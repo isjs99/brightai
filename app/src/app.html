@@ -1,0 +1,673 @@
+<title>Brightform Ops Console</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  color-scheme:light;
+  --bg:#f5f4f0;--surface:#fdfcfa;--surface-2:#efede8;--surface-3:#e3e0d8;
+  --ink:#1d1c19;--muted:#6b6860;--faint:#a19d94;
+  --border:#e3e0d9;--border-2:#edebe6;
+  --accent:#3a68ad;--accent-bg:#e4ecf7;
+  --good:#2f8a5a;--good-bg:#e6f2ea;--good-ink:#23643f;
+  --warn:#c9a35a;--warn-bg:#f7edd6;--warn-ink:#7d5410;
+  --crit:#b04a48;--crit-bg:#f6e3e1;--crit-ink:#8f3a38;
+  --s1:#2a78d6;--s2:#eb6834;--s3:#1baf7a;--grid:#e8e6e0;
+  --shadow:0 12px 40px rgba(29,28,25,.16);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#151513;--surface:#1d1c1a;--surface-2:#26251f;--surface-3:#34322b;
+    --ink:#ebe8e1;--muted:#a39f95;--faint:#6f6b62;
+    --border:#2f2e29;--border-2:#282722;
+    --accent:#7ea3e0;--accent-bg:#1f2b3f;
+    --good:#4faa77;--good-bg:#1d3327;--good-ink:#8fd3ac;
+    --warn:#c9a35a;--warn-bg:#3a2f16;--warn-ink:#e3c07a;
+    --crit:#d06663;--crit-bg:#3d2221;--crit-ink:#eb9a97;
+    --s1:#3987e5;--s2:#d95926;--s3:#199e70;--grid:#2a2925;
+    --shadow:0 12px 40px rgba(0,0,0,.55);
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#151513;--surface:#1d1c1a;--surface-2:#26251f;--surface-3:#34322b;
+  --ink:#ebe8e1;--muted:#a39f95;--faint:#6f6b62;
+  --border:#2f2e29;--border-2:#282722;
+  --accent:#7ea3e0;--accent-bg:#1f2b3f;
+  --good:#4faa77;--good-bg:#1d3327;--good-ink:#8fd3ac;
+  --warn:#c9a35a;--warn-bg:#3a2f16;--warn-ink:#e3c07a;
+  --crit:#d06663;--crit-bg:#3d2221;--crit-ink:#eb9a97;
+  --s1:#3987e5;--s2:#d95926;--s3:#199e70;--grid:#2a2925;
+  --shadow:0 12px 40px rgba(0,0,0,.55);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:'IBM Plex Sans','Helvetica Neue',Arial,sans-serif;font-size:13.5px;line-height:1.5;-webkit-font-smoothing:antialiased}
+a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}
+button{font-family:inherit;cursor:pointer}
+input,select,textarea{font-family:inherit;font-size:13px;color:var(--ink);background:var(--surface);border:1px solid var(--border);border-radius:5px;height:32px;padding:0 10px;min-width:0}
+input:focus,select:focus,textarea:focus,button:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+textarea{height:auto;padding:8px 10px;line-height:1.45}
+input[type=checkbox]{width:16px;height:16px;padding:0;margin:0;accent-color:var(--ink)}
+.mono,.num{font-family:'IBM Plex Mono','SF Mono',Menlo,monospace;font-variant-numeric:tabular-nums}
+.muted{color:var(--muted)}.faint{color:var(--faint)}.small{font-size:12px}
+.h{font-size:11px;font-weight:500;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.r{text-align:right}
+.app{display:grid;grid-template-columns:224px minmax(0,1fr);height:100%;overflow:hidden}
+.side{background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;min-height:0}
+.brand{display:flex;align-items:center;gap:10px;font-weight:600;font-size:14px;padding:18px 16px 14px}
+.brand i{width:18px;height:18px;border-radius:4px;background:var(--ink);display:inline-block}
+.nav{display:flex;flex-direction:column;gap:2px;padding:0 8px}
+.nav a{display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:5px;color:var(--muted);font-weight:500}
+.nav a:hover{background:var(--surface-2);text-decoration:none}
+.nav a.on{background:var(--surface-2);color:var(--ink)}
+.nav .badge{margin-left:auto;background:var(--warn-bg);color:var(--warn-ink);border-radius:10px;padding:0 7px;font-size:11px;font-weight:500;line-height:18px}
+.acct-list{flex:1;overflow:auto;padding:8px;border-top:1px solid var(--border-2);margin-top:10px;display:flex;flex-direction:column;gap:1px}
+.acct-list .h{padding:6px 10px}
+.acct-list a{display:flex;align-items:center;gap:8px;padding:5px 10px;border-radius:5px;color:var(--ink);font-size:13px}
+.acct-list a:hover{background:var(--surface-2);text-decoration:none}
+.acct-list a.on{background:var(--surface-2);font-weight:500}
+.acct-list a .mk{margin-left:auto;color:var(--faint);font-size:10.5px;white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex:none}
+.dot.ok{background:var(--good)}.dot.warn{background:var(--warn)}.dot.crit{background:var(--crit)}.dot.off{background:var(--surface-3)}
+.me{padding:12px 16px;border-top:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.avatar{width:28px;height:28px;border-radius:50%;background:var(--surface-3);display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex:none}
+.main{display:flex;flex-direction:column;min-height:0;overflow:auto}
+.topbar{display:flex;align-items:center;justify-content:space-between;gap:16px;height:56px;padding:0 28px;background:var(--surface);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:5}
+.crumb{display:flex;align-items:center;gap:8px;color:var(--muted);min-width:0}
+.crumb b{color:var(--ink);font-weight:600;font-size:15px;white-space:nowrap}
+.crumb .sep{color:var(--faint)}
+.content{padding:24px 28px 48px;display:flex;flex-direction:column;gap:24px;max-width:1360px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:6px}
+.tag{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:4px;font-size:11px;font-weight:500;white-space:nowrap}
+.tag.crit{background:var(--crit-bg);color:var(--crit-ink)}
+.tag.warn{background:var(--warn-bg);color:var(--warn-ink)}
+.tag.ok{background:var(--good-bg);color:var(--good-ink)}
+.tag.neutral{background:var(--surface-2);color:var(--muted)}
+.btn{height:32px;padding:0 12px;border-radius:5px;border:1px solid var(--border);background:var(--surface);font-size:12.5px;font-weight:500;color:var(--ink);display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.btn:hover{background:var(--surface-2)}
+.btn.primary{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.btn.primary:hover{opacity:.9;background:var(--ink)}
+.btn.quiet{background:transparent;border-color:transparent;color:var(--muted)}
+.btn.sm{height:26px;padding:0 9px;font-size:12px}
+.btn:disabled{opacity:.45;cursor:default}
+.btn-row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{text-align:left;font-size:11px;font-weight:500;color:var(--muted);padding:9px 14px;border-bottom:1px solid var(--border);letter-spacing:.04em;text-transform:uppercase;white-space:nowrap}
+.tbl td{padding:11px 14px;border-bottom:1px solid var(--border-2);vertical-align:middle}
+.tbl tr:last-child td{border-bottom:0}
+.tbl tr.click{cursor:pointer}.tbl tr.click:hover td{background:var(--surface-2)}
+.scroll{overflow-x:auto}
+.sec{display:flex;flex-direction:column;gap:10px}
+.sec-h{display:flex;align-items:baseline;justify-content:space-between;gap:16px}
+.sec-h .h{color:var(--ink)}
+.title{font-size:22px;font-weight:600;letter-spacing:-.01em;line-height:1.2;text-wrap:balance}
+.stats{display:flex;gap:28px;flex-wrap:wrap}
+.stat{display:flex;flex-direction:column;gap:2px;min-width:90px}
+.stat .v{font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:500;line-height:1.15;letter-spacing:-.01em}
+.stat.warn .v,.stat.warn .h{color:var(--warn-ink)}
+.stat.crit .v,.stat.crit .h{color:var(--crit-ink)}
+.stat .d{font-size:11.5px;color:var(--muted)}
+.item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:20px;padding:14px 16px;border-bottom:1px solid var(--border-2);align-items:start}
+.item:last-child{border-bottom:0}
+.item .t{font-weight:500}
+.item .k{font-size:11.5px;color:var(--muted);margin-bottom:3px}
+.item.done{opacity:.5}
+.col{display:flex;flex-direction:column;gap:4px}
+.row{display:flex;align-items:center;gap:8px}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:24px;align-items:start}
+.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.list-row{display:flex;justify-content:space-between;align-items:center;padding:9px 14px;border-bottom:1px solid var(--border-2);gap:12px}
+.list-row:last-child{border-bottom:0}
+.tabs{display:flex;border-bottom:1px solid var(--border);gap:24px;padding:0 28px;background:var(--surface)}
+.tabs a{padding:11px 2px;color:var(--muted);border-bottom:2px solid transparent;white-space:nowrap;font-weight:500}
+.tabs a:hover{text-decoration:none;color:var(--ink)}
+.tabs a.on{color:var(--ink);border-bottom-color:var(--ink)}
+.subtabs{display:flex;flex-direction:column;gap:2px}
+.subtabs a{padding:7px 10px;border-radius:5px;color:var(--muted);font-weight:500}
+.subtabs a.on{background:var(--surface-2);color:var(--ink)}
+.subtabs a:hover{text-decoration:none;background:var(--surface-2)}
+.seg{display:inline-flex;border:1px solid var(--border);border-radius:5px;overflow:hidden;background:var(--surface)}
+.seg button{padding:0 10px;height:28px;font-size:12px;color:var(--muted);border:0;border-right:1px solid var(--border-2);background:transparent;white-space:nowrap}
+.seg button:last-child{border-right:0}
+.seg button.on{background:var(--ink);color:var(--bg);font-weight:500}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip{height:26px;padding:0 10px;border-radius:13px;border:1px solid var(--border);background:var(--surface);font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:6px}
+.chip.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.field label{font-size:12px;color:var(--muted)}
+.field .hint{font-size:11.5px;color:var(--faint)}
+.fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px 20px}
+.fields.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.unit{display:flex;align-items:center;gap:6px}
+.unit input{width:100%}
+.unit span{color:var(--muted);white-space:nowrap;font-size:12px}
+.toggle{display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+.toggle i{width:34px;height:20px;border-radius:10px;background:var(--surface-3);position:relative;display:inline-block;transition:background .15s;flex:none}
+.toggle i::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--surface);transition:left .15s}
+.toggle.on i{background:var(--good)}.toggle.on i::after{left:16px}
+.note{padding:12px 16px;display:flex;align-items:center;gap:12px}
+.note.warn{border-color:var(--warn);background:var(--warn-bg)}
+.note.crit{border-color:var(--crit);background:var(--crit-bg)}
+.heat{display:grid;gap:3px}
+.heat .cell{height:26px;border-radius:3px;display:flex;align-items:center;justify-content:center;font-size:11px;cursor:pointer;background:var(--surface-2);color:var(--faint)}
+.heat .cell.ok{background:var(--good-bg);color:var(--good-ink)}
+.heat .cell.warn{background:var(--warn-bg);color:var(--warn-ink)}
+.heat .cell.crit{background:var(--crit-bg);color:var(--crit-ink)}
+.heat .cell.na{background:transparent;border:1px dashed var(--border)}
+.heat .lbl{font-size:12px;display:flex;align-items:center;padding-right:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.heat .top{font-size:10.5px;color:var(--muted);writing-mode:vertical-rl;transform:rotate(180deg);height:92px;display:flex;align-items:center;justify-content:flex-start;padding-left:2px}
+.chart{position:relative}
+.chart svg{display:block;width:100%;height:auto}
+.chart text{font-family:'IBM Plex Sans',sans-serif;font-size:11px;fill:var(--muted)}
+.chart .ax{stroke:var(--grid);stroke-width:1}
+.tip{position:absolute;pointer-events:none;background:var(--ink);color:var(--bg);padding:6px 9px;border-radius:5px;font-size:11.5px;white-space:nowrap;transform:translate(-50%,-110%);display:none;z-index:3}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted)}
+.legend i{width:10px;height:10px;border-radius:2px;display:inline-block;margin-right:6px;vertical-align:-1px}
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.35);display:none;align-items:center;justify-content:center;z-index:20}
+.modal-bg.open{display:flex}
+.modal{width:640px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);overflow:auto;background:var(--surface);border:1px solid var(--border);border-radius:8px;box-shadow:var(--shadow)}
+.modal.wide{width:820px}
+.modal .mh{padding:18px 22px 14px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;gap:16px}
+.modal .mb{padding:18px 22px;display:flex;flex-direction:column;gap:18px}
+.modal .mf{padding:14px 22px;border-top:1px solid var(--border);display:flex;gap:8px;align-items:center}
+.toast{position:fixed;left:50%;bottom:24px;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:6px;font-size:12.5px;box-shadow:var(--shadow);opacity:0;transition:opacity .2s;pointer-events:none;z-index:30;max-width:70vw}
+.toast.show{opacity:1}
+.check-row{display:grid;grid-template-columns:18px minmax(0,1fr) auto;gap:10px;padding:8px 14px 8px 30px;border-bottom:1px solid var(--border-2);align-items:start;background:var(--bg);font-size:12.5px}
+.check-row:last-child{border-bottom:0}
+.pre{white-space:pre-wrap;font-family:'IBM Plex Mono',monospace;font-size:12px;background:var(--surface-2);padding:12px 14px;border-radius:5px;line-height:1.5}
+.share-link{display:flex;align-items:center;gap:8px;background:var(--surface-2);border-radius:5px;padding:8px 10px}
+.share-link code{font-family:'IBM Plex Mono',monospace;font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.empty{padding:24px;text-align:center;color:var(--muted)}
+.selbar{position:sticky;bottom:16px;align-self:center;background:var(--ink);color:var(--bg);border-radius:8px;padding:10px 12px 10px 18px;display:flex;align-items:center;gap:14px;box-shadow:var(--shadow);z-index:4}
+.selbar .btn{background:var(--bg);color:var(--ink);border-color:var(--bg)}
+.selbar .btn.quiet{background:transparent;color:var(--bg);border-color:transparent;opacity:.8}
+.anchor-list{display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px}
+.rule-block{padding:18px 20px;display:flex;flex-direction:column;gap:14px}
+.rule-block+.rule-block{border-top:1px solid var(--border)}
+.ellip{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.src{font-size:11px;color:var(--faint)}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+@media (max-width: 1100px){.grid2{grid-template-columns:1fr}.fields{grid-template-columns:1fr 1fr}}
+@media (max-width: 800px){.app{grid-template-columns:1fr}.side{display:none}.grid3{grid-template-columns:1fr}.fields{grid-template-columns:1fr}}
+</style>
+
+<div class="app">
+  <aside class="side" id="side"></aside>
+  <main class="main">
+    <div id="top" class="topbar"></div>
+    <div id="view"></div>
+  </main>
+</div>
+<div class="modal-bg" id="modal"></div>
+<div class="toast" id="toast"></div>
+<script>
+const CRUVA=/*__CRUVA__*/null;
+</script>
+<script>
+// ---------- model: brands built from Cruva shops ----------
+const SECTIONS=['Homepage','Orders','CS, returns, aftercare','Products','Logistics','Marketing','Affiliate','LIVE and video','Growth','Analytics and reports','Account health','Finance','Cruva'];
+const FAMILIES=[['listing','Listing hygiene','Attributes, images, category, resubmit'],['promo','Promo renewal, same terms','Duplicate and set live, stock and margin permitting'],['price','Price changes inside rules','Never under the minimum price or the margin floor'],['ads','Ads rebalancing inside cap','Pause under the ROAS floor, shift budget, never above the cap'],['cs','CS replies','From the knowledge library, above confidence'],['affiliate','Affiliate replies','Creator inbox, commission and sample questions'],['outreach','Creator outreach and re-invites','Open and target collaboration, retire dead invites'],['samples','Sample approvals','Inside the sample rules'],['returns','Returns inside policy','Standard returns in window, refunds under goodwill ceiling'],['tagging','Creator tagging and lists','Cruva tags, groups, list building']];
+const LEVELS=[['off','Off'],['propose','Propose'],['notify','Act, notify'],['silent','Act silently']];
+const MK={DE:'Germany',FR:'France',IT:'Italy',ES:'Spain',UK:'United Kingdom',IE:'Ireland',NL:'Netherlands',BE:'Belgium',AU:'Australia',PL:'Poland'};
+const SYM={DE:'€',FR:'€',IT:'€',ES:'€',NL:'€',BE:'€',IE:'€',UK:'£',AU:'A$',PL:'zł'};
+const AMS=['Elena K.','Jonas P.','Mia T.','Sofia R.'];
+function seeded(n){let s=(n*9301+49297)%233280;return()=>{s=(s*9301+49297)%233280;return s/233280}}
+function hash(s){let h=7;for(const c of s)h=(h*31+c.charCodeAt(0))%100000;return h}
+function n0(v){return typeof v==='number'&&isFinite(v)?v:(v&&typeof v==='object'&&typeof v.value==='number')?v.value:0}
+function chg(v){return v&&typeof v==='object'&&typeof v.change_pct==='number'&&Math.abs(v.change_pct)<5000?v.change_pct:null}
+function fmtMoney(v,sym='€'){v=Math.round(v||0);return sym+v.toLocaleString('en-GB')}
+function fmt2(v,sym='€'){return sym+(+v||0).toFixed(2)}
+function pct(v){return (Math.round((v||0)*10)/10)+'%'}
+function fmtN(v){return Math.round(v||0).toLocaleString('en-GB')}
+function esc(s){return String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+function parseShop(name){
+ let m=name.match(/^(.*?)\s*[-(]?\s*(DE|FR|IT|ES|UK|IE|NL|BE|AU|PL)\)?\s*$/i);
+ let brand=m?m[1].trim():name.trim();let market=m?m[2].toUpperCase():'DE';
+ brand=brand.replace(/\s*-\s*$/,'').trim();
+ if(/^mothersearth$/i.test(brand))brand="Mother's Earth";
+ if(/^shea\s*moisture$/i.test(brand))brand='SheaMoisture';
+ return {brand,market};
+}
+const BRANDS=[];
+(function build(){
+ const shops=(CRUVA&&CRUVA.shops)||[];
+ const byKey={};
+ shops.forEach(sh=>{const {brand,market}=parseShop(sh.shop_name||'');const key=brand.toLowerCase().replace(/[^a-z0-9]/g,'');
+  if(!byKey[key])byKey[key]={id:key,name:brand,shops:[]};
+  byKey[key].shops.push(Object.assign({market},sh));});
+ Object.values(byKey).forEach((b,i)=>{
+  b.shops.sort((x,y)=>n0(y.stats&&y.stats.total_gmv)-n0(x.stats&&x.stats.total_gmv));
+  b.primary=b.shops.find(s=>s.products&&Array.isArray(s.products.top)&&s.products.top.length)||b.shops[0];
+  b.markets=[...new Set(b.shops.map(s=>s.market))];
+  b.sym=b.primary.currency_symbol||SYM[b.primary.market]||'€';
+  b.noPlan=b.shops.every(s=>s.error);
+  const S=k=>b.shops.reduce((t,s)=>t+n0(s.stats&&s.stats[k]),0);
+  const C=k=>{const c=b.shops.map(s=>chg(s.stats&&s.stats[k])).filter(x=>x!==null);return c.length?c.reduce((t,v)=>t+v,0)/c.length:null};
+  b.k={gmv:S('total_gmv'),gmvChg:C('total_gmv'),aff:S('affiliate_gmv'),affChg:C('affiliate_gmv'),units:S('total_units_sold'),videos:S('videos_posted'),videosChg:C('videos_posted'),affVideos:S('affiliate_videos_posted'),views:S('video_views'),viewsChg:C('video_views'),reqs:S('sample_requests'),approved:S('samples_approved'),shipped:S('samples_shipped'),delivered:S('samples_delivered'),dms:S('dms_sent')};
+  const F=k=>b.shops.reduce((t,s)=>t+n0(s.funnel&&s.funnel.stages&&s.funnel.stages[k]),0);
+  b.funnel={requested:F('requested'),approved:F('approved'),shipped:F('shipped'),delivered:F('delivered'),posted:F('posted')};
+  const st=(k,f)=>b.shops.reduce((t,s)=>{const v=s.funnel&&s.funnel.by_status&&s.funnel.by_status[k];return t+(v?(f?n0(v[f]):n0(v.count!==undefined?v.count:v)):0)},0);
+  b.review=st('To Review');b.reviewAge=Math.max(...b.shops.map(s=>{const v=s.funnel&&s.funnel.by_status&&s.funnel.by_status['To Review'];return v&&typeof v==='object'?n0(v.avg_age_days):0}),0);
+  b.expired=st('Expired');b.pending=st('Content Pending');b.overdue=st('Overdue');
+  b.sps=typeof b.primary.sps==='number'?b.primary.sps:null;
+  b.products=(b.primary.products&&Array.isArray(b.primary.products.top))?b.primary.products.top:[];b.productTotal=b.primary.products?n0(b.primary.products.total):0;b.unavailable=b.primary.products?n0(b.primary.products.unavailable):0;
+  b.campaigns=b.shops.flatMap(s=>((s.campaigns&&Array.isArray(s.campaigns.list))?s.campaigns.list:[]).map(c=>Object.assign({market:s.market},c)));
+  const prices=b.products.map(p=>+p.price||0).filter(x=>x>0).sort((x,y)=>x-y);const median=prices.length?prices[Math.floor(prices.length/2)]:20;
+  b.pendingSamples=(Array.isArray(b.primary.pending_samples)?b.primary.pending_samples:[]).map(p=>{const prod=b.products.find(x=>p.product&&x.name&&x.name.toLowerCase().startsWith(String(p.product).slice(0,20).toLowerCase()));return Object.assign({},p,{value:prod?+prod.price||median:median,priceKnown:!!prod,productName:p.product||'—',market:b.primary.market})});
+  b.am=AMS[i%3];b.approver='Sofia R.';b.client='Client contact';
+  b.readOnly=b.noPlan||(b.k.gmv===0&&b.k.videos===0&&b.k.reqs===0);
+  b.runEnd='06:'+String(4+(hash(b.name)%26)).padStart(2,'0');
+  b.signed=null;b.handled={};b._dirty=false;
+  b.mock=mockBits(b);
+  b.settings=defaultSettings(b);
+  BRANDS.push(b);
+ });
+ BRANDS.sort((x,y)=>y.k.gmv-x.k.gmv);
+})();
+function mockBits(b){const r=seeded(hash(b.name));const msgs=Math.max(0,Math.round(b.k.units/45));const esc_=Math.round(msgs*(0.08+r()*0.12));return {msgs,esc:esc_,escRate:msgs?Math.round(esc_/msgs*100):0,overrides:Math.round(r()*8),actions14:Math.round(60+r()*400),minutes:Math.round(3+r()*9),urgent:r()>0.72?1+Math.round(r()*2):0,returns:Math.round(r()*4),quiet:false}}
+function defaultSettings(b){
+ const wk={};b.markets.forEach(m=>wk[m]=Math.max(5,Math.ceil(b.k.approved/4.3/b.markets.length)));
+ const budgets=b.campaigns.reduce((t,c)=>t+n0(c.budget),0);
+ const roasT=b.campaigns.map(c=>n0(c.roas_target)).filter(x=>x>0);
+ return {version:14,changed:[{v:14,who:b.am,when:'3 Sep',what:'CS replies from propose to act and notify after the draft-only run.'},{v:13,who:'Sofia R.',when:'28 Aug',what:'Sample value ceiling raised.'},{v:12,who:b.am,when:'21 Aug',what:'Creator outreach to act silently, 0 overrides in 14 days.'}],
+  commercials:{retainer:2500,tiers:[{upTo:50000,rate:12},{upTo:150000,rate:10},{upTo:null,rate:8}],vat:b.primary.market==='UK'?20:19,mor:false,parent:b.name,baseShare:55},
+  targets:{gmvMonthly:Math.round(b.k.gmv*1.1/1000)*1000,videosWeek:Math.ceil(b.k.videos/4.3*1.1),activeCollabs:Math.max(20,Math.round(b.funnel.posted*1.5)),sampleRate:45,outreachSends:Math.max(20,Math.round(b.k.dms/30)),replyRate:12},
+  ads:{dailyCap:budgets?Math.round(budgets*1.1):200,monthlyCap:budgets?Math.round(budgets*33):5000,roasFloor:roasT.length?Math.round(Math.min(...roasT)*10)/10:2.5,graceDays:5,raiseWhen:1.5,targets:Object.fromEntries(b.campaigns.map(c=>[c.name,n0(c.roas_target)||2.5])),ranges:[{name:'Bestsellers',on:true,share:60,roas:2.5,products:b.products.slice(0,3).map(p=>p.id)},{name:'Everything else',on:true,share:40,roas:2.0,products:[]}]},
+  pricing:{minAboveBase:10,marginFloor:28,maxDiscount:25,roundTo:'.90',promoAutoRenew:true,promoMinStock:40,promoMaxDays:14,freeShipping:true,freeShipFrom:29},
+  samples:{on:!b.readOnly,weekly:wk,countries:b.markets.slice(),minFollowers:5000,valueCeiling:35,bundle:false,bundleWith:'',videoWithin:14,autoExpire:7},
+  autonomy:{listing:'silent',promo:'notify',price:'propose',ads:'notify',cs:'notify',affiliate:'propose',outreach:'silent',samples:'notify',returns:'silent',tagging:'silent'},
+  guardrails:{autoRepliesDay:60,msgsPerCreatorWeek:1,blackoutFrom:'22:00',blackoutTo:'06:00',goodwill:45,stockThreshold:100,confidence:0.85},
+  voice:{tone:Object.fromEntries(b.markets.map(m=>[m,m==='FR'?'polite, vous':m==='DE'?'warm, du-form':'friendly, plain'])),language:Object.fromEntries(b.markets.map(m=>[m,MK[m]==='Germany'?'German':MK[m]==='France'?'French':MK[m]==='Italy'?'Italian':MK[m]==='Spain'?'Spanish':MK[m]==='Netherlands'?'Dutch':MK[m]==='Poland'?'Polish':'English'])),banned:'heilt, garantiert, Wundermittel',escalate:'pregnancy, allergy, lawyer, press, minor'},
+  routing:{am:b.am,aa:'Jonas P.',va:'Mia T.',approver:'Sofia R.',slack:'#'+b.id+'-ops',hours:'08:00–18:00 local',client:''}};
+}
+const B=Object.fromEntries(BRANDS.map(b=>[b.id,b]));
+
+// ---------- the rules decide what the run does ----------
+function deriveAds(b){
+ const s=b.settings.ads;const out=[];let total=b.campaigns.reduce((t,c)=>t+n0(c.budget),0);
+ for(const c of b.campaigns){
+  const tgt=s.targets[c.name]||s.roasFloor;const roi=n0(c.ad_roi);const spend=n0(c.ad_spend);const budget=n0(c.budget);const live=/active|enable|deliver|running/i.test(String(c.operation_status||''))||!c.operation_status;
+  if(!live){out.push({c,kind:'skip',what:`“${c.name}” (${c.market}) is ${c.operation_status}. Left alone.`});continue}
+  if(roi>0&&roi<s.roasFloor){out.push({c,kind:'auto',what:`Paused “${c.name}” (${c.market}): ROAS ${roi.toFixed(2)} under the ${s.roasFloor} floor for ${s.graceDays}+ days. ${fmtMoney(budget,b.sym)}/day released.`});total-=budget;continue}
+  if(roi>=tgt*s.raiseWhen&&spend>=budget*0.8*30/30&&budget>0){const proposed=Math.round(budget*1.3);const room=s.dailyCap-(total-budget);
+   if(proposed<=room){out.push({c,kind:'auto',what:`Raised “${c.name}” (${c.market}) from ${fmtMoney(budget,b.sym)} to ${fmtMoney(proposed,b.sym)}/day. ROAS ${roi.toFixed(2)} against a ${tgt} target, spend at budget. Total stays inside the ${fmtMoney(s.dailyCap,b.sym)} cap.`});total=total-budget+proposed}
+   else{const upTo=Math.max(budget,room);out.push({c,kind:'wait',proposed,upTo,what:`Raise “${c.name}” (${c.market}) from ${fmtMoney(upTo,b.sym)} to ${fmtMoney(proposed,b.sym)}/day`,why:`ROAS ${roi.toFixed(2)} against a ${tgt} target and spend at budget. ${fmtMoney(proposed,b.sym)} takes the account over its ${fmtMoney(s.dailyCap,b.sym)} daily cap.`});total=upTo+(total-budget)}
+   continue}
+  out.push({c,kind:'hold',what:`“${c.name}” (${c.market}) held at ${fmtMoney(budget,b.sym)}/day. ROAS ${roi?roi.toFixed(2):'–'} against a ${tgt} target.`});
+ }
+ return out;
+}
+function deriveSamples(b){
+ const s=b.settings.samples;const used={};const out=[];
+ for(const q of b.pendingSamples){
+  const f=n0(q.followers);
+  if(!s.on){out.push({...q,kind:'blocked',why:'Sample approvals are off for this account.'});continue}
+  if(!s.countries.includes(q.market)){out.push({...q,kind:'declined',why:`${MK[q.market]} is not an enabled sample country.`});continue}
+  if(f<s.minFollowers){out.push({...q,kind:'declined',why:`${fmtN(f)} followers, under the ${fmtN(s.minFollowers)} minimum.`});continue}
+  if(q.value>s.valueCeiling){out.push({...q,kind:'wait',why:`Sample value ${fmt2(q.value,b.sym)} is over the ${fmtMoney(s.valueCeiling,b.sym)} ceiling.`});continue}
+  used[q.market]=(used[q.market]||0)+1;const quota=s.weekly[q.market]||0;
+  if(used[q.market]>quota){out.push({...q,kind:'held',why:`${q.market} weekly quota of ${quota} reached. Held for next week.`});continue}
+  out.push({...q,kind:'approved',why:`${q.market} ${used[q.market]} of ${quota} this week${s.bundle&&s.bundleWith?', shipped with '+s.bundleWith:''}. Video expected within ${s.videoWithin} days.`});
+ }
+ return out;
+}
+function priceRequests(b){const p=b.products[0];if(!p||BRANDS.indexOf(b)>7)return[];const price=+p.price||0;const base=price*b.settings.commercials.baseShare/100;return [{sku:p.name,base,current:price,requested:Math.round(price*0.8*100)/100,source:'Client asked for 20% off for a week (sample request)'}]}
+function derivePrices(b){
+ const s=b.settings.pricing;return priceRequests(b).map(p=>{
+  const minPrice=p.base*(1+s.minAboveBase/100);const margin=p.requested?(p.requested-p.base)/p.requested*100:0;const discount=(1-p.requested/p.current)*100;const reasons=[];
+  if(p.requested<minPrice)reasons.push(`under the minimum price of ${fmt2(minPrice,b.sym)} (base + ${s.minAboveBase}%)`);
+  if(margin<s.marginFloor)reasons.push(`margin ${pct(margin)} against the ${s.marginFloor}% floor`);
+  if(discount>s.maxDiscount)reasons.push(`discount ${pct(discount)} over the ${s.maxDiscount}% ceiling`);
+  const okPrice=Math.max(minPrice,p.base/(1-s.marginFloor/100),p.current*(1-s.maxDiscount/100));
+  return {...p,margin,discount,minPrice,reasons,okPrice,kind:reasons.length?'wait':'auto'}});
+}
+function shortName(n){return String(n||'').split(/[·|–-]/)[0].trim().slice(0,48)}
+function lowStock(b){return b.products.filter(p=>n0(p.stock)>0&&n0(p.stock)<b.settings.guardrails.stockThreshold)}
+function checks(b){
+ const c={};const k=b.k,s=b.settings;const T=b.settings.targets;
+ const ok=(sec,n,msg)=>(c[sec]=c[sec]||[]).push({n,st:'ok',msg});const warn=(sec,n,msg)=>(c[sec]=c[sec]||[]).push({n,st:'warn',msg});const crit=(sec,n,msg)=>(c[sec]=c[sec]||[]).push({n,st:'crit',msg});const na=(sec,n,msg)=>(c[sec]=c[sec]||[]).push({n,st:'na',msg});
+ if(b.readOnly){SECTIONS.forEach(sec=>{c[sec]=[{n:'All checks',st:'ro',msg:b.noPlan?'Shop is not on an active Cruva plan. No data, no writes.':'No activity in Cruva for this shop in 30 days. Checked, no writes.'}]});return c}
+ // Homepage
+ const g=k.gmvChg;const comps=[['affiliate GMV',k.affChg],['videos posted',k.videosChg],['video views',k.viewsChg]].filter(x=>x[1]!==null).sort((a,b2)=>a[1]-b2[1]);
+ const cause=comps.length&&comps[0][1]<0?`Cause: ${comps[0][0]} ${pct(comps[0][1])} over the same window.`:'No single component explains it; looking at traffic source next.';
+ if(g!==null&&g<=-15)crit('Homepage','GMV, orders, visitors vs prior period',`GMV ${fmtMoney(k.gmv,b.sym)} over 30 days, ${pct(g)} vs the prior 30. ${cause}`);
+ else if(g!==null&&g<=-5)warn('Homepage','GMV, orders, visitors vs prior period',`GMV ${fmtMoney(k.gmv,b.sym)} over 30 days, ${pct(g)} vs the prior 30. ${cause}`);
+ else ok('Homepage','GMV, orders, visitors vs prior period',`GMV ${fmtMoney(k.gmv,b.sym)} over 30 days${g!==null?', '+(g>=0?'+':'')+pct(g)+' vs the prior 30':''}.`);
+ ok('Homepage','Orders to ship, total and urgent',`${fmtN(k.units/30)} units a day on average. ${b.mock.urgent} urgent.`);
+ ok('Homepage','Pending returns',`${b.mock.returns} pending, inside policy.`);
+ ok('Homepage','Unread customer messages',`${b.mock.msgs} inbound in 30 days, none over 24h.`);
+ const ls=lowStock(b);if(ls.length)warn('Homepage','Low stock and out of stock',`${ls.length} listing${ls.length>1?'s':''} under ${s.guardrails.stockThreshold} units: ${ls.map(p=>shortName(p.name)+' ('+fmtN(p.stock)+')').join(', ')}.`);else ok('Homepage','Low stock and out of stock','Nothing under the stock threshold.');
+ ok('Homepage','Negative reviews','No recurring theme in 7 days.');
+ // Orders
+ if(b.mock.urgent)warn('Orders','Approaching auto-cancellation',`${b.mock.urgent} order${b.mock.urgent>1?'s':''} approaching auto-cancel. 3PL chased, AM and client contact notified at T-24h.`);else ok('Orders','Approaching auto-cancellation','None inside 48h.');
+ ok('Orders','Orders stuck in processing','No stalls against the normal transition time.');
+ // CS
+ if(b.mock.escRate>30)crit('CS, returns, aftercare','No conversation unanswered over 24h',`Escalation rate ${b.mock.escRate}%, above the normal band. Circuit breaker paused auto-send; ${b.mock.esc} drafts waiting on a person.`);
+ else ok('CS, returns, aftercare','No conversation unanswered over 24h',`${b.mock.msgs} inbound, ${b.mock.msgs-b.mock.esc} replied from the library, ${b.mock.esc} escalated.`);
+ ok('CS, returns, aftercare','Returns approaching TikTok SLA',`${b.mock.returns} standard returns approved inside the window.`);
+ // Products
+ if(b.unavailable)warn('Products','Deactivated, suspended, failed audit',`${b.unavailable} of ${b.productTotal} listings unavailable on TikTok Shop. Reason codes pulled; fixable ones resubmitted, the rest listed for the client.`);else ok('Products','Deactivated, suspended, failed audit',`All ${b.productTotal} listings live.`);
+ const pr=derivePrices(b);pr.forEach(p=>p.kind==='wait'?warn('Products','Price changes',`${shortName(p.sku)}: ${fmt2(p.current,b.sym)} to ${fmt2(p.requested,b.sym)} blocked, ${p.reasons.join('; ')}.`):ok('Products','Price changes',`${shortName(p.sku)} set to ${fmt2(p.requested,b.sym)}, inside every rule.`));
+ // Logistics
+ ok('Logistics','Delayed pickups, failed deliveries','No carrier or route pattern in 3 days.');
+ // Marketing
+ const ads=deriveAds(b);
+ if(!b.campaigns.length)na('Marketing','Ads spend pacing','No GMV Max campaigns in the last 30 days.');
+ else{const w=ads.filter(x=>x.kind==='wait'),a=ads.filter(x=>x.kind==='auto');if(w.length)warn('Marketing','ROAS and GMV Max performance',`${b.campaigns.length} campaigns. ${a.length} rebalanced inside the cap, ${w.length} increase${w.length>1?'s':''} over the ${fmtMoney(s.ads.dailyCap,b.sym)} cap waiting on you.`);else ok('Marketing','ROAS and GMV Max performance',`${b.campaigns.length} campaigns audited against targets. ${a.length} changed inside the cap.`)}
+ ok('Marketing','Promotions correct: price, dates, markets','Live promos match settings.');
+ na('Marketing','Platform campaign registration','No API. Prepared as an assisted item when a campaign opens.');
+ // Affiliate
+ const vw=k.videos/4.3;if(T.videosWeek&&vw<T.videosWeek*0.8)warn('Affiliate','Affiliate videos posted vs target',`${Math.round(vw)} videos a week against a ${T.videosWeek} target${k.videosChg!==null?', '+(k.videosChg>=0?'+':'')+pct(k.videosChg)+' vs prior period':''}.`);else ok('Affiliate','Affiliate videos posted vs target',`${Math.round(vw)} videos a week against a ${T.videosWeek||'–'} target.`);
+ const rate=b.funnel.approved?b.funnel.posted/b.funnel.approved*100:0;if(b.funnel.approved&&rate<T.sampleRate)warn('Affiliate','Sample rate, approved to video posted',`${pct(rate)} of approved samples posted (${b.funnel.posted} of ${b.funnel.approved}) against a ${T.sampleRate}% target. ${b.pending} creators still owe content, ${b.overdue} overdue; chased inside the per-creator cap.`);else ok('Affiliate','Sample rate, approved to video posted',`${pct(rate)} of approved samples posted against a ${T.sampleRate}% target.`);
+ const sm=deriveSamples(b);const ap=sm.filter(x=>x.kind==='approved').length;
+ if(b.review)warn('Affiliate','Sample requests waiting review',`${fmtN(b.review)} requests waiting, average age ${b.reviewAge.toFixed(1)} days. Rules applied to the ${b.pendingSamples.length} most recent: ${ap} approved, ${sm.filter(x=>x.kind==='held').length} held, ${sm.filter(x=>x.kind==='declined').length} declined, ${sm.filter(x=>x.kind==='wait').length} over the value ceiling.`);else ok('Affiliate','Sample requests waiting review','Queue empty.');
+ ok('Affiliate','Open collaboration plan live, commission rates','Matches settings.');
+ ok('Affiliate','Inbound affiliate messages',`Replied from the library.`);
+ // LIVE
+ ok('LIVE and video','Scheduled lives happening as planned','No missed live in 7 days.');
+ // Growth
+ na('Growth','New missions and incentives worth activating','Weekly assisted sweep, next Monday.');
+ // Analytics
+ if(!T.gmvMonthly)warn('Analytics and reports','GMV vs target','No monthly GMV target set. Pacing cannot pass.');else ok('Analytics and reports','GMV vs target',`Pacing ${pct(k.gmv/T.gmvMonthly*100)} of a ${fmtMoney(T.gmvMonthly,b.sym)} monthly target on a 30-day basis.`);
+ ok('Analytics and reports','GMV by content type',`Affiliate ${pct(k.gmv?k.aff/k.gmv*100:0)} of GMV${k.affChg!==null?', '+(k.affChg>=0?'+':'')+pct(k.affChg)+' vs prior':''}.`);
+ // Account health
+ if(b.sps===null)ok('Account health','Shop Performance Score','No score yet, normal under the volume threshold.');else if(b.sps<3.5)crit('Account health','Shop Performance Score',`${b.sps.toFixed(1)}. Under 3.5 restricts DM sending. Tied to the shipping and CS dimensions, see Logistics.`);else if(b.sps<4)warn('Account health','Shop Performance Score',`${b.sps.toFixed(1)}. Above the 3.5 DM restriction line, under the 4.0 campaign eligibility line.`);else ok('Account health','Shop Performance Score',`${b.sps.toFixed(1)}, holding.`);
+ ok('Account health','Violations, points, tickets','None open.');
+ // Finance
+ ok('Finance','Settlement and payout status','Reconciles to expected.');
+ // Cruva
+ const f=b.funnel;const steps=[['requested to approved',f.requested?f.approved/f.requested:1],['approved to shipped',f.approved?f.shipped/f.approved:1],['shipped to delivered',f.shipped?f.delivered/f.shipped:1],['delivered to posted',f.delivered?f.posted/f.delivered:1]].sort((a,b2)=>a[1]-b2[1]);
+ if(f.requested)warn('Cruva','Sample funnel per country',`Leaking step: ${steps[0][0]} at ${pct(steps[0][1]*100)}. ${b.expired?fmtN(b.expired)+' of '+fmtN(f.requested)+' requests ('+pct(b.expired/f.requested*100)+') expired before review; an auto-expire rule under '+s.samples.autoExpire+' days would clear that.':''}`);else ok('Cruva','Sample funnel per country','No requests in the window.');
+ ok('Cruva','Outreach reply rate and daily send volume',`${fmtN(k.dms/30)} DMs a day against a ${T.outreachSends} target.`);
+ return c;
+}
+function waitingItems(b){
+ const items=[];
+ deriveAds(b).filter(x=>x.kind==='wait').forEach(x=>items.push({id:b.id+'-ads-'+x.c.name,cat:'Money out beyond cap',t:x.what,d:x.why,btns:[`Raise to ${fmtMoney(x.proposed,b.sym)}`,'Hold at cap','Decline'],sec:'Marketing'}));
+ derivePrices(b).filter(x=>x.kind==='wait').forEach(x=>items.push({id:b.id+'-price',cat:'Price and margin',t:`${shortName(x.sku)}: ${fmt2(x.current,b.sym)} to ${fmt2(x.requested,b.sym)} blocked`,d:`${x.source}. ${x.reasons.join('; ')}. ${fmt2(x.okPrice,b.sym)} is the lowest price that passes every rule; counter-offer drafted.`,btns:[`Counter at ${fmt2(x.okPrice,b.sym)}`,'Override rules','Decline'],sec:'Products'}));
+ const sw=deriveSamples(b).filter(x=>x.kind==='wait');if(sw.length)items.push({id:b.id+'-samples',cat:'Money out beyond cap',t:`${sw.length} sample request${sw.length>1?'s':''} over the ${fmtMoney(b.settings.samples.valueCeiling,b.sym)} value ceiling`,d:sw.map(x=>`${x.handle} (${fmtN(x.followers)} followers), ${shortName(x.productName)} at ${fmt2(x.value,b.sym)}`).join(' · ')+'. Raise the ceiling on the Rules tab or decide these one by one.',btns:['Approve all','Review each','Decline'],sec:'Affiliate'});
+ if(b.mock.esc)items.push({id:b.id+'-cs',cat:'Low confidence replies',t:`${b.mock.esc} buyer message${b.mock.esc>1?'s':''} escalated with a draft`,d:b.mock.escRate>30?'Circuit breaker tripped: escalation rate outside its band. Update the library and auto-send resumes on the next run.':'Below confidence or on a hard trigger. Each has a draft and the reason it escalated.',btns:['Review drafts','Later'],sec:'CS, returns, aftercare'});
+ if(b.unavailable)items.push({id:b.id+'-unavail',cat:'Client facing',t:`Ask the client to relist ${b.unavailable} unavailable listings`,d:'Prepared one-liner with the reason codes the agent could not fix itself. Client-side execution; it goes from you.',btns:['Send','Later'],sec:'Products'});
+ if(BRANDS.indexOf(b)<5)items.push({id:b.id+'-report',cat:'Client facing',t:'Weekly report for w/c 31 Aug is ready to send',d:`GMV ${fmtMoney(b.k.gmv,b.sym)} over 30 days, ${b.k.videos} videos, ${b.funnel.posted} sample videos posted. Nothing goes to the client without a person.`,btns:['Review and send','Later'],sec:'Analytics and reports'});
+ return items.map(x=>({...x,done:!!b.handled[x.id]}));
+}
+function actions(b){
+ if(b.readOnly)return[];const out=[];const s=b.settings;
+ deriveAds(b).filter(x=>x.kind==='auto').forEach(x=>out.push({t:'06:05',f:'ads',a:x.what,g:`Cap ${fmtMoney(s.ads.dailyCap,b.sym)}/day · ROAS floor ${s.ads.roasFloor}`,r:'Done'}));
+ derivePrices(b).filter(x=>x.kind==='auto').forEach(x=>out.push({t:'06:05',f:'price',a:`Set ${shortName(x.sku)} to ${fmt2(x.requested,b.sym)}.`,g:`Margin ${pct(x.margin)} ≥ ${s.pricing.marginFloor}%`,r:'Live'}));
+ const sm=deriveSamples(b);const ap=sm.filter(x=>x.kind==='approved');if(sm.length)out.push({t:'06:07',f:'samples',a:`Approved ${ap.length} of the ${sm.length} most recent sample requests (${[...new Set(ap.map(x=>x.market))].map(m=>m+' '+ap.filter(x=>x.market===m).length).join(', ')||'none'}), held ${sm.filter(x=>x.kind==='held').length}, declined ${sm.filter(x=>x.kind==='declined').length}.`,g:`Quota ${Object.entries(s.samples.weekly).map(([k,v])=>k+' '+v).join(', ')} · ≥ ${fmtN(s.samples.minFollowers)} followers · ≤ ${fmtMoney(s.samples.valueCeiling,b.sym)}`,r:'Done'});
+ if(b.pending)out.push({t:'06:08',f:'outreach',a:`Chased ${Math.min(b.pending,40)} creators who received a sample and have not posted within ${s.samples.videoWithin} days.`,g:`${s.guardrails.msgsPerCreatorWeek} message per creator per week`,r:'Sent'});
+ if(b.k.dms)out.push({t:'06:08',f:'outreach',a:`Topped up outreach with ${fmtN(b.k.dms/30)} sends.`,g:`Inside the ${s.targets.outreachSends}/day target and blackout ${s.guardrails.blackoutFrom}–${s.guardrails.blackoutTo}`,r:'Sent'});
+ if(b.unavailable)out.push({t:'06:04',f:'listing',a:`Pulled reason codes on ${b.unavailable} unavailable listings, resubmitted the ones with fixable attributes.`,g:'Attribute schema 2026-08 · reversible',r:'Done'});
+ const ls=lowStock(b);if(ls.length)out.push({t:'06:06',f:'listing',a:`Pulled ${ls.length} low-stock listing${ls.length>1?'s':''} out of live promos and paused their ads.`,g:`Stock threshold ${s.guardrails.stockThreshold}`,r:'Done'});
+ if(b.mock.msgs)out.push({t:'06:11',f:'cs',a:`Replied to ${Math.min(s.guardrails.autoRepliesDay,Math.round(b.mock.msgs/30)+2)} buyer messages from the library, ${b.mock.esc?b.mock.esc+' escalated':'none escalated'}.`,g:`≤ ${s.guardrails.autoRepliesDay} auto sends · confidence ≥ ${s.guardrails.confidence}`,r:b.mock.escRate>30?'Paused':'Sent'});
+ if(b.mock.returns)out.push({t:'06:12',f:'returns',a:`Approved ${b.mock.returns} standard returns inside the window.`,g:`Each under ${fmtMoney(s.guardrails.goodwill,b.sym)} goodwill`,r:'Done'});
+ return out.sort((x,y)=>x.t.localeCompare(y.t));
+}
+function famName(k){const f=FAMILIES.find(x=>x[0]===k);return f?f[1]:k}
+function sectionStatus(b,sec,c){c=c||checks(b);const cs=c[sec]||[];const w=waitingItems(b).some(x=>x.sec===sec&&!x.done);if(cs.some(x=>x.st==='crit'))return 'crit';if(w||cs.some(x=>x.st==='warn'))return 'warn';if(cs.every(x=>x.st==='na'||x.st==='ro'))return 'off';return 'ok'}
+function brandStatus(b){const c=checks(b);const ss=SECTIONS.map(s=>sectionStatus(b,s,c));if(ss.includes('crit'))return 'crit';if(ss.includes('warn'))return 'warn';return 'ok'}
+function overrideRate(b){return b.mock.actions14?b.mock.overrides/b.mock.actions14*100:0}
+</script>
+<script>
+// ---------- charts ----------
+const CH={};let chId=0;
+function niceMax(v){if(v<=0)return 1;const p=Math.pow(10,Math.floor(Math.log10(v)));const n=v/p;const m=n<=1?1:n<=2?2:n<=2.5?2.5:n<=5?5:10;return m*p}
+function fmtK(v){return v>=1e6?(Math.round(v/1e5)/10)+'m':v>=1000?(Math.round(v/100)/10)+'k':String(Math.round(v))}
+function lineChart(o){
+ const id='c'+(++chId);const W=o.w||600,H=o.h||200,L=48,R=o.endLabel===false?16:66,T=14,B=26;const n=o.labels.length;
+ const max=niceMax(Math.max(...o.series.flatMap(s=>s.values),o.target||0)*1.05);
+ const x=i=>L+(n===1?0:i*(W-L-R)/(n-1));const y=v=>T+(H-T-B)*(1-v/max);
+ let g='';for(let k=0;k<=4;k++){const v=max*k/4;g+=`<line class="ax" x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}"></line><text x="${L-6}" y="${y(v)+4}" text-anchor="end">${o.fmt?o.fmt(v):fmtK(v)}</text>`}
+ const step=Math.max(1,Math.ceil(n/8));let xl='';for(let i=0;i<n;i+=step)xl+=`<text x="${x(i)}" y="${H-8}" text-anchor="middle">${esc(o.labels[i])}</text>`;
+ let paths='';o.series.forEach(s=>{const d=s.values.map((v,i)=>(i?'L':'M')+x(i).toFixed(1)+' '+y(v).toFixed(1)).join(' ');const area=o.area?`<path d="${d} L${x(n-1).toFixed(1)} ${y(0)} L${x(0)} ${y(0)} Z" fill="${s.color}" opacity=".1"></path>`:'';const last=s.values[n-1];paths+=`${area}<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"></path><circle cx="${x(n-1)}" cy="${y(last)}" r="4" fill="${s.color}" stroke="var(--surface)" stroke-width="2"></circle>`;if(o.endLabel!==false)paths+=`<text x="${x(n-1)+8}" y="${y(last)+4}" style="fill:var(--ink);font-weight:500">${o.fmt?o.fmt(last):fmtK(last)}</text>`});
+ const tgt=o.target?`<line x1="${L}" x2="${W-R}" y1="${y(o.target)}" y2="${y(o.target)}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3"></line><text x="${L+4}" y="${y(o.target)-4}" text-anchor="start">${esc(o.targetLabel||'target')}</text>`:'';
+ CH[id]={kind:'line',o,x:Array.from({length:n},(_,i)=>x(i)),W};
+ return `<div class="chart" data-ch="${id}"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px">${g}${xl}${tgt}${paths}<line data-cross x1="0" x2="0" y1="${T}" y2="${H-B}" stroke="var(--muted)" stroke-width="1" style="display:none"></line><rect x="${L}" y="0" width="${W-L-R}" height="${H}" fill="transparent"></rect></svg><div class="tip"></div></div>`;
+}
+function barChart(o){
+ const id='c'+(++chId);const W=o.w||600,H=o.h||200,L=48,R=16,T=14,B=26;const n=o.labels.length;
+ const totals=o.labels.map((_,i)=>o.series.reduce((t,s)=>t+s.values[i],0));
+ const max=niceMax(Math.max(...(o.stacked?totals:o.series.flatMap(s=>s.values)),o.target||0)*1.08);
+ const bw=(W-L-R)/n;const bar=Math.min(24,bw*0.6);const y=v=>T+(H-T-B)*(1-v/max);
+ let g='';for(let k=0;k<=4;k++){const v=max*k/4;g+=`<line class="ax" x1="${L}" x2="${W-R}" y1="${y(v)}" y2="${y(v)}"></line><text x="${L-6}" y="${y(v)+4}" text-anchor="end">${o.fmt?o.fmt(v):fmtK(v)}</text>`}
+ const step=Math.max(1,Math.ceil(n/10));let xl='';for(let i=0;i<n;i+=step)xl+=`<text x="${L+bw*i+bw/2}" y="${H-8}" text-anchor="middle">${esc(o.labels[i])}</text>`;
+ let rects='';o.labels.forEach((lab,i)=>{let acc=0;const cx=L+bw*i+bw/2;o.series.forEach((s,si)=>{const v=s.values[i];if(!v)return;const y0=y(acc+v),y1=y(acc);const h=Math.max(0,y1-y0-(si?2:0));const tip=o.series.map(ss=>`${ss.name}: ${o.fmt?o.fmt(ss.values[i]):fmtK(ss.values[i])}`).join(' · ');rects+=`<rect data-tip="${esc(lab)} — ${esc(tip)}" x="${(cx-bar/2).toFixed(1)}" y="${y0.toFixed(1)}" width="${bar.toFixed(1)}" height="${h.toFixed(1)}" fill="${s.color}" rx="${si===o.series.length-1||!o.stacked?3:0}"></rect>`;acc+=o.stacked?v:0})});
+ const tgt=o.target?`<line x1="${L}" x2="${W-R}" y1="${y(o.target)}" y2="${y(o.target)}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="3 3"></line><text x="${W-R}" y="${y(o.target)-4}" text-anchor="end">${esc(o.targetLabel||'target')}</text>`:'';
+ CH[id]={kind:'bar'};
+ return `<div class="chart" data-ch="${id}"><svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="height:${H}px">${g}${xl}${tgt}${rects}</svg><div class="tip"></div></div>`;
+}
+function hbars(rows,color,fmt){const max=Math.max(1,...rows.map(r=>r.value));return `<div style="display:flex;flex-direction:column;gap:6px">${rows.map(r=>`<div style="display:grid;grid-template-columns:120px minmax(0,1fr) 60px;gap:10px;align-items:center"><span class="muted small ellip">${esc(r.label)}</span><div style="height:12px;background:var(--surface-2);border-radius:3px;overflow:hidden"><div style="height:100%;width:${(r.value/max*100).toFixed(1)}%;background:${color};border-radius:0 3px 3px 0"></div></div><span class="num r small">${fmt?fmt(r.value):fmtN(r.value)}</span></div>`).join('')}</div>`}
+function spark(vals,color){const W=72,H=20;const max=Math.max(...vals),min=Math.min(...vals);const y=v=>max===min?H/2:H-2-(v-min)/(max-min)*(H-4);const d=vals.map((v,i)=>(i?'L':'M')+(i*W/(vals.length-1)).toFixed(1)+' '+y(v).toFixed(1)).join(' ');return `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" style="vertical-align:middle"><path d="${d}" fill="none" stroke="${color}" stroke-width="1.5"></path><circle cx="${W}" cy="${y(vals[vals.length-1])}" r="2.5" fill="${color}"></circle></svg>`}
+function bindCharts(root){root.querySelectorAll('.chart').forEach(el=>{const c=CH[el.dataset.ch];if(!c)return;const tip=el.querySelector('.tip');const svg=el.querySelector('svg');
+ if(c.kind==='line'){const cross=svg.querySelector('[data-cross]');svg.addEventListener('mousemove',e=>{const r=svg.getBoundingClientRect();const px=(e.clientX-r.left)/r.width*c.W;let best=0,bd=1e9;c.x.forEach((xx,i)=>{const d=Math.abs(xx-px);if(d<bd){bd=d;best=i}});cross.setAttribute('x1',c.x[best]);cross.setAttribute('x2',c.x[best]);cross.style.display='';tip.style.display='block';tip.style.left=(c.x[best]/c.W*100)+'%';tip.style.top='22px';tip.innerHTML=`<b>${esc(c.o.labels[best])}</b> · `+c.o.series.map(s=>`${esc(s.name)} ${c.o.fmt?c.o.fmt(s.values[best]):fmtK(s.values[best])}`).join(' · ')});svg.addEventListener('mouseleave',()=>{cross.style.display='none';tip.style.display='none'})}
+ else{svg.querySelectorAll('rect[data-tip]').forEach(rc=>{rc.addEventListener('mouseenter',()=>{const r=svg.getBoundingClientRect();const bb=rc.getBoundingClientRect();tip.style.display='block';tip.style.left=(bb.left+bb.width/2-r.left)+'px';tip.style.top=(bb.top-r.top)+'px';tip.textContent=rc.dataset.tip});rc.addEventListener('mouseleave',()=>tip.style.display='none')})}})}
+function shape(total,days,seed,chgPct){const r=seeded(seed);const out=[];const slope=(chgPct||0)/100;let acc=0;for(let i=0;i<days;i++){const v=(1+slope*(i/days-0.5))*(0.75+r()*0.5);out.push(v);acc+=v}return out.map(v=>Math.round(v/acc*total))}
+function dayLabels(days){const out=[];const d=new Date(2026,8,6);for(let i=days-1;i>=0;i--){const x=new Date(d);x.setDate(d.getDate()-i);out.push(x.getDate()+' '+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][x.getMonth()])}return out}
+function sumSeries(list){if(!list.length)return[];return list.reduce((acc,s)=>acc.map((v,i)=>v+s[i]),new Array(list[0].length).fill(0))}
+
+// ---------- shell ----------
+const S={alerts:{sev:['crit','wait','warn']},sel:new Set(),an:{acct:'all',range:30},setupTab:'commercials',open:{},todayDate:'Mon 7 Sep 2026'};
+const $=(sel,root=document)=>root.querySelector(sel);
+function go(h){location.hash=h}
+function route(){const p=location.hash.replace(/^#\/?/,'').split('/').filter(Boolean);return {p,page:p[0]||'accounts'}}
+function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');clearTimeout(t._t);t._t=setTimeout(()=>t.classList.remove('show'),2800)}
+function icon(n){const I={accounts:'<path d="M3 4h14v12H3z"></path><path d="M3 8h14M7 8v8"></path>',alerts:'<path d="M10 3l8 14H2z"></path><path d="M10 8v4M10 15h.01"></path>',analytics:'<path d="M3 16h14"></path><path d="M5 13l4-5 3 3 4-6"></path>',check:'<path d="M3 8.5l3 3 7-7"></path>',x:'<path d="M4 4l8 8M12 4l-8 8"></path>',chev:'<path d="M6 4l4 4-4 4"></path>'};const vb=['check','x','chev'].includes(n)?'0 0 16 16':'0 0 20 20';return `<svg width="16" height="16" viewBox="${vb}" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${I[n]}</svg>`}
+function openCount(b){return waitingItems(b).filter(x=>!x.done).length}
+function renderSide(){const {page,p}=route();const cur=page==='a'?p[1]:null;const waiting=BRANDS.reduce((t,b)=>t+openCount(b),0);
+ $('#side').innerHTML=`<div class="brand"><i></i><span>Brightform Ops</span></div>
+ <nav class="nav"><a href="#/accounts" class="${page==='accounts'?'on':''}">${icon('accounts')}Accounts</a><a href="#/alerts" class="${page==='alerts'?'on':''}">${icon('alerts')}Alerts<span class="badge">${waiting}</span></a><a href="#/analytics" class="${page==='analytics'?'on':''}">${icon('analytics')}Analytics</a></nav>
+ <div class="acct-list"><div class="h">Accounts · ${BRANDS.length}</div>${BRANDS.map(b=>`<a href="#/a/${b.id}" class="${cur===b.id?'on':''}"><span class="dot ${b.readOnly?'off':brandStatus(b)}"></span><span class="ellip">${esc(b.name)}</span><span class="mk mono">${b.markets.slice(0,3).join(' ')}${b.markets.length>3?' +'+(b.markets.length-3):''}</span></a>`).join('')}</div>
+ <div class="me"><span class="avatar">EK</span><div class="col" style="gap:0"><span style="font-weight:500">Elena K.</span><span class="muted small">Account manager</span></div></div>`}
+function topbar(crumbs,right=''){$('#top').innerHTML=`<div class="crumb">${crumbs}</div><div class="btn-row">${right}</div>`}
+function render(){const {page,p}=route();renderSide();const v=$('#view');
+ if(page==='alerts')v.innerHTML=viewAlerts();else if(page==='analytics')v.innerHTML=viewAnalytics();else if(page==='a'&&B[p[1]])v.innerHTML=viewAccount(B[p[1]],p[2]||'today',p[3]);else v.innerHTML=viewAccounts();
+ bindCharts(v);$('.main').scrollTop=0}
+window.addEventListener('hashchange',render);
+function handle(bid,id,label){const b=B[bid];b.handled[id]=label;render();toast(label+'. Logged against '+b.name+' under settings v'+b.settings.version+'.')}
+
+// ---------- accounts ----------
+function viewAccounts(){
+ topbar(`<b>Accounts</b><span class="sep">·</span><span>${S.todayDate}</span>`,`<button class="btn" onclick="go('#/alerts')">All alerts</button>`);
+ const live=BRANDS.filter(b=>!b.readOnly);const waiting=BRANDS.reduce((t,b)=>t+openCount(b),0);const unsigned=live.filter(b=>!b.signed).length;const gmv=BRANDS.reduce((t,b)=>t+b.k.gmv,0);const review=BRANDS.reduce((t,b)=>t+b.review,0);
+ const rows=BRANDS.map(b=>{const w=openCount(b);const c=checks(b);const flags=SECTIONS.reduce((t,s)=>t+(c[s]||[]).filter(x=>x.st==='crit'||x.st==='warn').length,0);const PRI=['Homepage','Account health','Products','Affiliate','Cruva','Marketing','CS, returns, aftercare','Analytics and reports','Orders','Logistics','LIVE and video','Finance','Growth'];const first=PRI.flatMap(s=>(c[s]||[]).filter(x=>x.st==='crit')).concat(PRI.flatMap(s=>(c[s]||[]).filter(x=>x.st==='warn')))[0];
+  return `<tr class="click" onclick="if(event.target.tagName!=='INPUT')go('#/a/${b.id}')"><td><input type="checkbox" ${S.sel.has(b.id)?'checked':''} ${b.readOnly?'disabled':''} onchange="this.checked?S.sel.add('${b.id}'):S.sel.delete('${b.id}');render()"></td><td style="font-weight:500;white-space:nowrap">${esc(b.name)}</td><td class="mono muted small">${b.markets.join(' ')}</td><td class="r mono">${b.noPlan?'<span class="muted">no plan</span>':fmtMoney(b.k.gmv,b.sym)}</td><td class="r mono ${b.k.gmvChg===null?'muted':b.k.gmvChg<0?'':''}" style="${b.k.gmvChg!==null&&b.k.gmvChg<=-15?'color:var(--crit-ink)':''}">${b.k.gmvChg===null?'–':(b.k.gmvChg>=0?'+':'')+pct(b.k.gmvChg)}</td><td class="r mono">${b.noPlan?'–':fmtN(b.k.videos/4.3)}</td><td class="r mono" style="${b.review>200?'color:var(--warn-ink)':''}">${b.noPlan?'–':fmtN(b.review)}</td><td><span class="row"><span class="dot ${b.readOnly?'off':brandStatus(b)}"></span><span class="muted small">${b.readOnly?(b.noPlan?'no plan':'checks only'):first?esc(first.n):'clean'}</span></span></td><td class="r mono" style="${w?'color:var(--warn-ink);font-weight:500':''}">${w||'–'}</td><td>${b.signed?`<span class="row" style="color:var(--good-ink)">${icon('check')}<span class="mono small">${b.signed}</span></span>`:b.readOnly?'<span class="faint">–</span>':'<span class="muted">not yet</span>'}</td></tr>`}).join('');
+ const bar=S.sel.size?`<div class="selbar"><span>${S.sel.size} account${S.sel.size>1?'s':''} selected</span><button class="btn" onclick="openBulk('ads')">Set ad budgets and ROAS</button><button class="btn" onclick="openBulk('samples')">Set sample rules</button><button class="btn" onclick="openBulk('pricing')">Set pricing and promos</button><button class="btn quiet" onclick="S.sel.clear();render()">Clear</button></div>`:'';
+ return `<div class="content">
+  <div class="stats"><div class="stat"><span class="h">Ran this morning</span><span class="v">${live.length}<span class="muted" style="font-size:13px">/${BRANDS.length}</span></span><span class="d">between 06:00 and 06:31 local</span></div><div class="stat ${waiting?'warn':''}"><span class="h">Waiting on you</span><span class="v">${waiting}</span><span class="d">across ${BRANDS.filter(b=>openCount(b)).length} accounts</span></div><div class="stat"><span class="h">Not signed off</span><span class="v">${unsigned}</span><span class="d">the 18:00 sweep picks these up</span></div><div class="stat"><span class="h">GMV, 30 days</span><span class="v">${fmtMoney(gmv,'$')}</span><span class="d">all shops, Cruva</span></div><div class="stat"><span class="h">Samples waiting review</span><span class="v">${fmtN(review)}</span><span class="d">the rules on each account decide them at 06:00</span></div></div>
+  <div class="card scroll"><table class="tbl"><thead><tr><th style="width:28px"></th><th>Account</th><th>Markets</th><th class="r">GMV 30d</th><th class="r">vs prior</th><th class="r">Videos / wk</th><th class="r">Samples to review</th><th>This morning</th><th class="r">Needs you</th><th>Signed off</th></tr></thead><tbody>${rows}</tbody></table></div>
+  <div class="src">GMV, change, videos and sample queues are 30-day figures from Cruva (8 Aug to 6 Sep). Run times, replies, returns and orders are sample data until the Partner Center adapters exist.</div>
+  ${bar}
+ </div>`;
+}
+</script>
+<script>
+// ---------- alerts ----------
+function viewAlerts(){
+ topbar(`<b>Alerts</b><span class="sep">·</span><span>every account, every risk area</span>`);
+ const f=S.alerts;const sevOn=k=>f.sev.includes(k);const chip=(k,l,n)=>`<button class="chip ${sevOn(k)?'on':''}" onclick="toggleSev('${k}')">${l}<span class="mono">${n}</span></button>`;
+ const all=[];const CK={};BRANDS.forEach(b=>{const c=checks(b);CK[b.id]=c;SECTIONS.forEach(sec=>(c[sec]||[]).forEach(x=>{if(x.st==='warn'||x.st==='crit')all.push({b,sec,sev:x.st,t:x.n,d:x.msg})}));waitingItems(b).forEach(w=>{if(!w.done)all.push({b,sec:w.sec,sev:'wait',t:w.t,d:w.d,id:w.id})})});
+ const counts={crit:all.filter(x=>x.sev==='crit').length,warn:all.filter(x=>x.sev==='warn').length,wait:all.filter(x=>x.sev==='wait').length,ok:BRANDS.reduce((t,b)=>t+SECTIONS.reduce((tt,s)=>tt+(CK[b.id][s]||[]).filter(x=>x.st==='ok').length,0),0)};
+ const order={crit:0,wait:1,warn:2};const list=all.filter(x=>sevOn(x.sev)).sort((a,b2)=>(order[a.sev]-order[b2.sev])||b2.b.k.gmv-a.b.k.gmv);
+ const heat=`<div class="heat" style="grid-template-columns:140px repeat(${SECTIONS.length},minmax(0,1fr))"><div></div>${SECTIONS.map(s=>`<div class="top" title="${esc(s)}">${esc(s)}</div>`).join('')}${BRANDS.map(b=>`<div class="lbl" title="${esc(b.name)}">${esc(b.name)}</div>${SECTIONS.map(s=>{const st=b.readOnly?'na':sectionStatus(b,s,CK[b.id]);const n=(CK[b.id][s]||[]).filter(x=>x.st==='warn'||x.st==='crit').length+waitingItems(b).filter(x=>x.sec===s&&!x.done).length;return `<div class="cell ${st==='off'?'':st}" title="${esc(b.name+' · '+s)}" onclick="S.open['${b.id}']='${esc(s)}';go('#/a/${b.id}')">${b.readOnly?'':n||(st==='ok'?'✓':'')}</div>`}).join('')}`).join('')}</div>`;
+ const okRows=sevOn('ok')?BRANDS.filter(b=>!b.readOnly).map(b=>{const n=SECTIONS.reduce((t,s)=>t+(CK[b.id][s]||[]).filter(x=>x.st==='ok').length,0);const tot=SECTIONS.reduce((t,s)=>t+(CK[b.id][s]||[]).length,0);return `<tr><td><span class="tag ok">Passed</span></td><td style="font-weight:500;white-space:nowrap">${esc(b.name)}</td><td class="muted small">All sections</td><td>${n} of ${tot} checks passed at ${b.runEnd}.</td><td class="r"><a href="#/a/${b.id}">Open</a></td></tr>`}).join(''):'';
+ const rows=list.map(x=>`<tr><td>${x.sev==='wait'?'<span class="tag warn">Needs you</span>':x.sev==='crit'?'<span class="tag crit">Critical</span>':'<span class="tag neutral">Flag</span>'}</td><td style="font-weight:500;white-space:nowrap">${esc(x.b.name)}</td><td class="muted small" style="white-space:nowrap">${esc(x.sec)}</td><td><div style="font-weight:500">${esc(x.t)}</div><div class="muted small">${esc(x.d||'')}</div></td><td class="r" style="white-space:nowrap">${x.sev==='wait'?`<button class="btn sm" onclick="handle('${x.b.id}','${esc(x.id)}','Handled')">Mark handled</button> `:''}<a href="#/a/${x.b.id}" onclick="S.open['${x.b.id}']='${esc(x.sec)}'">Open</a></td></tr>`).join('');
+ return `<div class="content">
+  <div class="sec"><div class="sec-h"><span class="h">Risk areas by account</span><span class="muted small">A number is open flags plus items waiting on you. Click a cell to open that section.</span></div><div class="card scroll" style="padding:14px 16px">${heat}</div></div>
+  <div class="sec"><div class="sec-h"><div class="chips">${chip('crit','Critical',counts.crit)}${chip('wait','Needs you',counts.wait)}${chip('warn','Flags',counts.warn)}${chip('ok','Passed',counts.ok)}</div><span class="muted small">${list.length} shown</span></div>
+  <div class="card scroll"><table class="tbl"><thead><tr><th>Type</th><th>Account</th><th>Area</th><th>Alert</th><th></th></tr></thead><tbody>${rows}${okRows}${!rows&&!okRows?'<tr><td colspan="5" class="empty">Nothing in this filter.</td></tr>':''}</tbody></table></div></div>
+ </div>`;
+}
+function toggleSev(k){const s=S.alerts.sev;const i=s.indexOf(k);if(i>=0)s.splice(i,1);else s.push(k);render()}
+
+// ---------- account ----------
+function viewAccount(b,tab,sub){
+ const open=openCount(b);
+ topbar(`<a href="#/accounts">Accounts</a><span class="sep">/</span><b>${esc(b.name)}</b><span class="muted small mono">${b.markets.join(' ')}</span><span class="tag neutral mono">v${b.settings.version}</span>${b.noPlan?'<span class="tag neutral">Not on a Cruva plan</span>':b.readOnly?'<span class="tag neutral">Checks only</span>':''}`,
+  `${b.signed?`<span class="row small" style="color:var(--good-ink)">${icon('check')}Signed off ${b.signed}</span>`:''}<button class="btn" onclick="S.an.acct='${b.id}';go('#/analytics')">Analytics</button><button class="btn primary" ${b.readOnly?'disabled':''} onclick="openSignoff('${b.id}')">${icon('check')}Sign off and share</button>`);
+ const tabs=`<div class="tabs"><a href="#/a/${b.id}/today" class="${tab==='today'?'on':''}">Today${open?` <span class="tag warn" style="height:18px;padding:0 6px;margin-left:4px">${open}</span>`:''}</a><a href="#/a/${b.id}/setup" class="${tab==='setup'?'on':''}">Setup</a></div>`;
+ return tabs+(tab==='setup'?viewSetup(b,sub):viewToday(b));
+}
+function viewToday(b){
+ const wait=waitingItems(b);const acts=actions(b);const c=checks(b);const k=b.k;
+ const items=wait.map(x=>`<div class="item ${x.done?'done':''}"><div class="col"><span class="k">${esc(x.cat)}</span><div class="t">${esc(x.t)}</div><div class="muted small">${esc(x.d)}</div></div><div class="btn-row" style="flex-wrap:nowrap">${x.done?`<span class="tag ok">${esc(b.handled[x.id])}</span>`:x.btns.map((bt,i)=>`<button class="btn ${i===0?'primary':i===x.btns.length-1?'quiet':''}" onclick="handle('${b.id}','${esc(x.id)}','${esc(bt)}')">${esc(bt)}</button>`).join('')}</div></div>`).join('');
+ const rows=acts.map(x=>`<tr><td class="mono muted small">${x.t}</td><td style="white-space:nowrap">${esc(famName(x.f))}</td><td>${esc(x.a)}</td><td class="muted small">${esc(x.g)}</td><td><span class="tag ${x.r==='Paused'?'warn':'ok'}">${esc(x.r)}</span></td><td><a href="#" onclick="toast('Override logged against ${esc(famName(x.f))}. Counts toward that family\\'s override rate.');return false">Override</a></td></tr>`).join('');
+ const ran=SECTIONS.map(s=>{const st=b.readOnly?'off':sectionStatus(b,s,c);const cs=c[s]||[];const isOpen=S.open[b.id]===s;const w=wait.filter(x=>x.sec===s&&!x.done).length;const msg=cs.find(x=>x.st==='crit')||cs.find(x=>x.st==='warn');
+  return `<div><a class="list-row" href="#" onclick="S.open['${b.id}']=${isOpen?'null':`'${esc(s)}'`};render();return false" style="color:inherit;text-decoration:none"><span class="row" style="white-space:nowrap"><span class="dot ${st}"></span>${esc(s)}</span><span class="muted small ellip" style="flex:1;text-align:right">${w?w+' waiting':msg?esc(msg.msg.split('. ')[0]):cs.every(x=>x.st==='na'||x.st==='ro')?esc((cs[0]&&cs[0].msg||'').split('. ')[0]):cs.length+' passed'}</span><span style="color:var(--faint);transform:rotate(${isOpen?90:0}deg);display:inline-flex">${icon('chev')}</span></a>${isOpen?cs.map(x=>`<div class="check-row"><span style="color:${x.st==='ok'?'var(--good-ink)':x.st==='crit'?'var(--crit-ink)':x.st==='warn'?'var(--warn-ink)':'var(--faint)'};margin-top:1px">${x.st==='ok'?icon('check'):x.st==='na'||x.st==='ro'?'<span class="mono">–</span>':icon('alerts')}</span><div class="col" style="gap:1px"><span style="${x.st==='ok'?'':'font-weight:500'}">${esc(x.n)}</span>${x.msg?`<span class="muted">${esc(x.msg)}</span>`:''}</div><span class="muted small">${{ok:'Passed',warn:'Flagged',crit:'Critical',na:'Assisted',ro:'Read-only'}[x.st]}</span></div>`).join(''):''}</div>`}).join('');
+ return `<div class="content">
+  <div class="stats"><div class="stat"><span class="h">GMV, 30 days</span><span class="v">${fmtMoney(k.gmv,b.sym)}</span><span class="d">${k.gmvChg===null?'no prior period':(k.gmvChg>=0?'+':'')+pct(k.gmvChg)+' vs prior 30'}</span></div><div class="stat"><span class="h">Affiliate share</span><span class="v">${pct(k.gmv?k.aff/k.gmv*100:0)}</span><span class="d">${fmtMoney(k.aff,b.sym)} from creators</span></div><div class="stat"><span class="h">Videos / week</span><span class="v">${fmtN(k.videos/4.3)}</span><span class="d">target ${b.settings.targets.videosWeek}</span></div><div class="stat ${b.review>200?'warn':''}"><span class="h">Samples to review</span><span class="v">${fmtN(b.review)}</span><span class="d">${b.reviewAge?'avg age '+b.reviewAge.toFixed(1)+' days':'queue empty'}</span></div><div class="stat ${b.sps!==null&&b.sps<3.5?'crit':''}"><span class="h">Shop score</span><span class="v">${b.sps===null?'–':b.sps.toFixed(1)}</span><span class="d">${b.sps===null?'not assigned yet':b.sps<3.5?'DM sending restricted':'of 5'}</span></div><div class="stat"><span class="h">Run</span><span class="v">${b.readOnly?'–':b.runEnd}</span><span class="d">${b.readOnly?'checks only':acts.length+' actions · '+SECTIONS.reduce((t,s)=>t+(c[s]||[]).length,0)+' checks'}</span></div></div>
+  <div class="grid2">
+   <div class="col" style="gap:24px;min-width:0">
+    <div class="sec"><div class="sec-h"><span class="h">Needs you</span><span class="muted small">Money out beyond cap, price and margin, client facing, low confidence replies. Everything else already ran.</span></div><div class="card">${items||'<div class="empty">Nothing waiting.</div>'}</div></div>
+    <div class="sec"><div class="sec-h"><span class="h">What changed</span><span class="muted small">Inside autonomy and guardrails, under v${b.settings.version}.</span></div><div class="card scroll"><table class="tbl"><thead><tr><th style="width:52px">Time</th><th style="width:140px">Family</th><th>Action</th><th style="width:210px">Guardrail passed</th><th style="width:70px"></th><th style="width:70px"></th></tr></thead><tbody>${rows||'<tr><td colspan="6" class="empty">No writes.</td></tr>'}</tbody></table></div></div>
+   </div>
+   <div class="col" style="gap:24px">
+    <div class="sec"><span class="h" style="color:var(--ink)">What ran</span><div class="card">${ran}</div></div>
+    <div class="card" style="padding:14px 16px"><div class="col" style="gap:10px"><span class="h">Trust</span><div class="list-row" style="padding:0;border:0"><span>Override rate, 14 days</span><span class="mono">${pct(overrideRate(b))}</span></div><div class="list-row" style="padding:0;border:0"><span>Escalation rate on replies</span><span class="mono">${b.mock.escRate}%</span></div><div class="list-row" style="padding:0;border:0"><span>Minutes per day</span><span class="mono">${b.mock.minutes}</span></div><span class="muted small">${overrideRate(b)===0&&!b.readOnly?'Zero overrides. Make sure that means trust, not absence.':'Falling override rate earns the next dial-up on the Autonomy tab.'}</span></div></div>
+   </div>
+  </div>
+  <div class="src">Stock, listings, sample queue, funnel and score are Cruva data. Messages, returns and order counts are sample data until the Partner Center adapters exist.</div>
+ </div>`;
+}
+</script>
+<script>
+// ---------- setup ----------
+const SETUP_TABS=[['commercials','Commercials'],['targets','Targets'],['rules','Rules'],['autonomy','Autonomy'],['voice','Voice and knowledge'],['routing','Routing']];
+function getPath(o,p){return p.split('.').reduce((x,k)=>x==null?x:x[k],o)}
+function setPath(o,p,v){const ks=p.split('.');const last=ks.pop();const t=ks.reduce((x,k)=>x[k]=x[k]||{},o);t[last]=v}
+function setS(bid,path,v){const b=B[bid];setPath(b.settings,path,v);b._dirty=true;render()}
+function saveS(bid){const b=B[bid];b.settings.version++;b.settings.changed.unshift({v:b.settings.version,who:'Elena K.',when:'7 Sep',what:'Edited on the '+SETUP_TABS.find(t=>t[0]===S.setupTab)[1]+' tab.'});b._dirty=false;render();toast(`Saved as v${b.settings.version}. Tomorrow’s 06:00 run uses it; today stays recorded under v${b.settings.version-1}.`)}
+function fld(b,label,path,type='number',o={}){const v=getPath(b.settings,path);let input;
+ if(type==='toggle')input=`<label class="toggle ${v?'on':''}" onclick="setS('${b.id}','${path}',${!v});return false"><i></i><span>${v?'On':'Off'}</span></label>`;
+ else if(type==='select')input=`<select onchange="setS('${b.id}','${path}',this.value)">${o.options.map(x=>`<option value="${x}" ${v===x?'selected':''}>${x}</option>`).join('')}</select>`;
+ else if(type==='textarea')input=`<textarea rows="2" onchange="setS('${b.id}','${path}',this.value)">${esc(v??'')}</textarea>`;
+ else input=`<div class="unit"><input type="${type}" value="${esc(v??'')}" ${o.step?'step="'+o.step+'"':''} onchange="setS('${b.id}','${path}',${type==='number'?'+this.value':'this.value'})">${o.unit?`<span>${o.unit}</span>`:''}</div>`;
+ return `<div class="field"><label>${label}</label>${input}${o.hint?`<span class="hint">${o.hint}</span>`:''}</div>`}
+function viewSetup(b,sub){
+ const t=sub||S.setupTab;S.setupTab=t;const s=b.settings;
+ const side=`<div class="card" style="padding:8px"><div class="subtabs">${SETUP_TABS.map(([k,l])=>`<a href="#/a/${b.id}/setup/${k}" class="${t===k?'on':''}">${l}</a>`).join('')}</div></div>
+ <div class="card" style="padding:14px 16px;margin-top:16px"><div class="col" style="gap:8px"><span class="h">Versions</span>${s.changed.slice(0,3).map(c=>`<div style="display:flex;gap:10px;font-size:12.5px"><span class="mono muted" style="width:28px;flex:none">v${c.v}</span><span><span style="font-weight:500">${esc(c.who)}, ${esc(c.when)}.</span> <span class="muted">${esc(c.what)}</span></span></div>`).join('')}<span class="muted small">Every run records the version it ran under.</span></div></div>`;
+ let body='',intro='';
+ if(t==='commercials'){intro='Feeds the P&L and every margin rule.';
+  body=`<div class="fields">${fld(b,'Monthly retainer','commercials.retainer','number',{unit:b.sym})}${fld(b,'VAT','commercials.vat','number',{unit:'%'})}${fld(b,'Merchant of record','commercials.mor','toggle')}${fld(b,'Client parent','commercials.parent','text')}${fld(b,'Base cost as share of price','commercials.baseShare','number',{unit:'%',hint:'Used where a SKU has no COGS yet. Upload COGS to replace it.'})}<div class="field"><label>Markets</label><div class="chips">${b.markets.map(m=>`<span class="chip on">${m}</span>`).join('')}</div></div></div>
+  <div class="sec"><span class="h">Commission tiers on GMV</span><div class="card"><table class="tbl"><thead><tr><th>Up to</th><th class="r">Rate</th></tr></thead><tbody>${s.commercials.tiers.map((tr,i)=>`<tr><td><div class="unit" style="max-width:220px"><input type="number" value="${tr.upTo??''}" placeholder="and above" onchange="setS('${b.id}','commercials.tiers.${i}.upTo',this.value===''?null:+this.value)"><span>${b.sym}</span></div></td><td class="r"><div class="unit" style="max-width:110px;margin-left:auto"><input type="number" value="${tr.rate}" onchange="setS('${b.id}','commercials.tiers.${i}.rate',+this.value)"><span>%</span></div></td></tr>`).join('')}</tbody></table></div></div>
+  <div class="sec"><div class="sec-h"><span class="h">Catalogue and COGS</span><span class="muted small">${b.productTotal} listings in Cruva, ${b.unavailable} unavailable. Top sellers shown.</span></div><div class="card scroll"><table class="tbl"><thead><tr><th>Product</th><th class="r">Price</th><th class="r">Units, lifetime</th><th class="r">Stock</th><th class="r">Base cost</th><th class="r">Min price</th></tr></thead><tbody>${b.products.map(p=>`<tr><td class="ellip" style="max-width:360px" title="${esc(p.name)}">${esc(shortName(p.name))}</td><td class="r mono">${fmt2(p.price,b.sym)}</td><td class="r mono">${fmtN(p.units_sold)}</td><td class="r mono" style="${n0(p.stock)<s.guardrails.stockThreshold?'color:var(--warn-ink)':''}">${fmtN(p.stock)}</td><td class="r mono muted">${fmt2(p.price*s.commercials.baseShare/100,b.sym)} <span class="faint">est.</span></td><td class="r mono">${fmt2(p.price*s.commercials.baseShare/100*(1+s.pricing.minAboveBase/100),b.sym)}</td></tr>`).join('')||'<tr><td colspan="6" class="empty">No products in Cruva for this shop.</td></tr>'}</tbody></table></div><span class="muted small"><a href="#" onclick="toast('Upload a CSV with product_id, base_cost.');return false">Upload COGS</a> to replace the estimate.</span></div>`}
+ else if(t==='targets'){intro='What the daily checks compare against. Defaults were set from the last 30 days in Cruva; a shop with no targets gets flagged rather than silently passing.';
+  body=`<div class="fields">${fld(b,'Monthly GMV','targets.gmvMonthly','number',{unit:b.sym,hint:'Last 30 days: '+fmtMoney(b.k.gmv,b.sym)})}${fld(b,'Affiliate videos per week','targets.videosWeek','number',{hint:'Last 30 days: '+fmtN(b.k.videos/4.3)+' a week'})}${fld(b,'Active collaborations','targets.activeCollabs','number')}${fld(b,'Sample rate, approved to video','targets.sampleRate','number',{unit:'%',hint:'Last 30 days: '+pct(b.funnel.approved?b.funnel.posted/b.funnel.approved*100:0)})}${fld(b,'Outreach sends per day','targets.outreachSends','number',{hint:'Last 30 days: '+fmtN(b.k.dms/30)+' a day'})}${fld(b,'Outreach reply rate','targets.replyRate','number',{unit:'%'})}</div>`}
+ else if(t==='rules'){intro='What the executor enforces in code. The agent can propose whatever it likes; these decide what actually happens.';const ads=deriveAds(b),pr=derivePrices(b),sm=deriveSamples(b);
+  body=`<div class="anchor-list"><a href="#r-ads">Ads</a><a href="#r-pricing">Pricing and promos</a><a href="#r-samples">Samples</a><a href="#r-guardrails">Guardrails</a></div>
+  <div class="card">
+   <div class="rule-block" id="r-ads"><div class="sec-h"><span class="h" style="color:var(--ink)">Ads</span><span class="muted small">Rebalances inside the cap, pauses under the floor. Anything above the cap waits for you.</span></div>
+    <div class="fields">${fld(b,'Daily spend cap','ads.dailyCap','number',{unit:b.sym+'/day'})}${fld(b,'Monthly spend cap','ads.monthlyCap','number',{unit:b.sym+'/month'})}${fld(b,'ROAS floor','ads.roasFloor','number',{unit:'× ROAS',step:'0.1'})}${fld(b,'Grace days under floor','ads.graceDays','number',{unit:'days'})}${fld(b,'Propose a raise at','ads.raiseWhen','number',{unit:'× target ROAS',step:'0.1',hint:'When a campaign beats its target by this and spend is at budget.'})}</div>
+    <div class="col" style="gap:8px"><span class="h">Product ranges</span><div class="card"><table class="tbl"><thead><tr><th>Range</th><th>Products</th><th>On</th><th class="r">Share of budget</th><th class="r">ROAS target</th><th class="r">≈ per day</th></tr></thead><tbody>${s.ads.ranges.map((r,i)=>`<tr><td><input type="text" value="${esc(r.name)}" onchange="setS('${b.id}','ads.ranges.${i}.name',this.value)" style="width:160px"></td><td class="muted small ellip" style="max-width:320px">${r.products.length?r.products.map(id=>{const p=b.products.find(x=>x.id===id);return p?shortName(p.name):id}).join(', '):'all other products'}</td><td><label class="toggle ${r.on?'on':''}" onclick="setS('${b.id}','ads.ranges.${i}.on',${!r.on});return false"><i></i></label></td><td class="r"><div class="unit" style="max-width:100px;margin-left:auto"><input type="number" value="${r.share}" onchange="setS('${b.id}','ads.ranges.${i}.share',+this.value)"><span>%</span></div></td><td class="r"><div class="unit" style="max-width:100px;margin-left:auto"><input type="number" step="0.1" value="${r.roas}" onchange="setS('${b.id}','ads.ranges.${i}.roas',+this.value)"><span>×</span></div></td><td class="r mono muted">${fmtMoney(s.ads.dailyCap*r.share/100,b.sym)}</td></tr>`).join('')}<tr><td colspan="6"><button class="btn sm" onclick="B['${b.id}'].settings.ads.ranges.push({name:'New range',on:true,share:0,roas:${s.ads.roasFloor},products:[]});B['${b.id}']._dirty=true;render()">+ Add range</button></td></tr></tbody></table></div></div>
+    <div class="col" style="gap:8px"><span class="h">With these rules, this morning</span><div class="card">${ads.length?ads.map(x=>`<div class="list-row"><span class="tag ${x.kind==='auto'?'ok':x.kind==='wait'?'warn':'neutral'}">${{auto:'Automatic',wait:'Waits for you',hold:'Held',skip:'Skipped'}[x.kind]}</span><span style="flex:1">${esc(x.what)}</span></div>`).join(''):`<div class="empty">No GMV Max campaigns in Cruva for ${esc(b.name)} in the last 30 days. When one runs, this is what applies.</div>`}</div></div>
+   </div>
+   <div class="rule-block" id="r-pricing"><div class="sec-h"><span class="h" style="color:var(--ink)">Pricing and promos</span><span class="muted small">Prices never under base plus the minimum, promos renew at the same terms only if stock and margin hold.</span></div>
+    <div class="fields">${fld(b,'Minimum price above base','pricing.minAboveBase','number',{unit:'%'})}${fld(b,'Margin floor','pricing.marginFloor','number',{unit:'%'})}${fld(b,'Max discount','pricing.maxDiscount','number',{unit:'%'})}${fld(b,'Round prices to','pricing.roundTo','select',{options:['.90','.99','.00']})}${fld(b,'Renew expiring promos at the same terms','pricing.promoAutoRenew','toggle')}${fld(b,'Do not renew under stock of','pricing.promoMinStock','number',{unit:'units'})}${fld(b,'Max promo length','pricing.promoMaxDays','number',{unit:'days'})}${fld(b,'Free shipping','pricing.freeShipping','toggle')}${fld(b,'Free shipping from','pricing.freeShipFrom','number',{unit:b.sym})}</div>
+    <div class="col" style="gap:8px"><span class="h">With these rules, pending price changes</span><div class="card scroll">${pr.length?`<table class="tbl"><thead><tr><th>Product</th><th class="r">Base est.</th><th class="r">Now</th><th class="r">Requested</th><th class="r">Margin</th><th>Result</th></tr></thead><tbody>${pr.map(x=>`<tr><td><div class="ellip" style="max-width:260px">${esc(shortName(x.sku))}</div><div class="muted small">${esc(x.source)}</div></td><td class="r mono">${fmt2(x.base,b.sym)}</td><td class="r mono">${fmt2(x.current,b.sym)}</td><td class="r mono">${fmt2(x.requested,b.sym)}</td><td class="r mono" style="${x.margin<s.pricing.marginFloor?'color:var(--crit-ink)':''}">${pct(x.margin)}</td><td>${x.kind==='auto'?'<span class="tag ok">Applies</span>':`<span class="tag warn">Blocked</span> <span class="muted small">${esc(x.reasons.join('; '))}. Counter ${fmt2(x.okPrice,b.sym)}.</span>`}</td></tr>`).join('')}</tbody></table>`:'<div class="empty">No price changes pending.</div>'}</div></div>
+   </div>
+   <div class="rule-block" id="r-samples"><div class="sec-h"><span class="h" style="color:var(--ink)">Samples</span><span class="muted small">${fmtN(b.review)} requests waiting review in Cruva. These rules decide them at 06:00.</span></div>
+    <div class="fields">${fld(b,'Sample approvals','samples.on','toggle')}${fld(b,'Minimum followers','samples.minFollowers','number',{hint:'Under this, declined automatically.'})}${fld(b,'Sample value ceiling','samples.valueCeiling','number',{unit:b.sym,hint:'Above this, waits for a person.'})}${fld(b,'Auto-expire unreviewed after','samples.autoExpire','number',{unit:'days',hint:b.expired?fmtN(b.expired)+' expired unreviewed in 30 days.':''})}${fld(b,'Ship samples together with','samples.bundle','toggle')}${fld(b,'Bundle SKU','samples.bundleWith','text')}${fld(b,'Video expected within','samples.videoWithin','number',{unit:'days'})}</div>
+    <div class="col" style="gap:8px"><span class="h">Countries and weekly quota</span><div class="card"><table class="tbl"><thead><tr><th>Country</th><th>On</th><th class="r">Accept per week</th><th class="r">Approved, 30 days</th></tr></thead><tbody>${Object.keys(MK).filter(m=>b.markets.includes(m)||s.samples.countries.includes(m)).map(m=>{const on=s.samples.countries.includes(m);const sh=b.shops.find(x=>x.market===m);return `<tr style="${on?'':'opacity:.55'}"><td>${MK[m]} <span class="mono muted small">${m}</span></td><td><label class="toggle ${on?'on':''}" onclick="toggleCountry('${b.id}','${m}');return false"><i></i></label></td><td class="r"><div class="unit" style="max-width:100px;margin-left:auto"><input type="number" value="${s.samples.weekly[m]??0}" ${on?'':'disabled'} onchange="setS('${b.id}','samples.weekly.${m}',+this.value)"></div></td><td class="r mono muted">${sh?fmtN(n0(sh.stats&&sh.stats.samples_approved)):'–'}</td></tr>`}).join('')}<tr><td colspan="4"><select onchange="if(this.value){toggleCountry('${b.id}',this.value)}" style="height:28px"><option value="">+ Add country</option>${Object.keys(MK).filter(m=>!b.markets.includes(m)&&!s.samples.countries.includes(m)).map(m=>`<option value="${m}">${MK[m]}</option>`).join('')}</select></td></tr></tbody></table></div></div>
+    <div class="col" style="gap:8px"><div class="sec-h"><span class="h">With these rules, the most recent requests</span><span class="muted small">${sm.filter(x=>x.kind==='approved').length} approved · ${sm.filter(x=>x.kind==='held').length} held · ${sm.filter(x=>x.kind==='declined').length} declined · ${sm.filter(x=>x.kind==='wait').length} waiting</span></div><div class="card scroll">${sm.length?`<table class="tbl"><thead><tr><th>Creator</th><th class="r">Followers</th><th>Product</th><th class="r">Value</th><th>Result</th></tr></thead><tbody>${sm.map(x=>`<tr><td class="mono">${esc(x.handle)}</td><td class="r mono">${fmtN(x.followers)}</td><td class="ellip" style="max-width:240px">${esc(shortName(x.productName))}</td><td class="r mono">${fmt2(x.value,b.sym)}</td><td><span class="tag ${x.kind==='approved'?'ok':x.kind==='wait'?'warn':'neutral'}">${{approved:'Approved',held:'Held',declined:'Declined',wait:'Waits for you',blocked:'Off'}[x.kind]}</span> <span class="muted small">${esc(x.why)}</span></td></tr>`).join('')}</tbody></table>`:'<div class="empty">No requests waiting review.</div>'}</div></div>
+   </div>
+   <div class="rule-block" id="r-guardrails"><div class="sec-h"><span class="h" style="color:var(--ink)">Guardrails</span><span class="muted small">Apply whatever the autonomy setting is.</span></div>
+    <div class="fields">${fld(b,'Max auto replies per day','guardrails.autoRepliesDay','number')}${fld(b,'Messages per creator per week','guardrails.msgsPerCreatorWeek','number')}${fld(b,'Reply confidence threshold','guardrails.confidence','number',{step:'0.05'})}${fld(b,'Blackout from','guardrails.blackoutFrom','time')}${fld(b,'Blackout to','guardrails.blackoutTo','time')}${fld(b,'Goodwill without asking','guardrails.goodwill','number',{unit:b.sym})}${fld(b,'Stock threshold for promos and ads','guardrails.stockThreshold','number',{unit:'units',hint:lowStock(b).length+' listings under it now.'})}</div>
+   </div>
+  </div>`}
+ else if(t==='autonomy'){intro='One row per job family. The override column is the number that justifies dialling up.';const r=seeded(hash(b.name)+3);
+  body=`<div class="card scroll"><table class="tbl"><thead><tr><th>Job family</th><th>Setting</th><th class="r">Actions 14d</th><th class="r">Overridden</th><th></th></tr></thead><tbody>${FAMILIES.map(([k,n,d])=>{const cur=s.autonomy[k];const acts=b.readOnly?0:Math.round(r()*120);const ov=b.readOnly?0:(k==='price'?Math.round(acts*0.18):Math.round(r()*3));const rate=acts?ov/acts*100:0;return `<tr><td><div style="font-weight:500">${n}</div><div class="muted small">${d}</div></td><td><span class="seg">${LEVELS.map(([lv,ll])=>`<button class="${cur===lv?'on':''}" onclick="setS('${b.id}','autonomy.${k}','${lv}')">${ll}</button>`).join('')}</span></td><td class="r mono">${acts}</td><td class="r mono" style="${rate>10?'color:var(--crit-ink);font-weight:500':''}">${ov}</td><td>${!b.readOnly&&acts>=14&&rate<=8&&cur!=='silent'&&cur!=='off'?'<span class="tag ok">Ready to dial up</span>':rate>10?'<span class="muted small">Stays on propose</span>':''}</td></tr>`}).join('')}</tbody></table></div>
+  <div class="muted small">Not configurable: money out beyond cap, price outside the rules, anything client facing, and replies below confidence always wait for a person.</div>`}
+ else if(t==='voice'){intro='Tone per market, what never gets said, what always escalates, and the knowledge library the replies are grounded in.';
+  body=`<div class="card"><table class="tbl"><thead><tr><th>Market</th><th>Language</th><th>Tone</th></tr></thead><tbody>${b.markets.map(m=>`<tr><td class="mono">${m}</td><td><input type="text" value="${esc(s.voice.language[m])}" onchange="setS('${b.id}','voice.language.${m}',this.value)"></td><td><input type="text" value="${esc(s.voice.tone[m])}" style="width:100%" onchange="setS('${b.id}','voice.tone.${m}',this.value)"></td></tr>`).join('')}</tbody></table></div>
+  <div class="fields two">${fld(b,'Banned phrases','voice.banned','textarea')}${fld(b,'Always escalate on','voice.escalate','textarea',{hint:'On top of the hard triggers: health and safety, adverse reactions, legal, press, minors, chargebacks, third contact.'})}</div>
+  <div class="sec"><div class="sec-h"><span class="h">Knowledge library</span><span class="muted small">Five layers, most specific wins. Live state is pulled at reply time.</span></div><div class="card">${[['Brand facts','Products, ingredients, claims allowed and not, availability',b.products.length?88:20],['Policy','Shipping per market, returns, refunds, warranty, goodwill ceiling',72],['Commercial','Commission per market, sample eligibility, open collab terms',85],['Precedent','Past approved replies, the client’s actual voice',b.mock.msgs>100?70:35],['Live account state','Order status, tracking, stock, promo terms right now','live']].map(([n,d,c])=>`<div class="list-row"><div class="col" style="gap:1px"><span style="font-weight:500">${n}</span><span class="muted small">${d}</span></div>${c==='live'?'<span class="tag neutral">At reply time</span>':`<div class="row"><div style="width:110px;height:8px;background:var(--surface-2);border-radius:3px;overflow:hidden"><div style="height:100%;width:${c}%;background:var(--s1)"></div></div><span class="mono small" style="width:34px;text-align:right">${c}%</span></div>`}</div>`).join('')}</div></div>`}
+ else if(t==='routing'){intro='Who gets what, and where.';
+  body=`<div class="fields">${fld(b,'Account manager','routing.am','text')}${fld(b,'Account assistant','routing.aa','text')}${fld(b,'VA','routing.va','text')}${fld(b,'Approver','routing.approver','text',{hint:'Signs money out beyond cap and price overrides.'})}${fld(b,'Slack channel','routing.slack','text')}${fld(b,'Client contact','routing.client','text',{hint:'Gets the prepared one-liners for client-side execution.'})}${fld(b,'Working hours','routing.hours','text')}</div>
+  <div class="card"><table class="tbl"><thead><tr><th>Escalation</th><th>Goes to</th><th>Also</th><th>By</th></tr></thead><tbody>${[['Money out beyond cap','Approver','AM','Slack and app'],['Price and margin','AM','Approver','Slack and app'],['Contractual and client facing','AM','','App; nothing leaves without a person'],['Low confidence replies','AA','VA on weekends','App; first response target 4h'],['Assisted, no API','AM','','Slack, weekly digest'],['Circuit breaker tripped','AM','Approver','Slack, immediately']].map(r=>`<tr><td style="font-weight:500">${r[0]}</td><td>${r[1]}</td><td class="muted">${r[2]}</td><td class="muted small">${r[3]}</td></tr>`).join('')}</tbody></table></div>`}
+ return `<div class="content"><div style="display:grid;grid-template-columns:200px minmax(0,1fr);gap:24px;align-items:start"><div>${side}</div><div class="col" style="gap:20px;min-width:0">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px"><div class="col" style="gap:2px"><span class="title" style="font-size:18px">${SETUP_TABS.find(x=>x[0]===t)[1]}</span><span class="muted">${intro}</span></div><button class="btn primary" ${b._dirty?'':'disabled'} onclick="saveS('${b.id}')">Save as v${s.version+1}</button></div>${body}</div></div></div>`;
+}
+function toggleCountry(bid,c){const s=B[bid].settings.samples;const i=s.countries.indexOf(c);if(i>=0)s.countries.splice(i,1);else{s.countries.push(c);if(s.weekly[c]==null)s.weekly[c]=5}B[bid]._dirty=true;render()}
+
+// ---------- analytics ----------
+function viewAnalytics(){
+ const an=S.an;const sel=an.acct==='all'?BRANDS.filter(b=>!b.readOnly):[B[an.acct]];const days=an.range;const labels=dayLabels(days);const sym=an.acct==='all'?'$':B[an.acct].sym;const fm=v=>fmtMoney(v,sym);
+ topbar(`<b>Analytics</b><span class="sep">·</span><span>${an.acct==='all'?'all accounts':esc(B[an.acct].name)}</span>`,`<select onchange="S.an.acct=this.value;render()"><option value="all">All accounts</option>${BRANDS.map(b=>`<option value="${b.id}" ${an.acct===b.id?'selected':''}>${esc(b.name)}</option>`).join('')}</select><span class="seg">${[7,30,90].map(d=>`<button class="${an.range===d?'on':''}" onclick="S.an.range=${d};render()">${d}d</button>`).join('')}</span>`);
+ const scale=days/30;const gmvT=sel.reduce((t,b)=>t+b.k.gmv,0)*scale;const affT=sel.reduce((t,b)=>t+b.k.aff,0)*scale;const chgs=sel.map(b=>b.k.gmvChg).filter(x=>x!==null);const chgAvg=chgs.length?chgs.reduce((t,v)=>t+v,0)/chgs.length:null;
+ const gmv=sumSeries(sel.map(b=>shape(b.k.gmv*scale,days,hash(b.name),b.k.gmvChg)));const aff=sumSeries(sel.map(b=>shape(b.k.aff*scale,days,hash(b.name)+1,b.k.affChg)));const other=gmv.map((v,i)=>Math.max(0,v-aff[i]));
+ const bsize=days===90?7:days===30?2:1;const bucket=(arr,size)=>{const out=[];for(let i=0;i<arr.length;i+=size)out.push(arr.slice(i,i+size).reduce((t,v)=>t+v,0));return out};const bl=days===90?labels.filter((_,i)=>i%7===0).map(l=>'wk '+l):days===30?labels.filter((_,i)=>i%2===0):labels;
+ const vids=sel.reduce((t,b)=>t+b.k.videos,0);const vT=sel.reduce((t,b)=>t+b.settings.targets.videosWeek,0);const weekLabels=['w32','w33','w34','w35','w36'];const vSeries=shape(vids/30*35,5,hash('v'+an.acct),sel.length===1?sel[0].k.videosChg:null);
+ const funnelOf=b=>[{label:'Requested',value:b.funnel.requested},{label:'Approved',value:b.funnel.approved},{label:'Shipped',value:b.funnel.shipped},{label:'Delivered',value:b.funnel.delivered},{label:'Video posted',value:b.funnel.posted}];
+ const funnelBrands=an.acct==='all'?BRANDS.filter(b=>b.funnel.requested>0).slice(0,4):[B[an.acct]];
+ const tgtG=sel.reduce((t,b)=>t+b.settings.targets.gmvMonthly,0)*scale;
+ const tbl=BRANDS.filter(b=>!b.readOnly).map(b=>`<tr class="click" onclick="S.an.acct='${b.id}';render()"><td style="font-weight:500;white-space:nowrap">${esc(b.name)}</td><td class="r mono">${fmtMoney(b.k.gmv,b.sym)}</td><td class="r mono" style="${b.k.gmvChg!==null&&b.k.gmvChg<=-15?'color:var(--crit-ink)':''}">${b.k.gmvChg===null?'–':(b.k.gmvChg>=0?'+':'')+pct(b.k.gmvChg)}</td><td class="r mono">${pct(b.k.gmv?b.k.aff/b.k.gmv*100:0)}</td><td class="r mono">${fmtN(b.k.videos)}</td><td class="r mono">${fmtK(b.k.views)}</td><td class="r mono">${fmtN(b.funnel.approved)}</td><td class="r mono">${fmtN(b.funnel.posted)}</td><td class="r mono">${b.funnel.approved?pct(b.funnel.posted/b.funnel.approved*100):'–'}</td><td class="r mono">${b.sps===null?'–':b.sps.toFixed(1)}</td></tr>`).join('');
+ return `<div class="content">
+  <div class="stats"><div class="stat"><span class="h">GMV, ${days} days</span><span class="v">${fm(gmvT)}</span><span class="d">${chgAvg===null?'no prior period':(chgAvg>=0?'+':'')+pct(chgAvg)+' vs the prior period'}</span></div><div class="stat"><span class="h">Affiliate share</span><span class="v">${pct(gmvT?affT/gmvT*100:0)}</span><span class="d">${fm(affT)} from creators</span></div><div class="stat"><span class="h">Pace vs target</span><span class="v">${tgtG?pct(gmvT/tgtG*100):'–'}</span><span class="d">${tgtG?fm(tgtG)+' expected':'no targets set'}</span></div><div class="stat"><span class="h">Videos, ${days} days</span><span class="v">${fmtN(vids*scale)}</span><span class="d">target ${fmtN(vT*days/7)}</span></div><div class="stat"><span class="h">Samples posted</span><span class="v">${fmtN(sel.reduce((t,b)=>t+b.funnel.posted,0))}</span><span class="d">of ${fmtN(sel.reduce((t,b)=>t+b.funnel.approved,0))} approved</span></div></div>
+  <div class="grid2" style="grid-template-columns:minmax(0,3fr) minmax(0,2fr)">
+   <div class="card" style="padding:16px 18px"><div class="sec-h" style="margin-bottom:10px"><span class="h" style="color:var(--ink)">GMV per day</span><span class="muted small">dashed: target pace</span></div>${lineChart({labels,series:[{name:'GMV',color:'var(--s1)',values:gmv}],fmt:fm,area:true,target:tgtG?Math.round(tgtG/days):0,targetLabel:'target/day',h:220})}</div>
+   <div class="card" style="padding:16px 18px"><div class="sec-h" style="margin-bottom:10px"><span class="h" style="color:var(--ink)">Affiliate vs everything else</span><div class="legend"><span><i style="background:var(--s1)"></i>Affiliate</span><span><i style="background:var(--s3)"></i>Other</span></div></div>${barChart({labels:bl,stacked:true,series:[{name:'Affiliate',color:'var(--s1)',values:bucket(aff,bsize)},{name:'Other',color:'var(--s3)',values:bucket(other,bsize)}],fmt:fm,h:220})}</div>
+  </div>
+  <div class="grid2" style="grid-template-columns:minmax(0,2fr) minmax(0,3fr)">
+   <div class="card" style="padding:16px 18px"><div class="sec-h" style="margin-bottom:10px"><span class="h" style="color:var(--ink)">Affiliate videos per week</span><span class="muted small">dashed: target</span></div>${barChart({labels:weekLabels,series:[{name:'Videos',color:'var(--s1)',values:vSeries}],target:vT,targetLabel:'target',h:200})}</div>
+   <div class="card" style="padding:16px 18px"><div class="sec-h" style="margin-bottom:10px"><span class="h" style="color:var(--ink)">Sample funnel, 30 days</span><span class="muted small">Cruva, requests by stage</span></div><div style="display:grid;grid-template-columns:repeat(${Math.min(2,funnelBrands.length)||1},minmax(0,1fr));gap:18px">${funnelBrands.map(b=>`<div class="col" style="gap:8px"><span style="font-weight:500">${esc(b.name)}</span>${hbars(funnelOf(b),'var(--s1)')}</div>`).join('')||'<div class="empty">No sample requests in the window.</div>'}</div></div>
+  </div>
+  <div class="sec"><div class="sec-h"><span class="h">Accounts, last 30 days</span><span class="muted small">Cruva. Click a row to focus the charts.</span></div><div class="card scroll"><table class="tbl"><thead><tr><th>Account</th><th class="r">GMV</th><th class="r">vs prior</th><th class="r">Affiliate</th><th class="r">Videos</th><th class="r">Views</th><th class="r">Samples approved</th><th class="r">Posted</th><th class="r">Sample rate</th><th class="r">Score</th></tr></thead><tbody>${tbl}</tbody></table></div></div>
+  <div class="src">Totals, changes, videos, views, funnel and score are Cruva figures for 8 Aug to 6 Sep. The day-by-day shape is illustrative until the daily series is wired in.</div>
+ </div>`;
+}
+</script>
+<script>
+// ---------- bulk rules (from the accounts list) ----------
+const BF={};
+function openBulk(kind){
+ const sel=[...S.sel].map(i=>B[i]).filter(Boolean);if(!sel.length)return;
+ const fi=(label,key,type='number',hint='',unit='')=>`<div class="field"><label>${label}</label><div class="unit">${type==='select'?`<select onchange="BF['${key}']=this.value;openBulk('${kind}')"><option value="">Keep as is</option>${hint.split('|').map(o=>`<option value="${o}" ${BF[key]===o?'selected':''}>${o}</option>`).join('')}</select>`:`<input type="${type}" placeholder="keep as is" value="${BF[key]??''}" onchange="BF['${key}']=this.value===''?undefined:this.value;openBulk('${kind}')">`}${unit?`<span>${unit}</span>`:''}</div>${type!=='select'&&hint?`<span class="hint">${hint}</span>`:''}</div>`;
+ let form='',preview='',title='';
+ if(kind==='ads'){title='Ad budgets and ROAS';form=`<div class="fields">${fi('Daily spend cap','dailyCap','number','','per day')}${fi('Monthly spend cap','monthlyCap','number','','per month')}${fi('ROAS floor','roasFloor','number','Campaigns under this pause after the grace days.','× ROAS')}${fi('Grace days','graceDays','number')}${fi('Range: Bestsellers on','bestOn','select','on|off')}${fi('Range: Bestsellers ROAS target','bestRoas','number','','× ROAS')}</div>`;
+  preview=`<table class="tbl"><thead><tr><th>Account</th><th class="r">Cap now</th><th class="r">Cap after</th><th>Campaigns in Cruva, 30d</th></tr></thead><tbody>${sel.map(b=>`<tr><td style="font-weight:500">${esc(b.name)}</td><td class="r mono">${fmtMoney(b.settings.ads.dailyCap,b.sym)}</td><td class="r mono" style="${BF.dailyCap?'font-weight:500':''}">${fmtMoney(BF.dailyCap?+BF.dailyCap:b.settings.ads.dailyCap,b.sym)}</td><td class="muted small">${b.campaigns.length||'none, rule applies when one runs'}</td></tr>`).join('')}</tbody></table>`}
+ else if(kind==='samples'){title='Sample rules';const cs=[...new Set(sel.flatMap(b=>b.markets))];form=`<div class="col" style="gap:12px"><div class="fields">${cs.map(c=>fi(MK[c]+' per week','wk_'+c,'number','','/ week')).join('')}</div><div class="fields">${fi('Minimum followers','minFollowers','number')}${fi('Sample value ceiling','valueCeiling','number')}${fi('Auto-expire unreviewed after','autoExpire','number','','days')}${fi('Ship samples together','bundle','select','on|off')}${fi('Bundle SKU','bundleWith','text')}${fi('Video expected within','videoWithin','number','','days')}</div></div>`;
+  preview=`<table class="tbl"><thead><tr><th>Account</th><th>Quota now</th><th>Quota after</th><th class="r">Waiting review</th><th>Most recent requests after</th></tr></thead><tbody>${sel.map(b=>{const wk={...b.settings.samples.weekly};b.markets.forEach(c=>{if(BF['wk_'+c]!==undefined)wk[c]=+BF['wk_'+c]});const sim=deriveSamples(simulate(b,{samples:{weekly:wk,minFollowers:BF.minFollowers?+BF.minFollowers:undefined,valueCeiling:BF.valueCeiling?+BF.valueCeiling:undefined}}));const k=x=>sim.filter(s=>s.kind===x).length;return `<tr><td style="font-weight:500">${esc(b.name)}</td><td class="mono muted small">${Object.entries(b.settings.samples.weekly).map(([c,v])=>c+' '+v).join(' · ')}</td><td class="mono small">${Object.entries(wk).map(([c,v])=>c+' '+v).join(' · ')}</td><td class="r mono">${fmtN(b.review)}</td><td class="muted small">${sim.length?`${k('approved')} approved, ${k('held')} held, ${k('declined')} declined, ${k('wait')} waiting`:'none pending'}</td></tr>`}).join('')}</tbody></table>`}
+ else{title='Pricing and promos';form=`<div class="fields">${fi('Minimum price above base','minAboveBase','number','','%')}${fi('Margin floor','marginFloor','number','','%')}${fi('Max discount','maxDiscount','number','','%')}${fi('Renew promos at same terms','promoAutoRenew','select','on|off')}${fi('Do not renew under stock of','promoMinStock','number','','units')}${fi('Free shipping','freeShipping','select','on|off')}${fi('Free shipping from','freeShipFrom','number')}</div>`;
+  preview=`<table class="tbl"><thead><tr><th>Account</th><th>Rules now</th><th>Rules after</th><th>Pending price change</th></tr></thead><tbody>${sel.map(b=>{const p=b.settings.pricing;const np={minAboveBase:BF.minAboveBase?+BF.minAboveBase:p.minAboveBase,marginFloor:BF.marginFloor?+BF.marginFloor:p.marginFloor,maxDiscount:BF.maxDiscount?+BF.maxDiscount:p.maxDiscount};const sim=derivePrices(simulate(b,{pricing:np}));return `<tr><td style="font-weight:500">${esc(b.name)}</td><td class="mono muted small">+${p.minAboveBase}% · ${p.marginFloor}% · ≤${p.maxDiscount}%</td><td class="mono small">+${np.minAboveBase}% · ${np.marginFloor}% · ≤${np.maxDiscount}%</td><td class="muted small">${sim.length?(sim[0].kind==='auto'?'applies automatically':'blocked, counter at '+fmt2(sim[0].okPrice,b.sym)):'none'}</td></tr>`}).join('')}</tbody></table>`}
+ $('#modal').innerHTML=`<div class="modal wide"><div class="mh"><div class="col" style="gap:2px"><span class="title" style="font-size:18px">${title} for ${sel.length} account${sel.length>1?'s':''}</span><span class="muted small">${sel.map(b=>esc(b.name)).join(', ')}. Blank fields keep each account’s own value. Each account gets a new settings version.</span></div><button class="btn quiet" onclick="closeModal()">${icon('x')}</button></div>
+ <div class="mb">${form}<div class="col" style="gap:8px"><span class="h">What changes tomorrow</span><div class="card scroll">${preview}</div></div></div>
+ <div class="mf"><button class="btn primary" onclick="applyBulk('${kind}')">Apply to ${sel.length} account${sel.length>1?'s':''}</button><button class="btn quiet" onclick="closeModal()">Cancel</button></div></div>`;
+ $('#modal').classList.add('open');
+}
+function simulate(b,patch){const s=JSON.parse(JSON.stringify(b.settings));for(const k in patch)for(const kk in patch[k])if(patch[k][kk]!==undefined)s[k][kk]=patch[k][kk];return Object.assign({},b,{settings:s})}
+function applyBulk(kind){
+ const sel=[...S.sel].map(i=>B[i]).filter(Boolean);
+ sel.forEach(b=>{const s=b.settings;
+  if(kind==='ads'){if(BF.dailyCap)s.ads.dailyCap=+BF.dailyCap;if(BF.monthlyCap)s.ads.monthlyCap=+BF.monthlyCap;if(BF.roasFloor)s.ads.roasFloor=+BF.roasFloor;if(BF.graceDays)s.ads.graceDays=+BF.graceDays;const r=s.ads.ranges[0];if(r){if(BF.bestOn)r.on=BF.bestOn==='on';if(BF.bestRoas)r.roas=+BF.bestRoas}}
+  else if(kind==='samples'){b.markets.forEach(c=>{if(BF['wk_'+c]!==undefined){s.samples.weekly[c]=+BF['wk_'+c];if(!s.samples.countries.includes(c))s.samples.countries.push(c)}});if(BF.minFollowers)s.samples.minFollowers=+BF.minFollowers;if(BF.valueCeiling)s.samples.valueCeiling=+BF.valueCeiling;if(BF.autoExpire)s.samples.autoExpire=+BF.autoExpire;if(BF.bundle)s.samples.bundle=BF.bundle==='on';if(BF.bundleWith)s.samples.bundleWith=BF.bundleWith;if(BF.videoWithin)s.samples.videoWithin=+BF.videoWithin}
+  else{const p=s.pricing;if(BF.minAboveBase)p.minAboveBase=+BF.minAboveBase;if(BF.marginFloor)p.marginFloor=+BF.marginFloor;if(BF.maxDiscount)p.maxDiscount=+BF.maxDiscount;if(BF.promoAutoRenew)p.promoAutoRenew=BF.promoAutoRenew==='on';if(BF.promoMinStock)p.promoMinStock=+BF.promoMinStock;if(BF.freeShipping)p.freeShipping=BF.freeShipping==='on';if(BF.freeShipFrom)p.freeShipFrom=+BF.freeShipFrom}
+  s.version++;s.changed.unshift({v:s.version,who:'Elena K.',when:'7 Sep',what:'Bulk: '+{ads:'ad budgets and ROAS',samples:'sample rules',pricing:'pricing and promos'}[kind]+'.'})});
+ for(const k in BF)delete BF[k];closeModal();S.sel.clear();render();toast(`Applied to ${sel.length} account${sel.length>1?'s':''}. Each got a new settings version; tomorrow’s 06:00 run uses it.`);
+}
+// ---------- sign off and share ----------
+function openSignoff(bid){
+ const b=B[bid];const c=checks(b);const wait=waitingItems(b);const open=wait.filter(x=>!x.done);const acts=actions(b);const passed=SECTIONS.reduce((t,s)=>t+(c[s]||[]).filter(x=>x.st==='ok').length,0);const total=SECTIONS.reduce((t,s)=>t+(c[s]||[]).length,0);const flagged=SECTIONS.flatMap(s=>(c[s]||[]).filter(x=>x.st==='crit'||x.st==='warn'));
+ const slack=`*${b.name} · ${S.todayDate} · run finished ${b.runEnd}*\n${passed} of ${total} checks passed, ${flagged.length} flagged, ${acts.length} actions inside v${b.settings.version}.\n${flagged.slice(0,4).map(f=>'• '+f.n+': '+f.msg.split('. ')[0]+'.').join('\n')}${open.length?'\n'+open.length+' still waiting on a person: '+[...new Set(open.map(x=>x.cat))].join(', '):'\nNothing waiting.'}\nSigned off by Elena K.`;
+ const client=`Hi,\n\nQuick one from this morning’s run on ${b.name}:\n– GMV ${fmtMoney(b.k.gmv,b.sym)} over the last 30 days${b.k.gmvChg!==null?' ('+(b.k.gmvChg>=0?'+':'')+pct(b.k.gmvChg)+' vs the prior 30)':''}, ${fmtN(b.k.videos)} creator videos.\n${flagged.slice(0,2).map(f=>'– '+f.msg.split('. ')[0]+'.').join('\n')}\n\nNothing you need to do today.\n\nElena`;
+ $('#modal').innerHTML=`<div class="modal"><div class="mh"><div class="col" style="gap:2px"><span class="title" style="font-size:18px">Sign off ${esc(b.name)}</span><span class="muted small">A record that a human looked. The work did not wait for it.</span></div><button class="btn quiet" onclick="closeModal()">${icon('x')}</button></div>
+ <div class="mb">
+  <div class="stats"><div class="stat"><span class="h">Checks</span><span class="v">${passed}<span class="muted" style="font-size:13px">/${total}</span></span></div><div class="stat"><span class="h">Actions</span><span class="v">${acts.length}</span></div><div class="stat"><span class="h">Flags</span><span class="v">${flagged.length}</span></div><div class="stat ${open.length?'warn':''}"><span class="h">Still waiting</span><span class="v">${open.length}</span></div></div>
+  <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px 16px">${SECTIONS.map(s=>`<span class="row small"><span class="dot ${sectionStatus(b,s,c)}"></span>${esc(s)}<span class="muted" style="margin-left:auto">${(c[s]||[]).filter(x=>x.st==='ok').length}/${(c[s]||[]).length}</span></span>`).join('')}</div>
+  ${open.length?`<div class="card note warn"><span style="color:var(--warn-ink)">${icon('alerts')}</span><span class="small">${open.length} item${open.length>1?'s':''} still waiting on a person. You can sign off anyway; the 18:00 sweep lists unworked items.</span></div>`:''}
+  <div class="col" style="gap:10px"><span class="h">Share</span>
+   <label class="toggle on" id="shSlack" onclick="this.classList.toggle('on')"><i></i><span>Post to ${esc(b.settings.routing.slack)} now</span></label><div class="pre">${esc(slack)}</div>
+   <label class="toggle" id="shClient" onclick="this.classList.toggle('on')"><i></i><span>Draft a client summary (opens in Gmail, you send)</span></label><div class="pre" style="opacity:.8">${esc(client)}</div>
+   <div class="share-link"><code>ops.brightform.agency/r/${b.id}/2026-09-07/v${b.settings.version}</code><button class="btn sm" onclick="toast('Link copied. Read-only, expires in 7 days.')">Copy link</button></div>
+  </div>
+ </div>
+ <div class="mf"><button class="btn primary" onclick="doSignoff('${b.id}')">${icon('check')}Sign off</button><button class="btn quiet" onclick="closeModal()">Not yet</button><span class="muted small" style="margin-left:auto">Recorded against v${b.settings.version}</span></div></div>`;
+ $('#modal').classList.add('open');
+}
+function closeModal(){$('#modal').classList.remove('open');$('#modal').innerHTML=''}
+function doSignoff(bid){const b=B[bid];const slack=$('#shSlack').classList.contains('on'),cl=$('#shClient').classList.contains('on');b.signed='08:'+String(20+Math.floor(Math.random()*30)).padStart(2,'0');closeModal();render();toast(`Signed off ${b.name}.${slack?' Posted to '+b.settings.routing.slack+'.':''}${cl?' Client draft opened in Gmail.':''}`)}
+document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
+$('#modal').addEventListener('click',e=>{if(e.target.id==='modal')closeModal()});
+if(!location.hash)location.hash='#/accounts';
+render();
+</script>
