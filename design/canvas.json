@@ -1,10 +1,10 @@
 {
   "artboards": [
     { "file": "Portfolio.dc.html", "x": 0, "y": 0, "w": 1440, "h": 1000, "title": "Accounts, this morning" },
-    { "file": "Main.dc.html", "x": 1560, "y": 0, "w": 1440, "h": 1640, "title": "Account view · GreatVita" },
+    { "file": "Main.dc.html", "x": 1560, "y": 0, "w": 1440, "h": 1840, "title": "Account view · GreatVita" },
     { "file": "Setup.dc.html", "x": 0, "y": 1160, "w": 1440, "h": 1000, "title": "Setup · Autonomy" },
-    { "file": "CampaignPanel.dc.html", "x": 3120, "y": 0, "w": 720, "h": 960, "title": "Assisted: campaign registration" },
-    { "file": "ReplyPanel.dc.html", "x": 3960, "y": 0, "w": 720, "h": 1040, "title": "Escalated reply" },
+    { "file": "CampaignPanel.dc.html", "x": 3120, "y": 0, "w": 720, "h": 1040, "title": "Assisted: campaign registration" },
+    { "file": "ReplyPanel.dc.html", "x": 3960, "y": 0, "w": 720, "h": 1120, "title": "Escalated reply" },
     { "file": "FeedAlternate.dc.html", "x": 3120, "y": 1160, "w": 900, "h": 760, "title": "Alternate: feed layout" }
   ],
   "annotations": [
