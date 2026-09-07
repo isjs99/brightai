@@ -1,0 +1,180 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; font-family: 'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif; background: #fdfcfa; color: #1d1c19; font-size: 13px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+    a { color: #3a68ad; text-decoration: none; } a:hover { color: #2d5290; text-decoration: underline; }
+    .mono { font-family: 'IBM Plex Mono', 'SF Mono', Menlo, monospace; }
+    .muted { color: #6b6860; }
+    .h { font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: #6b6860; }
+    .tag { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 4px; font-size: 11px; font-weight: 500; white-space: nowrap; }
+    .btn { height: 36px; padding: 0 14px; border-radius: 5px; border: 1px solid #d6d2c9; background: #fff; font-family: inherit; font-size: 13px; font-weight: 500; color: #1d1c19; display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+    .btn-primary { background: #1d1c19; color: #fff; border-color: #1d1c19; }
+    .btn-quiet { background: transparent; border-color: transparent; color: #6b6860; }
+    .tbl { width: 100%; border-collapse: collapse; }
+    .tbl th { text-align: left; font-size: 11px; font-weight: 500; color: #6b6860; padding: 8px 10px; border-bottom: 1px solid #e3e0d9; letter-spacing: .04em; text-transform: uppercase; }
+    .tbl td { padding: 9px 10px; border-bottom: 1px solid #ecebe6; vertical-align: middle; }
+    .tbl tr:last-child td { border-bottom: 0; }
+    .r { text-align: right; }
+    .chk { display: flex; align-items: center; gap: 10px; }
+  </style>
+</helmet>
+
+<div style="width: 720px; min-height: 960px; background: #fdfcfa; display: flex; flex-direction: column; border-left: 1px solid #e3e0d9;">
+
+  <div style="padding: 20px 24px 16px; border-bottom: 1px solid #e3e0d9; display: flex; flex-direction: column; gap: 8px;">
+    <div style="display: flex; align-items: center; justify-content: space-between;">
+      <span class="tag" style="background: #ebe9e3; color: #514e47;">Assisted · no API · one click for you</span>
+      <span class="muted">Prepared 06:07 · settings v14</span>
+    </div>
+    <div style="font-size: 20px; font-weight: 600; letter-spacing: -.01em;">Register GreatVita DE for the 9.9 Mega Sale</div>
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#7d5410" stroke-width="1.6" stroke-linecap="round"><circle cx="8" cy="8" r="6"></circle><path d="M8 4.5V8l2.5 1.5"></path></svg>
+      <span style="color: #7d5410; font-weight: 500;">Deadline Tue 9 Sep, 23:59 CEST. Two days.</span>
+      <span class="muted">Campaign runs 9 to 11 Sep.</span>
+    </div>
+  </div>
+
+  <div style="padding: 20px 24px; display: flex; flex-direction: column; gap: 22px;">
+
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <span class="h">Eligibility</span>
+      <div style="display: flex; flex-direction: column; gap: 6px;">
+        <div class="chk"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#23643f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3 3 7-7"></path></svg><span>Shop score 4.6, needs 4.5</span></div>
+        <div class="chk"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#23643f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3 3 7-7"></path></svg><span>On-time dispatch 96%, needs 95%</span></div>
+        <div class="chk"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#23643f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3 3 7-7"></path></svg><span>No open violations</span></div>
+        <div class="chk"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#7d5410" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2l6.5 11.5h-13z"></path><path d="M8 6.5v3M8 11.8h.01"></path></svg><span>Campaign price must be at or under the lowest price of the last 30 days. Two SKUs ran a deeper promo in August, so their campaign price is set to that.</span></div>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 8px;">
+      <div style="display: flex; align-items: baseline; justify-content: space-between;">
+        <span class="h">Recommended SKUs</span>
+        <span class="muted">Stock cover assumes 3× normal daily demand for the 3 days</span>
+      </div>
+      <div style="border: 1px solid #e3e0d9; border-radius: 6px; overflow: hidden;">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th style="width: 28px;"></th>
+              <th>SKU</th>
+              <th class="r">Campaign price</th>
+              <th class="r">Margin</th>
+              <th class="r">Stock cover</th>
+              <th class="r">Expected units</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><span style="width: 16px; height: 16px; border-radius: 3px; background: #1d1c19; display: inline-flex; align-items: center; justify-content: center;"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3 3 7-7"></path></svg></span></td>
+              <td>Omega-3 Kapseln 120</td>
+              <td class="r mono">€19.90</td>
+              <td class="r mono">36%</td>
+              <td class="r mono">19 days</td>
+              <td class="r mono">140</td>
+            </tr>
+            <tr>
+              <td><span style="width: 16px; height: 16px; border-radius: 3px; background: #1d1c19; display: inline-flex; align-items: center; justify-content: center;"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3 3 7-7"></path></svg></span></td>
+              <td>Omega-3 Duo</td>
+              <td class="r mono">€34.90</td>
+              <td class="r mono">34%</td>
+              <td class="r mono">14 days</td>
+              <td class="r mono">85</td>
+            </tr>
+            <tr>
+              <td><span style="width: 16px; height: 16px; border-radius: 3px; background: #1d1c19; display: inline-flex; align-items: center; justify-content: center;"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3 3 7-7"></path></svg></span></td>
+              <td>Vitamin D3 4000 IU</td>
+              <td class="r mono">€12.90</td>
+              <td class="r mono">31%</td>
+              <td class="r mono">22 days</td>
+              <td class="r mono">120</td>
+            </tr>
+            <tr>
+              <td><span style="width: 16px; height: 16px; border-radius: 3px; background: #1d1c19; display: inline-flex; align-items: center; justify-content: center;"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3 3 7-7"></path></svg></span></td>
+              <td>Vitamin C 1000 Depot</td>
+              <td class="r mono">€11.90</td>
+              <td class="r mono">33%</td>
+              <td class="r mono">17 days</td>
+              <td class="r mono">70</td>
+            </tr>
+            <tr>
+              <td><span style="width: 16px; height: 16px; border-radius: 3px; background: #1d1c19; display: inline-flex; align-items: center; justify-content: center;"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3 3 7-7"></path></svg></span></td>
+              <td>Eisen + Vitamin C</td>
+              <td class="r mono">€13.90</td>
+              <td class="r mono">30%</td>
+              <td class="r mono">11 days</td>
+              <td class="r mono">55</td>
+            </tr>
+            <tr>
+              <td><span style="width: 16px; height: 16px; border-radius: 3px; background: #1d1c19; display: inline-flex; align-items: center; justify-content: center;"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3 3 7-7"></path></svg></span></td>
+              <td>Kurkuma Komplex</td>
+              <td class="r mono">€16.90</td>
+              <td class="r mono">29%</td>
+              <td class="r mono">9 days</td>
+              <td class="r mono">45</td>
+            </tr>
+            <tr style="color: #6b6860;">
+              <td><span style="width: 16px; height: 16px; border-radius: 3px; border: 1px solid #d6d2c9; display: inline-block;"></span></td>
+              <td>Magnesium 400 <span class="tag" style="background: #f7edd6; color: #7d5410; margin-left: 6px;">stock cover 2 days</span></td>
+              <td class="r mono">€14.90</td>
+              <td class="r mono">32%</td>
+              <td class="r mono" style="color: #7d5410;">2 days</td>
+              <td class="r mono">–</td>
+            </tr>
+            <tr style="color: #6b6860;">
+              <td><span style="width: 16px; height: 16px; border-radius: 3px; border: 1px solid #d6d2c9; display: inline-block;"></span></td>
+              <td>Kollagen Pulver <span class="tag" style="background: #f6e3e1; color: #8f3a38; margin-left: 6px;">margin 24% under floor</span></td>
+              <td class="r mono">€24.90</td>
+              <td class="r mono" style="color: #8f3a38;">24%</td>
+              <td class="r mono">15 days</td>
+              <td class="r mono">–</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px;">
+      <div style="border: 1px solid #e3e0d9; border-radius: 6px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;">
+        <span class="h">Expected GMV</span>
+        <span class="mono" style="font-size: 20px; font-weight: 500;">≈ €6,800</span>
+        <span class="muted">9.9 last year × 1.4, current run rate</span>
+      </div>
+      <div style="border: 1px solid #e3e0d9; border-radius: 6px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;">
+        <span class="h">Blended margin</span>
+        <span class="mono" style="font-size: 20px; font-weight: 500;">33%</span>
+        <span class="muted">Floor 28%, all 6 SKUs clear it</span>
+      </div>
+      <div style="border: 1px solid #e3e0d9; border-radius: 6px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px;">
+        <span class="h">Ads during campaign</span>
+        <span class="mono" style="font-size: 20px; font-weight: 500;">€200 / day</span>
+        <span class="muted">At cap, no increase proposed</span>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 6px;">
+      <span class="h">What happens next</span>
+      <span class="muted">There is no API for campaign registration. The agent has done the selection, the stock check and the margin. You open Seller Center with the list beside you, register the 6 SKUs at these prices, and mark it done here. It then audits the live campaign against this list every morning and corrects drift.</span>
+    </div>
+
+  </div>
+
+  <div style="margin-top: auto; padding: 16px 24px 20px; border-top: 1px solid #e3e0d9; display: flex; align-items: center; gap: 10px;">
+    <button class="btn btn-primary">
+      <span>Open registration in Seller Center</span>
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3H3v10h10v-3M9 3h4v4M13 3L7 9"></path></svg>
+    </button>
+    <button class="btn">Mark as registered</button>
+    <button class="btn btn-quiet" style="margin-left: auto;">Skip this campaign</button>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

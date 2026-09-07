@@ -1,0 +1,402 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; font-family: 'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif; background: #f4f3ef; color: #1d1c19; font-size: 13px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+    a { color: #3a68ad; text-decoration: none; } a:hover { color: #2d5290; text-decoration: underline; }
+    .mono { font-family: 'IBM Plex Mono', 'SF Mono', Menlo, monospace; }
+    .muted { color: #6b6860; }
+    .card { background: #fdfcfa; border: 1px solid #e3e0d9; border-radius: 6px; }
+    .h { font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: #6b6860; }
+    .tag { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 4px; font-size: 11px; font-weight: 500; white-space: nowrap; }
+    .tag-money { background: #f6e3e1; color: #8f3a38; }
+    .tag-price { background: #f7edd6; color: #7d5410; }
+    .tag-client { background: #e4ecf7; color: #2d5290; }
+    .tag-conf { background: #ece6f6; color: #5f4a90; }
+    .tag-assist { background: #ebe9e3; color: #514e47; }
+    .tag-ok { background: #e6f2ea; color: #23643f; }
+    .btn { height: 32px; padding: 0 12px; border-radius: 5px; border: 1px solid #d6d2c9; background: #fff; font-family: inherit; font-size: 12.5px; font-weight: 500; color: #1d1c19; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .btn-primary { background: #1d1c19; color: #fff; border-color: #1d1c19; }
+    .btn-quiet { background: transparent; border-color: transparent; color: #6b6860; }
+    .tbl { width: 100%; border-collapse: collapse; }
+    .tbl th { text-align: left; font-size: 11px; font-weight: 500; color: #6b6860; padding: 8px 12px; border-bottom: 1px solid #e3e0d9; letter-spacing: .04em; text-transform: uppercase; }
+    .tbl td { padding: 10px 12px; border-bottom: 1px solid #ecebe6; vertical-align: top; }
+    .tbl tr:last-child td { border-bottom: 0; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; flex: none; }
+    .item { display: grid; grid-template-columns: 140px minmax(0, 1fr) auto; gap: 20px; padding: 14px 16px; border-bottom: 1px solid #ecebe6; }
+    .item:last-child { border-bottom: 0; }
+    .num { font-family: 'IBM Plex Mono', 'SF Mono', Menlo, monospace; font-size: 26px; font-weight: 500; line-height: 1; letter-spacing: -.01em; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; min-height: 1640px; background: #f4f3ef; display: flex; flex-direction: column;">
+
+  <div style="display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 28px; background: #fdfcfa; border-bottom: 1px solid #e3e0d9; flex: none;">
+    <div style="display: flex; align-items: center; gap: 28px;">
+      <div style="display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 14px;">
+        <span style="width: 18px; height: 18px; border-radius: 4px; background: #1d1c19; display: inline-block;"></span>
+        <span>Brightform Ops</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 4px;">
+        <a href="#" style="padding: 6px 10px; border-radius: 5px; color: #6b6860;">Accounts</a>
+        <a href="#" style="padding: 6px 10px; border-radius: 5px; background: #ebe9e3; color: #1d1c19; font-weight: 500;">GreatVita</a>
+        <a href="#" style="padding: 6px 10px; border-radius: 5px; color: #6b6860;">Setup</a>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <span class="muted">Sun 7 Sep 2026</span>
+      <span class="tag mono" style="background: #ebe9e3; color: #514e47;">settings v14</span>
+      <span style="width: 28px; height: 28px; border-radius: 50%; background: #d9d5cc; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600;">EK</span>
+      <button class="btn btn-primary">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8.5l3 3 7-7"></path></svg>
+        <span>Sign off today</span>
+      </button>
+    </div>
+  </div>
+
+  <div style="padding: 24px 28px 0; display: flex; align-items: flex-end; justify-content: space-between; gap: 24px;">
+    <div style="display: flex; flex-direction: column; gap: 6px;">
+      <div style="display: flex; align-items: center; gap: 10px;">
+        <span style="font-size: 22px; font-weight: 600; letter-spacing: -.01em;">GreatVita</span>
+        <span class="tag mono" style="background: #ebe9e3; color: #514e47;">DE</span>
+        <span class="tag mono" style="background: #ebe9e3; color: #514e47;">FR</span>
+        <span class="muted">AM Elena K. · Approver Sofia R. · #greatvita-ops</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px;">
+        <span class="dot" style="background: #2f8a5a;"></span>
+        <span>Morning run 06:00 CEST finished 06:14. 13 sections, 41 checks. Slack summary posted 06:15.</span>
+        <span class="muted">Not signed off yet.</span>
+      </div>
+    </div>
+    <div style="display: flex; gap: 10px;">
+      <div class="card" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 4px; min-width: 96px;">
+        <span class="h">Actions</span><span class="num">9</span>
+      </div>
+      <div class="card" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 4px; min-width: 96px;">
+        <span class="h">Findings</span><span class="num">4</span>
+      </div>
+      <div class="card" style="padding: 10px 14px; display: flex; flex-direction: column; gap: 4px; min-width: 96px; border-color: #c9a35a; background: #fbf5e8;">
+        <span class="h" style="color: #7d5410;">Waiting on you</span><span class="num" style="color: #7d5410;">5</span>
+      </div>
+    </div>
+  </div>
+
+  <div style="padding: 20px 28px 32px; display: grid; grid-template-columns: minmax(0, 1fr) 372px; gap: 20px; align-items: start;">
+
+    <div style="display: flex; flex-direction: column; gap: 20px; min-width: 0;">
+
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between;">
+          <span class="h" style="color: #1d1c19;">Waiting on you</span>
+          <span class="muted">Four gate categories plus assisted items. Everything else already ran.</span>
+        </div>
+        <div class="card">
+
+          <div class="item">
+            <div style="display: flex; flex-direction: column; gap: 6px; align-items: flex-start;">
+              <span class="tag tag-money">Money out beyond cap</span>
+              <span class="muted">Ads · GMV Max</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <div style="font-weight: 500;">Raise daily budget on “Omega-3 Kapseln DE” from €180 to €240</div>
+              <div class="muted">ROAS 4.1 against a 2.5 floor for 6 days running. Spend hit the €200 daily cap by 15:00 yesterday. The agent rebalanced up to the cap already; €240 needs you.</div>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <button class="btn btn-primary">Raise to €240</button>
+              <button class="btn">Hold at cap</button>
+              <button class="btn btn-quiet">Decline</button>
+            </div>
+          </div>
+
+          <div class="item">
+            <div style="display: flex; flex-direction: column; gap: 6px; align-items: flex-start;">
+              <span class="tag tag-price">Price and margin</span>
+              <span class="muted">Products · Pricing</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <div style="font-weight: 500;">Client asked for 20% off Vitamin D3 4000 IU. Blocked: margin would be 22% against the 28% floor</div>
+              <div class="muted">From Markus’s email, Fri 5 Sep. The executor refused the price. At 12% the margin holds at 29%. Counter-offer drafted.</div>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <button class="btn btn-primary">Counter at 12%</button>
+              <button class="btn">Override floor, 20%</button>
+              <button class="btn btn-quiet">Decline</button>
+            </div>
+          </div>
+
+          <div class="item">
+            <div style="display: flex; flex-direction: column; gap: 6px; align-items: flex-start;">
+              <span class="tag tag-conf">Low confidence reply</span>
+              <span class="muted">CS · DE · 2 of 4</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <div style="font-weight: 500;">Buyer asks whether Omega-3 is safe in week 12 of pregnancy</div>
+              <div class="muted">Hard trigger: health claim. The library has no client position on pregnancy, gap logged. A draft that declines to advise and offers to hold the order is ready.</div>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <button class="btn btn-primary">Review draft</button>
+              <button class="btn btn-quiet">See all 4</button>
+            </div>
+          </div>
+
+          <div class="item">
+            <div style="display: flex; flex-direction: column; gap: 6px; align-items: flex-start;">
+              <span class="tag tag-client">Client facing</span>
+              <span class="muted">Reports</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <div style="font-weight: 500;">Weekly report for w/c 31 Aug is ready to go to Markus</div>
+              <div class="muted">GMV €31,400 (+6% w/w), 34 affiliate videos against a 30 target, sample rate DE 31% below the 45% target. Nothing goes to the client without a person.</div>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <button class="btn btn-primary">Review and send</button>
+              <button class="btn btn-quiet">Later</button>
+            </div>
+          </div>
+
+          <div class="item">
+            <div style="display: flex; flex-direction: column; gap: 6px; align-items: flex-start;">
+              <span class="tag tag-assist">Assisted · no API</span>
+              <span class="muted">Marketing · Campaigns</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <div style="font-weight: 500;">Register for the 9.9 Mega Sale, DE. Deadline Tue 9 Sep 23:59</div>
+              <div class="muted">Eligible. 6 SKUs recommended, 2 excluded on stock cover and margin. Expected ≈ €6,800 GMV over the 3 days. One click in Seller Center once you agree the list.</div>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <button class="btn btn-primary">Open panel</button>
+              <button class="btn btn-quiet">Skip</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between;">
+          <span class="h" style="color: #1d1c19;">What it found</span>
+          <span class="muted">Every swing carries its cause. No cause, no line.</span>
+        </div>
+        <div class="card">
+
+          <div class="item" style="grid-template-columns: 140px minmax(0, 1fr) auto;">
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <span style="font-weight: 500;">GMV yesterday</span>
+              <span class="mono" style="font-size: 18px; color: #8f3a38;">−18%</span>
+              <span class="muted mono">€4,120 vs €5,030</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <div><span style="font-weight: 500;">Cause: LIVE channel −64%</span> <span class="muted">(€1,340 to €480). The Saturday 19:00 live on the schedule did not happen. Video +3%, shop page −2%, no SKU or traffic-source swing.</span></div>
+              <div class="muted">Flagged in LIVE and video at 06:07. Nobody has explained the missed live yet.</div>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <button class="btn">Breakdown</button>
+            </div>
+          </div>
+
+          <div class="item">
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <span style="font-weight: 500;">Stock, DE</span>
+              <span class="mono" style="font-size: 18px; color: #7d5410;">3 SKUs</span>
+              <span class="muted mono">under 40 units</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <div><span style="font-weight: 500;">Magnesium 400, Zink 25, B12 Spray.</span> <span class="muted">Pulled from the “September Bundle” promo and ads paused on Magnesium and Zink at 06:06. Markus notified with a restock one-liner.</span></div>
+              <div class="muted">At current run rate Magnesium 400 sells out Thursday.</div>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <button class="btn">SKUs</button>
+            </div>
+          </div>
+
+          <div class="item">
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <span style="font-weight: 500;">Deliveries</span>
+              <span class="mono" style="font-size: 18px; color: #7d5410;">7 failed</span>
+              <span class="muted mono">last 3 days</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <div><span style="font-weight: 500;">One carrier, one route.</span> <span class="muted">All DHL, all postcodes 20xxx to 22xxx (Hamburg). Not a CS problem. Raised as a logistics finding and tied to the shipping dimension of the shop score, which slipped 0.1.</span></div>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <button class="btn">Orders</button>
+            </div>
+          </div>
+
+          <div class="item">
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <span style="font-weight: 500;">Reviews</span>
+              <span class="mono" style="font-size: 18px; color: #7d5410;">4 negative</span>
+              <span class="muted mono">7 days, one theme</span>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <div><span style="font-weight: 500;">“Kapsel zu groß” on Omega-3, recurring.</span> <span class="muted">Third week the theme shows up. Raised as a product finding rather than a CS one. Worth a line in the client report.</span></div>
+            </div>
+            <div style="display: flex; gap: 8px; align-items: flex-start;">
+              <button class="btn">Reviews</button>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between;">
+          <span class="h" style="color: #1d1c19;">What changed</span>
+          <span class="muted">Executed inside autonomy and guardrails. Override anything and it counts against that family.</span>
+        </div>
+        <div class="card" style="overflow: hidden;">
+          <table class="tbl">
+            <thead>
+              <tr>
+                <th style="width: 56px;">Time</th>
+                <th style="width: 130px;">Family</th>
+                <th>Action</th>
+                <th style="width: 210px;">Guardrail passed</th>
+                <th style="width: 80px;">Result</th>
+                <th style="width: 72px;"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td class="mono muted">06:03</td>
+                <td>Listing hygiene</td>
+                <td>Resubmitted 2 listings that failed audit overnight. Missing “Nettofüllmenge” attribute added from the Sept schema.</td>
+                <td class="muted">Attribute schema 2026-08 · reversible</td>
+                <td><span class="tag tag-ok">Live</span></td>
+                <td><a href="#">Override</a></td>
+              </tr>
+              <tr>
+                <td class="mono muted">06:04</td>
+                <td>Promo renewal</td>
+                <td>Renewed “Omega-3 Duo” for 7 days at the same terms it ran last week (−15%).</td>
+                <td class="muted">Stock 312 &gt; 40 · margin 34% &gt; 28%</td>
+                <td><span class="tag tag-ok">Live</span></td>
+                <td><a href="#">Override</a></td>
+              </tr>
+              <tr>
+                <td class="mono muted">06:05</td>
+                <td>Ads rebalancing</td>
+                <td>Paused “D3 Herbst” (ROAS 1.9, under floor), moved its €60/day to “Omega-3 Kapseln DE”.</td>
+                <td class="muted">Total €200 = daily cap</td>
+                <td><span class="tag tag-ok">Done</span></td>
+                <td><a href="#">Override</a></td>
+              </tr>
+              <tr>
+                <td class="mono muted">06:06</td>
+                <td>Stock guard</td>
+                <td>Pulled 3 low-stock SKUs from “September Bundle”, paused ads on 2. Restock one-liner sent to Markus.</td>
+                <td class="muted">Stock threshold 40</td>
+                <td><span class="tag tag-ok">Done</span></td>
+                <td><a href="#">Override</a></td>
+              </tr>
+              <tr>
+                <td class="mono muted">06:08</td>
+                <td>Creator outreach</td>
+                <td>Re-invited 12 creators whose target-collab plans expired. Retired 5 invites dead for 30 days.</td>
+                <td class="muted">12 of 40 daily sends · 1 msg per creator per week</td>
+                <td><span class="tag tag-ok">Sent</span></td>
+                <td><a href="#">Override</a></td>
+              </tr>
+              <tr>
+                <td class="mono muted">06:08</td>
+                <td>Sample chase</td>
+                <td>Chased 6 creators who took a sample over 14 days ago and have not posted.</td>
+                <td class="muted">Not contacted this week by any other rule</td>
+                <td><span class="tag tag-ok">Sent</span></td>
+                <td><a href="#">Override</a></td>
+              </tr>
+              <tr>
+                <td class="mono muted">06:11</td>
+                <td>CS replies</td>
+                <td>Replied to 19 buyer messages from the library, in the buyer’s language. 4 escalated to you.</td>
+                <td class="muted">19 of 60 auto sends · confidence ≥ 0.85</td>
+                <td><span class="tag tag-ok">Sent</span></td>
+                <td><a href="#">Review</a></td>
+              </tr>
+              <tr>
+                <td class="mono muted">06:12</td>
+                <td>Returns</td>
+                <td>Approved 3 standard returns inside the 30-day window, refunds queued.</td>
+                <td class="muted">Each under €45 goodwill ceiling</td>
+                <td><span class="tag tag-ok">Done</span></td>
+                <td><a href="#">Override</a></td>
+              </tr>
+              <tr>
+                <td class="mono muted">06:13</td>
+                <td>Orders</td>
+                <td>Chased the 3PL on 2 urgent DE orders approaching auto-cancel tomorrow 10:00.</td>
+                <td class="muted">Routing: AM + client contact at T-24h</td>
+                <td><span class="tag tag-ok">Sent</span></td>
+                <td><a href="#">Audit</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 20px;">
+
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <span class="h" style="color: #1d1c19;">What ran</span>
+        <div class="card" style="display: flex; flex-direction: column;">
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; border-bottom: 1px solid #ecebe6;"><span style="display: flex; align-items: center; gap: 8px;"><span class="dot" style="background: #b04a48;"></span>Homepage</span><span class="muted">GMV swing, cause found</span></div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; border-bottom: 1px solid #ecebe6;"><span style="display: flex; align-items: center; gap: 8px;"><span class="dot" style="background: #2f8a5a;"></span>Orders</span><span class="muted">2 urgent, 3PL chased</span></div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; border-bottom: 1px solid #ecebe6;"><span style="display: flex; align-items: center; gap: 8px;"><span class="dot" style="background: #c9a35a;"></span>CS, returns, aftercare</span><span class="muted">19 replied · 4 waiting</span></div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; border-bottom: 1px solid #ecebe6;"><span style="display: flex; align-items: center; gap: 8px;"><span class="dot" style="background: #c9a35a;"></span>Products</span><span class="muted">2 fixed · 3 low stock · 1 price waiting</span></div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; border-bottom: 1px solid #ecebe6;"><span style="display: flex; align-items: center; gap: 8px;"><span class="dot" style="background: #c9a35a;"></span>Logistics</span><span class="muted">DHL Hamburg pattern</span></div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; border-bottom: 1px solid #ecebe6;"><span style="display: flex; align-items: center; gap: 8px;"><span class="dot" style="background: #c9a35a;"></span>Marketing</span><span class="muted">2 actions · budget + campaign waiting</span></div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; border-bottom: 1px solid #ecebe6;"><span style="display: flex; align-items: center; gap: 8px;"><span class="dot" style="background: #2f8a5a;"></span>Affiliate</span><span class="muted">18 messages sent</span></div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; border-bottom: 1px solid #ecebe6;"><span style="display: flex; align-items: center; gap: 8px;"><span class="dot" style="background: #b04a48;"></span>LIVE and video</span><span class="muted">Sat 19:00 live missed</span></div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; border-bottom: 1px solid #ecebe6;"><span style="display: flex; align-items: center; gap: 8px;"><span class="dot" style="background: #d9d5cc;"></span>Growth</span><span class="muted">Weekly sweep, Mon</span></div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; border-bottom: 1px solid #ecebe6;"><span style="display: flex; align-items: center; gap: 8px;"><span class="dot" style="background: #2f8a5a;"></span>Analytics and reports</span><span class="muted">Rank #4 in category, held</span></div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; border-bottom: 1px solid #ecebe6;"><span style="display: flex; align-items: center; gap: 8px;"><span class="dot" style="background: #2f8a5a;"></span>Account health</span><span class="muted">Score 4.6 · shipping −0.1</span></div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; border-bottom: 1px solid #ecebe6;"><span style="display: flex; align-items: center; gap: 8px;"><span class="dot" style="background: #2f8a5a;"></span>Finance</span><span class="muted">Payout €12,480 Wed, reconciles</span></div>
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 9px 14px;"><span style="display: flex; align-items: center; gap: 8px;"><span class="dot" style="background: #c9a35a;"></span>Cruva</span><span class="muted">Video stage leaking, DE</span></div>
+        </div>
+      </div>
+
+      <div style="display: flex; flex-direction: column; gap: 10px;">
+        <span class="h" style="color: #1d1c19;">The three numbers</span>
+        <div class="card" style="display: flex; flex-direction: column;">
+          <div style="padding: 14px 16px; border-bottom: 1px solid #ecebe6; display: flex; flex-direction: column; gap: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline;"><span>Override rate, 14 days</span><span class="num" style="font-size: 22px;">3.1%</span></div>
+            <div class="muted">Down from 7.4%. Highest family: price changes 18%. Lowest: listing hygiene, creator tagging, returns at 0%.</div>
+          </div>
+          <div style="padding: 14px 16px; border-bottom: 1px solid #ecebe6; display: flex; flex-direction: column; gap: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline;"><span>Escalation rate on replies</span><span class="num" style="font-size: 22px;">17%</span></div>
+            <div class="muted">4 of 23 today. Falling since the library filled on 28 Aug. 3 gaps logged this week, 2 suggested entries waiting for your approval.</div>
+          </div>
+          <div style="padding: 14px 16px; display: flex; flex-direction: column; gap: 6px;">
+            <div style="display: flex; justify-content: space-between; align-items: baseline;"><span>Minutes on this account, per day</span><span class="num" style="font-size: 22px;">11</span></div>
+            <div class="muted">Target under 8. Was 14 last week, 26 before the pilot.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 8px;">
+        <span class="h">Run record</span>
+        <div style="display: flex; flex-direction: column; gap: 4px;" class="muted">
+          <div style="display: flex; justify-content: space-between;"><span>Snapshot</span><span class="mono">2026-09-07 06:00:41</span></div>
+          <div style="display: flex; justify-content: space-between;"><span>Settings version</span><span class="mono">v14 (Elena, 3 Sep)</span></div>
+          <div style="display: flex; justify-content: space-between;"><span>Sources synced</span><span class="mono">9 of 9</span></div>
+          <div style="display: flex; justify-content: space-between;"><span>Writes</span><span class="mono">31 ok · 0 failed</span></div>
+          <div style="display: flex; justify-content: space-between;"><span>Audit log</span><a href="#">Open</a></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+</body>
+</html>

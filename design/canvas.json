@@ -1,0 +1,18 @@
+{
+  "artboards": [
+    { "file": "Portfolio.dc.html", "x": 0, "y": 0, "w": 1440, "h": 1000, "title": "Accounts, this morning" },
+    { "file": "Main.dc.html", "x": 1560, "y": 0, "w": 1440, "h": 1640, "title": "Account view · GreatVita" },
+    { "file": "Setup.dc.html", "x": 0, "y": 1160, "w": 1440, "h": 1000, "title": "Setup · Autonomy" },
+    { "file": "CampaignPanel.dc.html", "x": 3120, "y": 0, "w": 720, "h": 960, "title": "Assisted: campaign registration" },
+    { "file": "ReplyPanel.dc.html", "x": 3960, "y": 0, "w": 720, "h": 1040, "title": "Escalated reply" },
+    { "file": "FeedAlternate.dc.html", "x": 3120, "y": 1160, "w": 900, "h": 760, "title": "Alternate: feed layout" }
+  ],
+  "annotations": [
+    { "id": "note-landing", "x": 0, "y": -150, "w": 420, "text": "Landing after login. Spec §1 and §9: 19 accounts, sign-off is a record not a gate, and the 'nobody looking' guard surfaces as a problem rather than a green tick." },
+    { "id": "note-account", "x": 1560, "y": -150, "w": 460, "text": "The account view, spec §1 and §4. Four blocks: waiting on you (the four gate categories from §2 plus assisted), what it found (every swing carries its cause), what changed (with the guardrail each action passed), what ran (13 sections)." },
+    { "id": "note-setup", "x": 0, "y": 1010, "w": 420, "text": "Setup, spec §3. Autonomy tab shown: one row per job family, four settings, override count per family as the number that justifies dialling up. Other five tabs are just the tab strip for now." },
+    { "id": "note-panels", "x": 3120, "y": -150, "w": 560, "text": "The two panels the spec singles out. Campaign registration (§4 Marketing, §5 assisted manual): a human decision in 20 seconds. Escalated reply (§6): message, why it escalated, what was retrieved, the draft, and the library gap it logged." },
+    { "id": "note-alt", "x": 3120, "y": 1010, "w": 420, "text": "One low-fi alternate for the account view, kept beside the deliverable rather than instead of it. Pick if you prefer a chronological read over a to-do read." }
+  ],
+  "launch": { "view": "canvas" }
+}

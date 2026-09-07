@@ -1,0 +1,215 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+  <style>
+    body { margin: 0; font-family: 'IBM Plex Sans', 'Helvetica Neue', Arial, sans-serif; background: #f4f3ef; color: #1d1c19; font-size: 13px; line-height: 1.45; -webkit-font-smoothing: antialiased; }
+    a { color: #3a68ad; text-decoration: none; } a:hover { color: #2d5290; text-decoration: underline; }
+    .mono { font-family: 'IBM Plex Mono', 'SF Mono', Menlo, monospace; }
+    .muted { color: #6b6860; }
+    .card { background: #fdfcfa; border: 1px solid #e3e0d9; border-radius: 6px; }
+    .h { font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; color: #6b6860; }
+    .tag { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 4px; font-size: 11px; font-weight: 500; white-space: nowrap; }
+    .btn { height: 32px; padding: 0 12px; border-radius: 5px; border: 1px solid #d6d2c9; background: #fff; font-family: inherit; font-size: 12.5px; font-weight: 500; color: #1d1c19; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .btn-primary { background: #1d1c19; color: #fff; border-color: #1d1c19; }
+    .tbl { width: 100%; border-collapse: collapse; }
+    .tbl th { text-align: left; font-size: 11px; font-weight: 500; color: #6b6860; padding: 8px 12px; border-bottom: 1px solid #e3e0d9; letter-spacing: .04em; text-transform: uppercase; }
+    .tbl td { padding: 10px 12px; border-bottom: 1px solid #ecebe6; vertical-align: middle; }
+    .tbl tr:last-child td { border-bottom: 0; }
+    .seg { display: inline-flex; border: 1px solid #d6d2c9; border-radius: 5px; overflow: hidden; background: #fff; }
+    .seg span { padding: 0 10px; height: 28px; display: inline-flex; align-items: center; font-size: 12px; color: #6b6860; border-right: 1px solid #e3e0d9; white-space: nowrap; }
+    .seg span:last-child { border-right: 0; }
+    .seg .on { background: #1d1c19; color: #fff; font-weight: 500; }
+    .tab { padding: 10px 2px; margin-right: 24px; color: #6b6860; border-bottom: 2px solid transparent; white-space: nowrap; }
+    .tab.on { color: #1d1c19; font-weight: 500; border-bottom-color: #1d1c19; }
+    .r { text-align: right; }
+  </style>
+</helmet>
+
+<div style="width: 1440px; min-height: 1000px; background: #f4f3ef; display: flex; flex-direction: column;">
+
+  <div style="display: flex; align-items: center; justify-content: space-between; height: 56px; padding: 0 28px; background: #fdfcfa; border-bottom: 1px solid #e3e0d9; flex: none;">
+    <div style="display: flex; align-items: center; gap: 28px;">
+      <div style="display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 14px;">
+        <span style="width: 18px; height: 18px; border-radius: 4px; background: #1d1c19; display: inline-block;"></span>
+        <span>Brightform Ops</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 4px;">
+        <a href="#" style="padding: 6px 10px; border-radius: 5px; color: #6b6860;">Accounts</a>
+        <a href="#" style="padding: 6px 10px; border-radius: 5px; color: #6b6860;">GreatVita</a>
+        <a href="#" style="padding: 6px 10px; border-radius: 5px; background: #ebe9e3; color: #1d1c19; font-weight: 500;">Setup</a>
+      </div>
+    </div>
+    <div style="display: flex; align-items: center; gap: 12px;">
+      <span class="tag mono" style="background: #ebe9e3; color: #514e47;">settings v14</span>
+      <span style="width: 28px; height: 28px; border-radius: 50%; background: #d9d5cc; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600;">EK</span>
+      <button class="btn btn-primary">Save as v15</button>
+    </div>
+  </div>
+
+  <div style="padding: 24px 28px 0; display: flex; flex-direction: column; gap: 4px;">
+    <div style="display: flex; align-items: center; gap: 10px;">
+      <span style="font-size: 22px; font-weight: 600; letter-spacing: -.01em;">Setup · GreatVita</span>
+      <span class="tag mono" style="background: #ebe9e3; color: #514e47;">DE</span>
+      <span class="tag mono" style="background: #ebe9e3; color: #514e47;">FR</span>
+    </div>
+    <span class="muted">Configured once, then mostly untouched. Every change is versioned, and every daily run records the version it ran under.</span>
+  </div>
+
+  <div style="padding: 16px 28px 0; display: flex; border-bottom: 1px solid #e3e0d9; margin: 0 0 20px;">
+    <span class="tab">Commercials</span>
+    <span class="tab">Targets</span>
+    <span class="tab on">Autonomy</span>
+    <span class="tab">Guardrails</span>
+    <span class="tab">Voice and knowledge</span>
+    <span class="tab">Routing</span>
+  </div>
+
+  <div style="padding: 0 28px 32px; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; align-items: start;">
+
+    <div style="display: flex; flex-direction: column; gap: 12px;">
+      <div style="display: flex; align-items: baseline; justify-content: space-between;">
+        <span>One row per job family. Off, propose only, act and notify, act silently. The override column is the number that justifies dialling up.</span>
+        <span class="muted">Guardrails apply whatever is set here. The executor refuses in code.</span>
+      </div>
+
+      <div class="card" style="overflow: hidden;">
+        <table class="tbl">
+          <thead>
+            <tr>
+              <th>Job family</th>
+              <th>Setting</th>
+              <th class="r">Actions 14d</th>
+              <th class="r">Overridden</th>
+              <th>Last override</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><div style="font-weight: 500;">Listing hygiene</div><div class="muted">Attributes, images, category, resubmit</div></td>
+              <td><span class="seg"><span>Off</span><span>Propose</span><span>Act, notify</span><span class="on">Act silently</span></span></td>
+              <td class="r mono">61</td>
+              <td class="r mono">0</td>
+              <td class="muted">None in 14 days</td>
+              <td></td>
+            </tr>
+            <tr>
+              <td><div style="font-weight: 500;">Promo renewal, same terms</div><div class="muted">Duplicate and set live, stock and margin permitting</div></td>
+              <td><span class="seg"><span>Off</span><span>Propose</span><span class="on">Act, notify</span><span>Act silently</span></span></td>
+              <td class="r mono">14</td>
+              <td class="r mono">1</td>
+              <td class="muted">Elena, 29 Aug, ended a promo early</td>
+              <td><span class="tag" style="background: #e6f2ea; color: #23643f;">Ready to dial up</span></td>
+            </tr>
+            <tr>
+              <td><div style="font-weight: 500;">Price changes inside floor</div><div class="muted">Never below the margin floor, never over the discount ceiling</div></td>
+              <td><span class="seg"><span>Off</span><span class="on">Propose</span><span>Act, notify</span><span>Act silently</span></span></td>
+              <td class="r mono">22</td>
+              <td class="r mono" style="color: #8f3a38; font-weight: 500;">4</td>
+              <td class="muted">Elena, 4 Sep, held a price the client wanted kept</td>
+              <td><span class="muted">18%, stays on propose</span></td>
+            </tr>
+            <tr>
+              <td><div style="font-weight: 500;">Ads rebalancing inside cap</div><div class="muted">Pause under the ROAS floor, shift budget, never above the daily cap</div></td>
+              <td><span class="seg"><span>Off</span><span>Propose</span><span class="on">Act, notify</span><span>Act silently</span></span></td>
+              <td class="r mono">29</td>
+              <td class="r mono">2</td>
+              <td class="muted">Elena, 2 Sep, un-paused a campaign</td>
+              <td></td>
+            </tr>
+            <tr>
+              <td><div style="font-weight: 500;">CS replies</div><div class="muted">From the knowledge library, above confidence, in the buyer’s language</div></td>
+              <td><span class="seg"><span>Off</span><span>Propose</span><span class="on">Act, notify</span><span>Act silently</span></span></td>
+              <td class="r mono">117</td>
+              <td class="r mono">3</td>
+              <td class="muted">Draft-only measurement ended 28 Aug at 93% agreement</td>
+              <td></td>
+            </tr>
+            <tr>
+              <td><div style="font-weight: 500;">Affiliate replies</div><div class="muted">Creator inbox, commission and sample questions</div></td>
+              <td><span class="seg"><span>Off</span><span class="on">Propose</span><span>Act, notify</span><span>Act silently</span></span></td>
+              <td class="r mono">41</td>
+              <td class="r mono">6</td>
+              <td class="muted">Draft-only until 12 Sep, currently 85% agreement</td>
+              <td><span class="muted">Measuring</span></td>
+            </tr>
+            <tr>
+              <td><div style="font-weight: 500;">Creator outreach and re-invites</div><div class="muted">Open and target collaboration, retire dead invites</div></td>
+              <td><span class="seg"><span>Off</span><span>Propose</span><span>Act, notify</span><span class="on">Act silently</span></span></td>
+              <td class="r mono">210</td>
+              <td class="r mono">0</td>
+              <td class="muted">None in 14 days</td>
+              <td></td>
+            </tr>
+            <tr>
+              <td><div style="font-weight: 500;">Sample approvals under ceiling</div><div class="muted">Eligibility rules from the library, value ceiling from guardrails</div></td>
+              <td><span class="seg"><span>Off</span><span>Propose</span><span class="on">Act, notify</span><span>Act silently</span></span></td>
+              <td class="r mono">33</td>
+              <td class="r mono">1</td>
+              <td class="muted">Sofia, 1 Sep, declined a creator</td>
+              <td></td>
+            </tr>
+            <tr>
+              <td><div style="font-weight: 500;">Returns inside policy</div><div class="muted">Standard returns in window, refunds under goodwill ceiling</div></td>
+              <td><span class="seg"><span>Off</span><span>Propose</span><span>Act, notify</span><span class="on">Act silently</span></span></td>
+              <td class="r mono">48</td>
+              <td class="r mono">0</td>
+              <td class="muted">None in 14 days</td>
+              <td></td>
+            </tr>
+            <tr>
+              <td><div style="font-weight: 500;">Creator tagging and lists</div><div class="muted">Cruva tags, groups, list building</div></td>
+              <td><span class="seg"><span>Off</span><span>Propose</span><span>Act, notify</span><span class="on">Act silently</span></span></td>
+              <td class="r mono">95</td>
+              <td class="r mono">0</td>
+              <td class="muted">None in 14 days</td>
+              <td></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="muted">Not configurable here: money out beyond cap, price outside the floor, anything client facing, and replies below confidence always wait for a person.</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 20px;">
+      <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+        <span class="h">Guardrails in force, v14</span>
+        <div style="display: flex; flex-direction: column; gap: 5px;">
+          <div style="display: flex; justify-content: space-between;"><span class="muted">Margin floor</span><span class="mono">28%</span></div>
+          <div style="display: flex; justify-content: space-between;"><span class="muted">Max discount</span><span class="mono">25%</span></div>
+          <div style="display: flex; justify-content: space-between;"><span class="muted">Ads cap, daily / monthly</span><span class="mono">€200 / €5,000</span></div>
+          <div style="display: flex; justify-content: space-between;"><span class="muted">Auto replies per day</span><span class="mono">60</span></div>
+          <div style="display: flex; justify-content: space-between;"><span class="muted">Messages per creator</span><span class="mono">1 / week</span></div>
+          <div style="display: flex; justify-content: space-between;"><span class="muted">Sample value ceiling</span><span class="mono">€35</span></div>
+          <div style="display: flex; justify-content: space-between;"><span class="muted">Goodwill without asking</span><span class="mono">€45</span></div>
+          <div style="display: flex; justify-content: space-between;"><span class="muted">No promo renewal under</span><span class="mono">40 units</span></div>
+          <div style="display: flex; justify-content: space-between;"><span class="muted">Blackout</span><span class="mono">22:00–07:00 local</span></div>
+        </div>
+        <a href="#">Edit in Guardrails</a>
+      </div>
+
+      <div class="card" style="padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+        <span class="h">Versions</span>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; gap: 10px;"><span class="mono muted" style="width: 30px; flex: none;">v14</span><span><span style="font-weight: 500;">Elena, 3 Sep.</span> <span class="muted">CS replies from propose to act and notify after the draft-only run.</span></span></div>
+          <div style="display: flex; gap: 10px;"><span class="mono muted" style="width: 30px; flex: none;">v13</span><span><span style="font-weight: 500;">Sofia, 28 Aug.</span> <span class="muted">Sample value ceiling €30 to €35.</span></span></div>
+          <div style="display: flex; gap: 10px;"><span class="mono muted" style="width: 30px; flex: none;">v12</span><span><span style="font-weight: 500;">Elena, 21 Aug.</span> <span class="muted">Creator outreach to act silently, 0 overrides in 14 days.</span></span></div>
+          <div style="display: flex; gap: 10px;"><span class="mono muted" style="width: 30px; flex: none;">v11</span><span><span style="font-weight: 500;">Elena, 18 Aug.</span> <span class="muted">September targets: GMV €120k, 30 videos/week, ROAS floor 2.5.</span></span></div>
+        </div>
+        <a href="#">Full history</a>
+      </div>
+    </div>
+
+  </div>
+</div>
+</x-dc>
+</body>
+</html>
