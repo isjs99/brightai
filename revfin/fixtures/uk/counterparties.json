@@ -1,0 +1,122 @@
+[
+  {
+    "id": "cp-acme",
+    "name": "Acme Beauty Ltd",
+    "state": "created",
+    "accounts": [
+      {
+        "id": "cpa-acme",
+        "currency": "GBP",
+        "type": "external"
+      }
+    ]
+  },
+  {
+    "id": "cp-glow",
+    "name": "Glow Skincare GmbH",
+    "state": "created",
+    "accounts": [
+      {
+        "id": "cpa-glow",
+        "currency": "EUR",
+        "type": "external"
+      }
+    ]
+  },
+  {
+    "id": "cp-payroll-as",
+    "name": "A Smith",
+    "state": "created",
+    "accounts": [
+      {
+        "id": "cpa-as",
+        "currency": "GBP",
+        "type": "external"
+      }
+    ]
+  },
+  {
+    "id": "cp-payroll-jl",
+    "name": "J Lee",
+    "state": "created",
+    "accounts": [
+      {
+        "id": "cpa-jl",
+        "currency": "GBP",
+        "type": "external"
+      }
+    ]
+  },
+  {
+    "id": "cp-hmrc",
+    "name": "HMRC Cumbernauld",
+    "state": "created",
+    "accounts": [
+      {
+        "id": "cpa-hmrc",
+        "currency": "GBP",
+        "type": "external"
+      }
+    ]
+  },
+  {
+    "id": "cp-mia",
+    "name": "Mia Chen",
+    "state": "created",
+    "accounts": [
+      {
+        "id": "cpa-mia",
+        "currency": "GBP",
+        "type": "external"
+      }
+    ]
+  },
+  {
+    "id": "cp-wework",
+    "name": "WeWork Shoreditch",
+    "state": "created",
+    "accounts": [
+      {
+        "id": "cpa-wework",
+        "currency": "GBP",
+        "type": "external"
+      }
+    ]
+  },
+  {
+    "id": "cp-lightbox",
+    "name": "Studio Lightbox Ltd",
+    "state": "created",
+    "accounts": [
+      {
+        "id": "cpa-lightbox",
+        "currency": "GBP",
+        "type": "external"
+      }
+    ]
+  },
+  {
+    "id": "cp-de",
+    "name": "Brightform Social Media UG (haftungsbeschraenkt)",
+    "state": "created",
+    "accounts": [
+      {
+        "id": "acc-de-eur-main",
+        "currency": "EUR",
+        "type": "revolut"
+      }
+    ]
+  },
+  {
+    "id": "cp-jpatel",
+    "name": "J Patel",
+    "state": "created",
+    "accounts": [
+      {
+        "id": "cpa-jpatel",
+        "currency": "GBP",
+        "type": "external"
+      }
+    ]
+  }
+]

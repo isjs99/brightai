@@ -1,0 +1,42 @@
+[
+  {
+    "id": "acc-uk-gbp-main",
+    "name": "Main GBP",
+    "currency": "GBP",
+    "state": "active",
+    "balance": 38420.55,
+    "public": false,
+    "created_at": "2025-03-01T10:00:00Z",
+    "updated_at": "2026-09-10T08:00:00Z"
+  },
+  {
+    "id": "acc-uk-gbp-savings",
+    "name": "Savings GBP",
+    "currency": "GBP",
+    "state": "active",
+    "balance": 5000.0,
+    "public": false,
+    "created_at": "2025-03-01T10:00:00Z",
+    "updated_at": "2026-09-10T08:00:00Z"
+  },
+  {
+    "id": "acc-uk-eur",
+    "name": "EUR",
+    "currency": "EUR",
+    "state": "active",
+    "balance": 6240.1,
+    "public": false,
+    "created_at": "2025-03-01T10:00:00Z",
+    "updated_at": "2026-09-10T08:00:00Z"
+  },
+  {
+    "id": "acc-uk-usd",
+    "name": "USD",
+    "currency": "USD",
+    "state": "active",
+    "balance": 1150.0,
+    "public": false,
+    "created_at": "2025-06-01T10:00:00Z",
+    "updated_at": "2026-09-10T08:00:00Z"
+  }
+]

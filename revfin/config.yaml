@@ -1,0 +1,76 @@
+# revfin configuration. No secrets in here: credentials live in .env.
+#
+# Adding a Revolut account = add an entity block below + REVOLUT_<SLUG>_* in .env.
+
+settings:
+  env: sandbox              # overridden by REVOLUT_ENV
+  db_path: data/revfin.db
+  tokens_path: tokens.json
+  exports_dir: data/exports
+  default_since: 2026-01-01 # first sync pulls from here
+  sync_overlap_days: 3      # re-pull this many days before the last sync to catch state changes
+
+entities:
+  uk:
+    name: Brightform Social Media Limited
+    base_currency: GBP
+    # How this entity shows up as a counterparty name in the other entity's books.
+    # Transfers matching it (or landing in this entity's own accounts) are tagged intercompany.
+    intercompany_pattern: "brightform.*(limited|ltd)"
+  de:
+    name: Brightform Social Media UG (haftungsbeschraenkt)
+    base_currency: EUR
+    intercompany_pattern: "brightform.*(ug|haftungsbeschr)"
+
+# Optional nicknames by Revolut account id (shown in balances and summaries).
+accounts: {}
+#  "9a1b2c3d-...": UK Main GBP
+
+# Fallback FX rates when the /rate call has not been synced yet. Revolut's live
+# rate wins whenever it is stored. Keys are FROM_TO.
+fx:
+  rates:
+    EUR_GBP: 0.85
+    USD_GBP: 0.78
+    GBP_EUR: 1.17
+    USD_EUR: 0.92
+
+unusual:
+  large_outgoing: 5000      # in the entity's base currency
+  month_on_month_pct: 40
+
+# Category rules. Regex, case-insensitive, first match wins. Match keys:
+# merchant_name, counterparty_name, reference, type, direction (in|out).
+# Built-ins run first: type fee -> bank_fee, exchange -> fx, transfers between
+# the entity's own accounts -> internal, transfers to the other entity -> intercompany.
+categories:
+  - id: payroll_ref
+    category: payroll
+    match: { reference: "salary|payroll|wages|lohn|gehalt", direction: out }
+  - id: tax_authorities
+    category: tax
+    match: { counterparty_name: "hmrc|finanzamt|companies house|bundeskasse" }
+  - id: tax_ref
+    category: tax
+    match: { reference: "\\b(vat|paye|corporation tax|umsatzsteuer|lohnsteuer)\\b", direction: out }
+  - id: office
+    category: office_rent
+    match: { counterparty_name: "wework|regus|mindspace|spaces" }
+  - id: ads_platforms
+    category: ads
+    match: { merchant_name: "tiktok ads|tiktok for business|meta ads|facebook|facebk|google ads|linkedin" }
+  - id: software_card
+    category: software
+    match: { merchant_name: "adobe|notion|slack|google workspace|gsuite|figma|canva|openai|anthropic|github|zoom|apple\\.com|microsoft|dropbox|1password|cruva|windsor|tldv|capcut" }
+  - id: travel
+    category: travel
+    match: { merchant_name: "trainline|uber|bolt|ryanair|easyjet|british airways|lufthansa|deutsche bahn|airbnb|booking\\.com|hotel" }
+  - id: client_transfer_in
+    category: client_receipt
+    match: { type: transfer, direction: in, reference: "invoice|inv[- ]?\\d|retainer|commission" }
+  - id: contractor_ref
+    category: contractor
+    match: { reference: "contractor|freelance|invoice", direction: out }
+  - id: owner_drawings
+    category: owner
+    match: { reference: "drawings|dividend|director loan|owner", direction: out }

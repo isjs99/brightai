@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Copy to ~/Library/LaunchAgents/ and replace /Users/you/brightai/revfin with the real path. -->
+  <key>Label</key>
+  <string>com.brightform.revfin</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/you/brightai/revfin/scripts/sync-and-summarise.sh</string>
+  </array>
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Hour</key>
+    <integer>7</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>/Users/you/brightai/revfin/data/revfin.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/you/brightai/revfin/data/revfin.log</string>
+  <key>RunAtLoad</key>
+  <false/>
+</dict>
+</plist>
