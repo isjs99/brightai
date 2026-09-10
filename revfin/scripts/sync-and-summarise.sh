@@ -22,4 +22,8 @@ echo "== $(date -u +%FT%TZ) revfin sync"
 status=$?
 echo "== $(date -u +%FT%TZ) revfin summary --month $MONTH"
 "$REVFIN" summary --month "$MONTH" || status=$?
+if grep -qE '^REVFIN_SHEET_ID=.+' .env 2>/dev/null; then
+  echo "== $(date -u +%FT%TZ) revfin sheets push"
+  "$REVFIN" sheets push || status=$?
+fi
 exit $status

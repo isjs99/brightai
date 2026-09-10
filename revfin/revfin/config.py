@@ -121,6 +121,17 @@ class Rule:
     direction: str | None = None  # "in" | "out" | None
 
 
+PNL_SECTIONS = ["revenue", "cost_of_sales", "opex", "tax", "equity"]
+EXCLUDED_FROM_PNL = ("fx", "internal", "intercompany")
+
+
+@dataclass
+class PnlLine:
+    category: str
+    section: str
+    label: str
+
+
 @dataclass
 class Settings:
     home: Path
@@ -138,7 +149,24 @@ class Settings:
     account_nicknames: dict[str, str]
     entities: dict[str, Entity]
     rules: list[Rule]
+    group_currency: str = "GBP"
+    pnl_lines: list[PnlLine] = field(default_factory=list)
+    sheet_id_env: str = "REVFIN_SHEET_ID"
+    service_account_env: str = "GOOGLE_SERVICE_ACCOUNT_FILE"
     raw: dict = field(default_factory=dict)
+
+    def pnl_line_for(self, category: str) -> PnlLine | None:
+        for line in self.pnl_lines:
+            if line.category == category:
+                return line
+        return None
+
+    def sheet_id(self, environ: dict | None = None) -> str | None:
+        return (os.environ if environ is None else environ).get(self.sheet_id_env) or None
+
+    def service_account_file(self, environ: dict | None = None) -> Path | None:
+        value = (os.environ if environ is None else environ).get(self.service_account_env)
+        return (self.home / Path(value).expanduser()).resolve() if value else None
 
     def entity(self, slug: str) -> Entity:
         try:
@@ -199,6 +227,23 @@ def _parse_rules(items: list | None) -> list[Rule]:
     return rules
 
 
+def _parse_pnl(raw: dict | None) -> list[PnlLine]:
+    lines: list[PnlLine] = []
+    seen: set[str] = set()
+    for i, item in enumerate((raw or {}).get("lines") or []):
+        if not isinstance(item, dict) or not item.get("category") or not item.get("section"):
+            raise ConfigError(f"pnl.lines #{i + 1} needs 'category' and 'section'")
+        if item["section"] not in PNL_SECTIONS:
+            raise ConfigError(f"pnl.lines '{item['category']}': section must be one of {PNL_SECTIONS}")
+        if item["category"] in seen:
+            raise ConfigError(f"pnl.lines: category '{item['category']}' mapped twice")
+        seen.add(item["category"])
+        lines.append(PnlLine(str(item["category"]), str(item["section"]), str(item.get("label") or item["category"])))
+    if "uncategorised" not in seen:
+        lines.append(PnlLine("uncategorised", "opex", "Uncategorised"))
+    return lines
+
+
 def _parse_fx(raw: dict | None) -> dict[tuple[str, str], float]:
     rates: dict[tuple[str, str], float] = {}
     for key, value in (raw or {}).items():
@@ -250,6 +295,8 @@ def load(home: str | os.PathLike | None = None, environ: dict | None = None) -> 
         return (root / Path(settings_raw.get(key) or default)).resolve()
 
     unusual = raw.get("unusual") or {}
+    pnl_raw = raw.get("pnl") or {}
+    sheets_raw = raw.get("sheets") or {}
     return Settings(
         home=root,
         env=env,
@@ -266,5 +313,9 @@ def load(home: str | os.PathLike | None = None, environ: dict | None = None) -> 
         account_nicknames={str(k): str(v) for k, v in (raw.get("accounts") or {}).items()},
         entities=entities,
         rules=_parse_rules(raw.get("categories")),
+        group_currency=str(pnl_raw.get("group_currency") or "GBP").upper(),
+        pnl_lines=_parse_pnl(pnl_raw),
+        sheet_id_env=str(sheets_raw.get("spreadsheet_id_env") or "REVFIN_SHEET_ID"),
+        service_account_env=str(sheets_raw.get("service_account_env") or "GOOGLE_SERVICE_ACCOUNT_FILE"),
         raw=raw,
     )

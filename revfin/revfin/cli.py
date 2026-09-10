@@ -19,9 +19,12 @@ from .config import load as load_settings
 from .db import DB
 from .export import export_rows, render
 from .fixtures import load_fixtures
+from .pnl import build_pnl
+from .sheets import SheetsApi, SheetsError, load_service, push_workbook, resolve_target, service_account_email
 from .summary import write_summary
 from .sync import sync_entity
 from .util import fmt_money, parse_date, utcnow
+from .workbook import build_workbook, write_xlsx
 
 app = typer.Typer(
     add_completion=False,
@@ -277,6 +280,115 @@ def categorise(entity: Optional[str] = typer.Option(None, "--entity", "-e")) -> 
             typer.echo(f"[{ent.slug}] {summary_text}")
     finally:
         db.close()
+
+
+def _month_or_none(value: Optional[str], flag: str) -> Optional[str]:
+    if value is None:
+        return None
+    try:
+        datetime.strptime(value, "%Y-%m")
+    except ValueError:
+        fail(f"{flag} must look like 2026-08")
+    return value
+
+
+@app.command()
+def pnl(
+    from_: Optional[str] = typer.Option(None, "--from", help="First month YYYY-MM (default: first month with data)."),
+    to: Optional[str] = typer.Option(None, "--to", help="Last month YYYY-MM (default: last month with data)."),
+    xlsx: Optional[Path] = typer.Option(None, "--xlsx", help="Workbook path (default: data/exports/pnl-<from>-<to>.xlsx)."),
+    json_path: Optional[Path] = typer.Option(None, "--json", help="Also write the figures as JSON here."),
+    no_xlsx: bool = typer.Option(False, "--no-xlsx", help="Skip the workbook, just print the table."),
+) -> None:
+    """Cash-basis P&L by month per entity and consolidated, with analytics, as an .xlsx workbook."""
+    s = state.settings
+    start, end = _month_or_none(from_, "--from"), _month_or_none(to, "--to")
+    db = _db()
+    try:
+        model = build_pnl(s, db, start, end)
+    finally:
+        db.close()
+    _print_pnl_table(model)
+    if json_path:
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(__import__("json").dumps(model.to_json(), indent=2))
+        typer.echo(f"wrote {json_path}")
+    if not no_xlsx:
+        path = xlsx or s.exports_dir / f"pnl-{model.months[0]}-to-{model.months[-1]}.xlsx"
+        write_xlsx(build_workbook(model, s.account_nicknames), path)
+        typer.echo(f"wrote {path} ({len(model.ledger)} ledger rows, {len(model.months)} months)")
+
+
+def _print_pnl_table(model) -> None:
+    for v in model.all_views():
+        typer.echo(f"{v.name} ({v.currency})")
+        header = f"  {'':<22}" + "".join(f"{m:>12}" for m in model.months)
+        typer.echo(header)
+        for label, fn in (("Revenue", v.revenue), ("Gross profit", v.gross_profit),
+                          ("Operating result", v.operating_result), ("Net cash result", v.net_result)):
+            typer.echo(f"  {label:<22}" + "".join(f"{fn(m):>12,.0f}" for m in model.months))
+        typer.echo(f"  {'Cash at month end':<22}" + "".join(
+            f"{v.cash_total.get(m):>12,.0f}" if v.cash_total.get(m) is not None else f"{'n/a':>12}" for m in model.months))
+    if model.fx_notes:
+        typer.echo("FX: " + "; ".join(model.fx_notes))
+
+
+sheets_app = typer.Typer(help="Google Sheets: push the P&L workbook into a spreadsheet.", no_args_is_help=True)
+app.add_typer(sheets_app, name="sheets")
+
+
+@sheets_app.command("check")
+def sheets_check(sheet_id: Optional[str] = typer.Option(None, "--sheet-id")) -> None:
+    """Verify credentials and access to the target spreadsheet without writing anything."""
+    s = state.settings
+    try:
+        sid, key = resolve_target(s, sheet_id)
+        email = service_account_email(key)
+        typer.echo(f"service account: {email or 'unreadable key file'} ({key})")
+        api = SheetsApi(load_service(key), sid)
+        meta = api.get()
+    except (ConfigError, SheetsError) as exc:
+        fail(str(exc))
+        return
+    except Exception as exc:  # googleapiclient.errors.HttpError and friends
+        fail(f"Google refused: {str(exc)[:300]}\nIf it says 403, share the sheet with the service account email above as Editor.")
+        return
+    tabs = ", ".join(sh["properties"]["title"] for sh in meta.get("sheets", []))
+    typer.secho(f"ok: '{meta['properties']['title']}' is reachable. Tabs: {tabs}", fg=typer.colors.GREEN)
+
+
+@sheets_app.command("push")
+def sheets_push(
+    sheet_id: Optional[str] = typer.Option(None, "--sheet-id", help="Spreadsheet id or URL (default: REVFIN_SHEET_ID)."),
+    from_: Optional[str] = typer.Option(None, "--from", help="First month YYYY-MM."),
+    to: Optional[str] = typer.Option(None, "--to", help="Last month YYYY-MM."),
+) -> None:
+    """Build the P&L and write every tab into the Google Sheet (replaces tab contents, keeps the sheet id)."""
+    s = state.settings
+    start, end = _month_or_none(from_, "--from"), _month_or_none(to, "--to")
+    try:
+        sid, key = resolve_target(s, sheet_id)
+        service = load_service(key)
+    except (ConfigError, SheetsError) as exc:
+        fail(str(exc))
+        return
+    db = _db()
+    try:
+        model = build_pnl(s, db, start, end)
+    finally:
+        db.close()
+    tabs = build_workbook(model, s.account_nicknames)
+    typer.echo(f"pushing {len(tabs)} tabs, months {model.months[0]} to {model.months[-1]}")
+    try:
+        stats = push_workbook(SheetsApi(service, sid), tabs, log)
+    except Exception as exc:
+        fail(f"Google refused: {str(exc)[:300]}\nRun `revfin sheets check` to diagnose.")
+        return
+    typer.secho(
+        f"done: {stats['tabs']} tabs, {stats['rows']} rows, {stats['charts']} charts in '{stats['title']}'"
+        f"  https://docs.google.com/spreadsheets/d/{sid}/edit",
+        fg=typer.colors.GREEN,
+    )
 
 
 @app.command("load-fixtures")

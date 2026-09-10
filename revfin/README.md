@@ -162,6 +162,9 @@ revfin summary [--month 2026-08] [--entity X] [--as-of 2026-09-10] [--print]
 revfin status
 revfin categorise [--entity X]              re-apply config.yaml rules, no API calls
 revfin load-fixtures [--dir fixtures]       offline data for testing summary
+revfin pnl [--from 2026-01] [--to 2026-09] [--xlsx path] [--json path]
+revfin sheets check                          confirm the service account can reach the sheet
+revfin sheets push [--sheet-id ID_OR_URL]    build the P&L and write every tab into Google Sheets
 ```
 
 `sync` defaults to "since the last successful sync minus 3 days" so
@@ -175,6 +178,59 @@ alongside, top counterparties, client receipts by client, unusual items,
 the uncategorised list, a runway estimate, and a JSON block at the bottom
 with the same figures. All entities in one file, each in its own reporting
 currency with the FX rates used stated at the top of its section.
+
+## P&L workbook and Google Sheets
+
+`revfin pnl` builds a cash-basis P&L from the whole ledger and writes an
+`.xlsx` with these tabs. `revfin sheets push` writes the identical tabs into
+a Google Sheet, replacing the contents each time so the sheet URL never
+changes.
+
+| Tab | What is in it |
+|---|---|
+| Overview | latest month vs prior for every view, FX used, tab index |
+| P&L Group, P&L UK, P&L DE | monthly lines by section (revenue, cost of sales, opex, tax, owner), gross profit and margin, operating result, net cash result, cumulative net, cash at month end, two charts |
+| Analytics | revenue MoM, trailing 3 month, YTD, gross and net margin, opex and payroll as share of revenue, paying clients, largest client share, uncategorised spend, cash, net burn, runway |
+| Clients | revenue by client by month with share, first and last receipt |
+| Vendors | spend by payee by month with category |
+| Cash | month-end balance per account and totals, chart |
+| Uncategorised | legs still needing a rule |
+| Ledger | every transaction leg with entity-currency and group-currency amounts |
+| Mapping | category to P&L line, from config.yaml |
+
+Cash basis means a line is what hit the bank that month. The Group view
+converts each entity into `pnl.group_currency` (GBP) at the latest synced
+rate. Intercompany transfers, FX exchanges and own-account moves are never
+income or spend. The category to line mapping is the `pnl.lines` block in
+config.yaml; edit it to restructure the P&L.
+
+### Google Sheets setup (once, about 10 minutes)
+
+The push uses a Google service account, a robot identity that is an editor
+on one spreadsheet and nothing else. No browser login on the scheduled run.
+
+1. Go to https://console.cloud.google.com, create a project (call it `revfin`).
+2. **APIs & Services > Library**, search "Google Sheets API", click **Enable**.
+3. **IAM & Admin > Service Accounts > Create service account**. Name `revfin`. No roles needed. Create.
+4. Open the service account, **Keys > Add key > Create new key > JSON**. It downloads a file. Move it to `secrets/google-service-account.json` in this folder.
+5. Copy the service account's email (looks like `revfin@revfin-123456.iam.gserviceaccount.com`).
+6. Open the target Google Sheet, **Share**, paste that email, set **Editor**, untick "notify", Share.
+7. In `.env`:
+
+```
+GOOGLE_SERVICE_ACCOUNT_FILE=secrets/google-service-account.json
+REVFIN_SHEET_ID=<the long id from the sheet URL, between /d/ and /edit>
+```
+
+Then:
+
+```
+revfin sheets check
+revfin sheets push
+```
+
+`check` prints the service account email if you need it again, and says
+whether the sheet is reachable. A 403 means step 6 was missed.
 
 ## Multi-currency and FX
 
@@ -204,8 +260,9 @@ is: Claude or a human proposes a rule, you add it to config.yaml, run
 
 ## Scheduled run
 
-`scripts/sync-and-summarise.sh` runs `sync` then `summary` for the current
-month and exits non-zero on an auth failure so the scheduler notices.
+`scripts/sync-and-summarise.sh` runs `sync`, then `summary` for the current
+month, then `sheets push` if `REVFIN_SHEET_ID` is set in `.env`. It exits
+non-zero on an auth failure so the scheduler notices.
 
 - Mac: copy `scripts/com.brightform.revfin.plist` to `~/Library/LaunchAgents/`,
   fix the two paths inside, then `launchctl load ~/Library/LaunchAgents/com.brightform.revfin.plist`.

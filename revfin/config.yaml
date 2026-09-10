@@ -39,6 +39,31 @@ unusual:
   large_outgoing: 5000      # in the entity's base currency
   month_on_month_pct: 40
 
+# Cash-basis P&L layout used by `revfin pnl` and `revfin sheets push`.
+# Every category maps to a line in a section. Sections in order:
+# revenue, cost_of_sales, opex, tax, equity. fx / internal / intercompany are
+# always excluded (they are not income or spend).
+pnl:
+  group_currency: GBP       # consolidated view converts every entity to this
+  lines:
+    - { category: client_receipt, section: revenue,       label: Client receipts }
+    - { category: contractor,     section: cost_of_sales, label: Contractors and creators }
+    - { category: ads,            section: cost_of_sales, label: Paid media }
+    - { category: payroll,        section: opex,          label: Payroll }
+    - { category: office_rent,    section: opex,          label: Office and rent }
+    - { category: software,       section: opex,          label: Software and tools }
+    - { category: travel,         section: opex,          label: Travel }
+    - { category: bank_fee,       section: opex,          label: Bank fees }
+    - { category: uncategorised,  section: opex,          label: Uncategorised }
+    - { category: tax,            section: tax,           label: Tax (VAT, PAYE, corporation tax) }
+    - { category: owner,          section: equity,        label: Owner drawings and dividends }
+
+# Google Sheets target for `revfin sheets push`. The spreadsheet id is the long
+# part of the sheet URL. Credentials come from .env (see README, "Google Sheets").
+sheets:
+  spreadsheet_id_env: REVFIN_SHEET_ID
+  service_account_env: GOOGLE_SERVICE_ACCOUNT_FILE
+
 # Category rules. Regex, case-insensitive, first match wins. Match keys:
 # merchant_name, counterparty_name, reference, type, direction (in|out).
 # Built-ins run first: type fee -> bank_fee, exchange -> fx, transfers between
