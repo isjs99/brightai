@@ -17,7 +17,9 @@ dependencies = [
 [project.optional-dependencies]
 # P&L workbook export (.xlsx) and Google Sheets push
 pnl = ["openpyxl>=3.1", "google-api-python-client>=2.100", "google-auth>=2.20"]
-dev = ["pytest>=8", "openpyxl>=3.1", "google-api-python-client>=2.100", "google-auth>=2.20"]
+# MCP server for Claude Desktop / Cowork / Code
+mcp = ["mcp>=2"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "openpyxl>=3.1", "google-api-python-client>=2.100", "google-auth>=2.20", "mcp>=2"]
 
 [project.scripts]
 revfin = "revfin.cli:app"

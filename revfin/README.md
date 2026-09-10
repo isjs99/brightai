@@ -165,6 +165,7 @@ revfin load-fixtures [--dir fixtures]       offline data for testing summary
 revfin pnl [--from 2026-01] [--to 2026-09] [--xlsx path] [--json path]
 revfin sheets check                          confirm the service account can reach the sheet
 revfin sheets push [--sheet-id ID_OR_URL]    build the P&L and write every tab into Google Sheets
+revfin mcp [--print-config]                  run as an MCP server for Claude Desktop / Cowork / Code
 ```
 
 `sync` defaults to "since the last successful sync minus 3 days" so
@@ -178,6 +179,35 @@ alongside, top counterparties, client receipts by client, unusual items,
 the uncategorised list, a runway estimate, and a JSON block at the bottom
 with the same figures. All entities in one file, each in its own reporting
 currency with the FX rates used stated at the top of its section.
+
+## Use it from Claude (MCP)
+
+revfin can run as an MCP server, so Claude Desktop, Cowork or Claude Code
+can ask it for the numbers directly instead of you exporting files. It runs
+on your Mac, reads the local database, and stays read-only against Revolut.
+
+Tools it exposes: `revfin_status`, `revfin_sync`, `revfin_balances`,
+`revfin_summary`, `revfin_pnl`, `revfin_transactions`, `revfin_uncategorised`,
+`revfin_add_category_rule`, `revfin_categorise`, `revfin_export_workbook`,
+`revfin_push_to_google_sheets`. The only things it writes are the local
+database, exports, and new category rules in config.yaml.
+
+Setup:
+
+```
+cd ~/brightai/revfin && source .venv/bin/activate
+pip install -e ".[mcp]"
+revfin mcp --print-config
+```
+
+That prints a JSON block with the right absolute paths for your machine.
+Paste it into `~/Library/Application Support/Claude/claude_desktop_config.json`
+(merge into the existing `mcpServers` object if you already have other
+servers there), then quit and reopen Claude Desktop. Cowork picks it up
+from the same file. For Claude Code: `claude mcp add revfin -- <command from the printed block> mcp`.
+
+Then in Claude: "what's our cash position", "P&L for August by entity",
+"what's uncategorised, propose rules", "push the P&L to the sheet".
 
 ## P&L workbook and Google Sheets
 

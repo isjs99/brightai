@@ -391,6 +391,26 @@ def sheets_push(
     )
 
 
+@app.command()
+def mcp(
+    print_config: bool = typer.Option(False, "--print-config", help="Print the Claude Desktop config entry and exit."),
+) -> None:
+    """Run revfin as an MCP server on stdio for Claude Desktop, Cowork or Claude Code."""
+    import json as _json
+
+    from .mcp_server import build_server, desktop_config
+
+    if print_config:
+        typer.echo(_json.dumps(desktop_config(state.settings), indent=2))
+        return
+    try:
+        server = build_server(state.settings.home)
+    except ImportError:
+        fail("MCP library missing. Run: pip install -e '.[mcp]'")
+        return
+    server.run(transport="stdio")
+
+
 @app.command("load-fixtures")
 def load_fixtures_cmd(
     directory: Path = typer.Option(None, "--dir", help="Fixture folder (default: <home>/fixtures)."),
