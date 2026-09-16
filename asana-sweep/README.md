@@ -149,6 +149,45 @@ The Asana API cannot set or read a task's repeat setting, so the check infers it
 - **no new copy: repeat not set?** The task was completed today but Asana did not spawn a fresh copy. Open the task in Asana and set it to repeat every workday.
 - **no due date**. A task without a due date cannot repeat. Give it one.
 
+## Roles
+
+Two passwords, two roles. `DASHBOARD_PASSWORD` signs in as **admin** (everything editable). `AM_PASSWORD` signs in as **account manager**: every page is visible, nothing can be changed (the API refuses non-GET requests with 403 and the editing controls are hidden). Leave `AM_PASSWORD` blank to disable the read-only login.
+
+## Promotions (TikTok Shop)
+
+Account management > Promotions plans one promotion across many shops: pick accounts and either every market they are active in or only some countries, choose products per shop, and push. It uses the TikTok Shop OpenAPI Promotion API (202309) through a Partner Center app:
+
+1. Create an app in Partner Center, set its redirect URL to `<PUBLIC_URL>/api/tts/callback`, put the app key and secret in `.env` (`TTS_APP_KEY`, `TTS_APP_SECRET`) and restart.
+2. Under Promotions > Connection, paste the service id and open the authorisation link for each seller. Authorised shops appear and can be linked to a roster account and market.
+3. Create the promotion, review the targets and push. Sync reads the live status back; Deactivate ends it on TikTok.
+
+## GMV Max
+
+GMV Max campaigns live in the TikTok Marketing API (Business Center), which is a separate app from the Shop OpenAPI, so this page is a planner: one row per account, market and campaign type with daily budget, bid strategy, target ROI and status, editable in bulk, with CSV export to mirror into Ads Manager.
+
+## Leads
+
+Growth > Leads mirrors the "Core Lead List" tab of the lead sheet every few minutes (the sheet id and tab are in the page settings). The server reads the sheet's public CSV export, so the sheet must be shared as "Anyone with the link can view"; alternatively set `LEADS_CSV_URL` to any CSV URL, or paste the CSV export into the page. Rows are matched by client name; rows that disappear from the sheet are marked removed; a stage containing "signed" marks the deal signed and stamps the date once.
+
+Per lead you log the **onboarding AM** and **sourced by** (an AM, or not AM-sourced). Both survive syncs. If the sheet grows "Sourced By" / "Onboarding AM" columns they fill in automatically when the name matches a team member. A signed deal gives points to the onboarding AM and to the sourcing AM; the weights are in settings and the By AM table shows totals, signed value and open pipeline per person.
+
+## BD pipeline
+
+Growth > BD pipeline holds fast-rising TikTok Shops per EU market, the decision makers behind them and where we have reached out.
+
+- **Prospects** come from FastMoss: the seed is the top 7-day GMV shops for DE, UK, FR, IT and ES, scored by the share of lifetime GMV made this week ("surging" at 15%+, "rising" at 5%+). Refresh by pasting a FastMoss `shop_search` result into Import pull, or have a scheduled job POST the same JSON to `/api/bd/import` with `Authorization: Bearer <INGEST_TOKEN>`. Re-imports refresh the numbers and never touch status, owner, contacts or outreach.
+- **Decision makers**: with `APOLLO_API_KEY` set, "Find decision makers" searches Apollo for founders, e-commerce and marketing leads (free) and "Reveal" enriches one person for their work email and LinkedIn (one Apollo credit, confirmed first). Contacts can also be added by hand.
+- **Outreach checklist**: TTS AM, Gmail and LinkedIn per prospect. Outreach is complete only when all three are ticked; the CRM overview per country counts prospects, any outreach, complete, won and lost.
+
+## CS & affiliate inbox
+
+Account management > CS & affiliate inbox reads buyer chats (customer service) and creator DMs (affiliates) from every authorised TikTok shop and lets the team reply from one place.
+
+- **Reading**: polled every couple of minutes through the Shop OpenAPI (customer_service 202309, affiliate_seller 202412/202505); changes show up live.
+- **Context**: each reply is drafted from the context library (editable per language, per channel, per account), live promotions for that shop and market, the products in them, earlier threads with the same buyer or creator, and Cruva outreach notes for creators (`POST /api/inbox/cruva-outreach/import` with `{ rows: [{ creator_handle, summary, occurred_at }] }`).
+- **Drafting and sending** use the Anthropic API (`ANTHROPIC_API_KEY`, model `REPLY_MODEL`, default claude-sonnet-5). Draft with Claude, edit, Send. TikTok only lets a shop message buyers with a recent order or conversation; those threads are read-only.
+- **Auto-reply** has one master switch at the top of the page and, per account, a switch for customer service and one for affiliate DMs. A reply only goes out automatically when the master switch and the account switch are on, the last message is from the other side and is text, it is newer than the age limit (48h by default), nothing was auto-sent for that message already, and at least 10 minutes passed since the last auto reply in that thread. Every auto reply is recorded with the message it answered.
+
 ## Slack notifications
 
 Paste an incoming webhook URL into the rule. After each run you get one line:
@@ -174,6 +213,10 @@ src/sweep       match.ts (pure matching logic), runner.ts (fetch, plan, delete, 
 src/checklist   evaluate.ts (pure completion logic), checker.ts (daily check, Slack digest), reminders.ts (AM DMs), calendar.ts
 src/gmv         cruva.ts (REST client), sync.ts (daily pull), grading.ts (pure score + letter)
 src/reports     calendar, GMV and grade aggregations for the dashboard
+src/leads       lead sheet CSV parsing, sync watcher and AM points
+src/bd          FastMoss seed, rise score, Apollo client
+src/inbox       TikTok inbox sync, context builder, Claude drafting, auto-reply gate
+src/tts         TikTok Shop OpenAPI client, promotions push, markets
 src/live        change watcher (per-board modified_since polling) and the event bus behind the dashboard's live updates
 src/scheduler   node-cron registration per rule and for the daily check, plain-English schedule text
 src/db          SQLite schema, migrations (seed rule), queries
@@ -197,3 +240,9 @@ Auth is a single shared password behind a signed cookie, in `src/web/auth.ts` be
 | `SLACK_BOT_TOKEN` | Optional Slack bot token for DM reminders to AMs |
 | `CRUVA_API_KEY` | Optional Cruva REST API key for the daily GMV sync |
 | `CRUVA_BASE_URL`, `CRUVA_STATS_PATH` | Optional overrides for the Cruva stats endpoint |
+| `AM_PASSWORD` | Optional read-only login for account managers |
+| `TTS_APP_KEY`, `TTS_APP_SECRET` | TikTok Shop Partner Center app, for promotions and the inbox |
+| `LEADS_CSV_URL` | Optional CSV URL to mirror as the lead list instead of the Google Sheet export |
+| `APOLLO_API_KEY` | Optional Apollo.io key for decision-maker search and reveal |
+| `INGEST_TOKEN` | Optional bearer token for `POST /api/bd/import` |
+| `ANTHROPIC_API_KEY`, `REPLY_MODEL` | Anthropic API key and model for drafting and auto-replies |
