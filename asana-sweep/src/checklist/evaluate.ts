@@ -103,9 +103,15 @@ export function evaluateChecklist(topLevel: ChecklistTask[], subtasksByParent: M
   const warnings: string[] = [];
 
   for (const [name, copies] of groups) {
-    const doneToday = copies.filter((c) => c.completed && c.completed_at && localDate(c.completed_at, opts.tz) === opts.checkDate);
+    // Most recent completion first, so repeated completions on one day resolve to the latest copy.
+    const doneToday = copies
+      .filter((c) => c.completed && c.completed_at && localDate(c.completed_at, opts.tz) === opts.checkDate)
+      .sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''));
     const incomplete = copies.filter((c) => !c.completed);
-    const pending = incomplete.filter((c) => !c.due_on || c.due_on <= opts.checkDate);
+    // Earliest due first (no due date last), so the copy that is actually due today represents the item.
+    const pending = incomplete
+      .filter((c) => !c.due_on || c.due_on <= opts.checkDate)
+      .sort((a, b) => (a.due_on ?? '9999').localeCompare(b.due_on ?? '9999'));
     const future = incomplete.filter((c) => c.due_on && c.due_on > opts.checkDate);
 
     let state: ItemState;
@@ -136,24 +142,31 @@ export function evaluateChecklist(topLevel: ChecklistTask[], subtasksByParent: M
       warnings.push(`"${name}" only exists as an old completed copy (no incomplete copy). One-off, or not set to repeat.`);
     }
 
+    // Subtasks come from the representative copy only. Asana gives every recurring copy its own
+    // set of subtasks, so merging across copies would list the same action several times.
     const subtasks: SubtaskResult[] = [];
     if (state === 'done' || state === 'pending') {
-      const seen = new Set<string>();
-      for (const c of copies) {
-        for (const st of subtasksByParent.get(c.gid) ?? []) {
-          if (seen.has(st.gid)) continue;
-          seen.add(st.gid);
-          const doneTodaySt = st.completed && st.completed_at ? localDate(st.completed_at, opts.tz) === opts.checkDate : false;
-          if (st.completed && !doneTodaySt) continue; // finished on an earlier day: history
-          subtasks.push({
-            name: st.name,
-            task_gid: st.gid,
-            role: roleOf(st, true, opts),
-            done: doneTodaySt,
-            assignee_name: st.assignee_name,
-            completed_at: st.completed_at,
-          });
-        }
+      const seenNames = new Set<string>();
+      const mine = [...(subtasksByParent.get(rep.gid) ?? [])].sort((a, b) => {
+        // Completed-today first so a duplicate name keeps the copy that was actually done.
+        const ad = a.completed && a.completed_at && localDate(a.completed_at, opts.tz) === opts.checkDate ? 0 : 1;
+        const bd = b.completed && b.completed_at && localDate(b.completed_at, opts.tz) === opts.checkDate ? 0 : 1;
+        return ad - bd;
+      });
+      for (const st of mine) {
+        const key = st.name.trim().toLowerCase();
+        if (!key || seenNames.has(key)) continue;
+        const doneTodaySt = st.completed && st.completed_at ? localDate(st.completed_at, opts.tz) === opts.checkDate : false;
+        if (st.completed && !doneTodaySt) continue; // finished on an earlier day: history
+        seenNames.add(key);
+        subtasks.push({
+          name: st.name,
+          task_gid: st.gid,
+          role: roleOf(st, true, opts),
+          done: doneTodaySt,
+          assignee_name: st.assignee_name,
+          completed_at: st.completed_at,
+        });
       }
     }
 

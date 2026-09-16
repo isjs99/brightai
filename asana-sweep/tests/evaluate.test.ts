@@ -123,6 +123,31 @@ describe('evaluateChecklist', () => {
     expect(r.combined_complete).toBe(false);
   });
 
+  it('counts subtasks once even when several recurring copies of the item exist', () => {
+    // Three copies of the same item: two completed today (a test run), one fresh incomplete copy.
+    // Each carries its own copy of the same two subtasks, as Asana does on recurrence.
+    const tasks = [
+      t({ gid: 'c1', name: 'Affiliate - AM daily checks', completed: true, completed_at: '2026-09-16T08:00:00Z', num_subtasks: 2 }),
+      t({ gid: 'c2', name: 'Affiliate - AM daily checks', completed: true, completed_at: '2026-09-16T10:00:00Z', num_subtasks: 2 }),
+      t({ gid: 'c3', name: 'Affiliate - AM daily checks', due_on: '2026-09-17', num_subtasks: 2 }),
+    ];
+    const sub = (gid: string, parent: string, name: string, done: boolean) =>
+      t({ gid, name, parent_gid: parent, assignee_name: 'dm@brightform.agency', completed: done, completed_at: done ? '2026-09-16T09:30:00Z' : null });
+    const subs = new Map<string, ChecklistTask[]>([
+      ['c1', [sub('s1', 'c1', 'Process daily sample requests within SLA', true), sub('s2', 'c1', 'All affiliate chats answered', false)]],
+      ['c2', [sub('s3', 'c2', 'Process daily sample requests within SLA', true), sub('s4', 'c2', 'All affiliate chats answered', true)]],
+      ['c3', [sub('s5', 'c3', 'Process daily sample requests within SLA', false), sub('s6', 'c3', 'All affiliate chats answered', false)]],
+    ]);
+    const r = evaluateChecklist(tasks, subs, opts);
+    expect(r.items).toHaveLength(1);
+    expect(r.items[0].state).toBe('done');
+    expect(r.items[0].task_gid).toBe('c2'); // the latest completion represents the item
+    expect(r.items[0].subtasks.map((s) => s.name)).toEqual(['Process daily sample requests within SLA', 'All affiliate chats answered']);
+    expect(r.items[0].subtasks.every((s) => s.done)).toBe(true);
+    expect(r.aa_total).toBe(2);
+    expect(r.aa_done).toBe(2);
+  });
+
   it('returns empty for a project with no tasks', () => {
     const r = evaluateChecklist([], new Map(), opts);
     expect(r.status).toBe('empty');
