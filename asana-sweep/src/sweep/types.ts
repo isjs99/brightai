@@ -678,6 +678,64 @@ export interface BdProspect {
   outreach_log: BdOutreachEvent[];
 }
 
+export type BdDraftStatus = 'draft' | 'gmail' | 'sent' | 'discarded';
+
+/** A cold email drafted for one decision maker, reviewed in the inbox, then handed to Gmail. */
+export interface BdEmailDraft {
+  id: number;
+  prospect_id: number;
+  contact_id: number | null;
+  shop_name: string;
+  market: string;
+  to_name: string;
+  to_email: string;
+  subject: string;
+  body: string;
+  language: string;
+  style: 'short' | 'intro';
+  status: BdDraftStatus;
+  generator: 'claude' | 'template';
+  gmail_draft_id: string | null;
+  gmail_message_id: string | null;
+  gmail_url: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** One of Isaac's earlier outreach emails, used as a voice sample when drafting. */
+export interface OutreachExample {
+  id: number;
+  subject: string;
+  body: string;
+  kind: 'cold' | 'intro' | 'reply' | 'followup';
+  to_domain: string | null;
+  sent_at: string | null;
+  source: 'seed' | 'gmail' | 'manual';
+  gmail_id: string | null;
+  enabled: boolean;
+}
+
+export interface OutreachSettings {
+  gmail_configured: boolean;
+  gmail_connected: boolean;
+  gmail_email: string | null;
+  llm_configured: boolean;
+  sender_name: string;
+  sender_title: string;
+  booking_url: string;
+  pitch: string;
+  sent_query: string;
+  last_pull_at: string | null;
+  last_pull_error: string | null;
+}
+
+export interface OutreachData {
+  drafts: BdEmailDraft[];
+  examples: OutreachExample[];
+  settings: OutreachSettings;
+}
+
 export interface BdCountryRow {
   market: string;
   prospects: number;
@@ -698,6 +756,8 @@ export interface BdData {
   markets: string[];
   categories: string[];
   apollo_configured: boolean;
+  gmail_connected: boolean;
+  llm_configured: boolean;
   ingest_configured: boolean;
   last_pull_at: string | null;
   totals: { prospects: number; complete: number; won: number; with_contacts: number; new_30d: number; gmv_started_30d: number };

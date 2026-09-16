@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import type { BdContact, BdData, BdOutreachEvent, BdProspect, BdProspectPatch, BdStatus } from '../../../sweep/types';
 import { api, fmtMoney, fmtPct, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
+import { useNavigate } from 'react-router-dom';
 
 const STATUSES: { v: BdStatus; label: string; cls: string }[] = [
   { v: 'new', label: 'New', cls: 'muted' },
@@ -33,12 +34,13 @@ export default function BdPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [open, setOpen] = useState<number | null>(null);
-  const [f, setF] = useState({ market: '', status: '', category: '', owner: '', rise: '', type: '', launch: '', q: '', sort: 'rise' as 'rise' | 'gmv' | 'name' | 'updated' | 'launched', hideDone: false, hideClients: true });
+  const [f, setF] = useState({ market: '', status: '', category: '', owner: '', rise: '', type: '', launch: '', contact: '', q: '', sort: 'rise' as 'rise' | 'gmv' | 'name' | 'updated' | 'launched', hideDone: false, hideClients: true });
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [add, setAdd] = useState({ shop_name: '', market: 'DE', brand: '', category: '', website: '', tiktok_handle: '', notes: '' });
   const [importText, setImportText] = useState('');
   const isAdmin = useIsAdmin();
+  const navigate = useNavigate();
 
   const load = useCallback(() => api.bd().then(setData).catch((e) => setError((e as Error).message)), []);
   useEffect(() => { load(); }, [load]);
@@ -98,6 +100,14 @@ export default function BdPage() {
   };
 
   const reveal = (c: BdContact) => run(`c${c.id}`, () => api.revealContact(c.id), `${c.name} revealed.`);
+  const draftEmail = async (c: BdContact, style: 'short' | 'intro') => {
+    setBusy(`d${c.id}`);
+    setError(null);
+    try {
+      const r = await api.draftEmail(c.id, { style });
+      navigate(`/inbox?tab=outreach&draft=${r.draft.id}`);
+    } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
+  };
 
   if (!data) return <p>{error ?? 'Loading…'}</p>;
 
@@ -111,6 +121,7 @@ export default function BdPage() {
       (!f.rise || band(p.rise_score).label.toLowerCase() === f.rise) &&
       (!f.type || (p.shop_type ?? '') === f.type) &&
       (!f.launch || (f.launch === 'new_shop' ? p.new_shop_30d : f.launch === 'gmv_started' ? p.gmv_started_30d : p.new_shop_30d || p.gmv_started_30d)) &&
+      (!f.contact || (f.contact === 'email' ? p.contacts.some((c) => c.email) : f.contact === 'linkedin' ? p.contacts.some((c) => c.linkedin_url) : f.contact === 'any' ? p.contacts.length > 0 : p.contacts.length === 0)) &&
       (!f.hideClients || !p.is_client) &&
       (!f.hideDone || (!p.outreach_complete && p.status !== 'won' && p.status !== 'lost')) &&
       (!q || [p.shop_name, p.brand, p.category, p.notes, p.tiktok_handle, ...p.contacts.map((c) => c.name)].some((v) => (v ?? '').toLowerCase().includes(q))))
@@ -132,6 +143,8 @@ export default function BdPage() {
       <td className="sub">{c.phone ?? ''}</td>
       <td>
         <div className="actions">
+          {isAdmin && c.email && <button className="small primary" onClick={() => draftEmail(c, 'short')} disabled={busy === `d${c.id}`} title="Draft a short note in Isaac's voice, tailored to this shop, then review it in the inbox and send from Gmail">{busy === `d${c.id}` ? 'Drafting…' : 'Draft email'}</button>}
+          {isAdmin && c.email && <button className="small" onClick={() => draftEmail(c, 'intro')} disabled={busy === `d${c.id}`} title="Full introduction with the Who we are / Credentials / What we do blocks">Draft intro</button>}
           {isAdmin && !c.enriched && data.apollo_configured && <button className="small" onClick={() => reveal(c)} disabled={busy === `c${c.id}`}>Reveal</button>}
           {isAdmin && <button className="small danger" onClick={() => window.confirm(`Remove ${c.name}?`) && run(`c${c.id}`, () => api.deleteContact(c.id))}>×</button>}
         </div>
@@ -274,6 +287,7 @@ export default function BdPage() {
         <select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}><option value="">All statuses</option>{STATUSES.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}</select>
         <select value={f.rise} onChange={(e) => setF({ ...f, rise: e.target.value })}><option value="">All momentum</option><option value="surging">Surging</option><option value="rising">Rising</option><option value="steady">Steady</option></select>
         <select value={f.launch} onChange={(e) => setF({ ...f, launch: e.target.value })}><option value="">Any age</option><option value="new_shop">Launched in last 30 days</option><option value="gmv_started">GMV started in last 30 days</option><option value="either">Either</option></select>
+        <select value={f.contact} onChange={(e) => setF({ ...f, contact: e.target.value })}><option value="">Any contacts</option><option value="email">With email contact</option><option value="linkedin">With LinkedIn contact</option><option value="any">With any contact</option><option value="none">No contacts yet</option></select>
         <select value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}><option value="">Local + cross-border</option><option value="local">Local shops</option><option value="cross_border">Cross-border</option></select>
         <select value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}><option value="">All categories</option>{data.categories.map((c) => <option key={c}>{c}</option>)}</select>
         <select value={f.owner} onChange={(e) => setF({ ...f, owner: e.target.value })}><option value="">Any owner</option>{data.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>

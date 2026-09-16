@@ -28,6 +28,9 @@ import { LANGUAGE_NAMES } from '../inbox/language.js';
 import type { ConversationDetail, ContextEntry, InboxData } from '../sweep/types.js';
 import { normaliseDomain } from '../bd/score.js';
 import { importPullFiles, isoDate, parseProspectInput } from '../bd/import.js';
+import { GmailClient, gmailComposeUrl } from '../bd/gmail.js';
+import { LANGUAGES as OUTREACH_LANGUAGES, outreachInputs, parseDraftJson, renderOutreachPrompt, templateDraft } from '../bd/outreach.js';
+import type { BdEmailDraft, OutreachData, OutreachExample } from '../sweep/types.js';
 import type { BdCountryRow, BdData, BdProspectInput, BdProspectPatch, BdStatus } from '../sweep/types.js';
 import type { AuthProvider } from './auth.js';
 import { requireAdminForWrites, requireAuth, SharedPasswordAuth } from './auth.js';
@@ -1076,6 +1079,8 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
 
   const BD_STATUSES: BdStatus[] = ['new', 'researching', 'contacted', 'replied', 'meeting', 'won', 'lost'];
 
+  const gmail = new GmailClient(q);
+
   const bdData = (): BdData => {
     const prospects = q.listProspects(false);
     const byMarket = new Map<string, BdCountryRow>();
@@ -1098,6 +1103,8 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
       markets: [...byMarket.keys()].sort(),
       categories: [...new Set(prospects.map((p) => p.category).filter((c): c is string => Boolean(c)))].sort(),
       apollo_configured: apollo.configured,
+      gmail_connected: gmail.connected,
+      llm_configured: Boolean(config.anthropicApiKey),
       ingest_configured: Boolean(config.ingestToken),
       last_pull_at: q.lastProspectPull(),
       totals: {
@@ -1226,7 +1233,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     }
   });
 
-  /** Apollo enrichment: full name, work email, LinkedIn. Costs one credit; the UI confirms first. */
+  /** Apollo enrichment: full name, work email, LinkedIn. Costs one credit; no confirmation (standing authorisation). */
   r.post('/bd/contacts/:id/reveal', async (req, res) => {
     const contact = q.getContact(idParam(req));
     if (!contact) throw new HttpError(404, 'Contact not found');
@@ -1242,6 +1249,208 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     }
   });
 
+
+  // ---- BD outreach emails: draft in Isaac's voice, review in the inbox, hand off to Gmail ----
+
+  const actorOf = (req: Request): string => (auth instanceof SharedPasswordAuth ? auth.roleOf(req) ?? 'admin' : 'admin');
+  const isAdminReq = (req: Request): boolean => (auth instanceof SharedPasswordAuth ? auth.roleOf(req) === 'admin' : auth.isAuthenticated(req));
+
+  const outreachData = (): OutreachData => ({
+    drafts: q.listDrafts(),
+    examples: q.listExamples(),
+    settings: {
+      gmail_configured: gmail.configured,
+      gmail_connected: gmail.connected,
+      gmail_email: gmail.email,
+      llm_configured: Boolean(config.anthropicApiKey),
+      sender_name: q.getSetting('outreach_sender_name', ''),
+      sender_title: q.getSetting('outreach_sender_title', ''),
+      booking_url: q.getSetting('outreach_booking_url', ''),
+      pitch: q.getSetting('outreach_pitch', ''),
+      sent_query: q.getSetting('outreach_sent_query', ''),
+      last_pull_at: q.getSetting('outreach_last_pull_at', '') || null,
+      last_pull_error: q.getSetting('outreach_last_pull_error', '') || null,
+    },
+  });
+
+  /** Generate subject + body for one contact, with Claude when configured, else the template. */
+  const generateDraft = async (prospectId: number, contact: { name: string; title: string | null; email: string | null }, opts: { language: string; style: 'short' | 'intro'; instructions: string | null }): Promise<{ subject: string; body: string; generator: BdEmailDraft['generator'] }> => {
+    const prospect = q.getProspect(prospectId);
+    if (!prospect) throw new HttpError(404, 'Prospect not found');
+    const req = { prospect, contact, ...opts, ...outreachInputs(q), previousDrafts: q.listDrafts({ prospectId, includeDiscarded: true }) };
+    if (!config.anthropicApiKey) return { ...templateDraft(req), generator: 'template' };
+    const { system, user } = renderOutreachPrompt(req);
+    try {
+      const text = await draftWithClaude(system, user, { maxTokens: 1500 });
+      return { ...parseDraftJson(text), generator: 'claude' };
+    } catch (err) {
+      throw new HttpError(502, (err as Error).message);
+    }
+  };
+
+  const draftOpts = (b: Record<string, unknown>, fallback?: BdEmailDraft) => ({
+    language: OUTREACH_LANGUAGES[String(b.language ?? '')] ? String(b.language) : fallback?.language ?? 'en',
+    style: (b.style === 'intro' || b.style === 'short' ? b.style : fallback?.style ?? 'short') as 'short' | 'intro',
+    instructions: optText(b.instructions),
+  });
+
+  r.get('/outreach', (_req, res) => res.json(outreachData()));
+
+  /** Draft an email to one decision maker (needs an email address). */
+  r.post('/bd/contacts/:id/draft', async (req, res) => {
+    const contact = q.getContact(idParam(req));
+    if (!contact) throw new HttpError(404, 'Contact not found');
+    if (!contact.email) throw new HttpError(400, 'This contact has no email address yet. Reveal them first or add the email by hand.');
+    const opts = draftOpts((req.body ?? {}) as Record<string, unknown>);
+    const g = await generateDraft(contact.prospect_id, contact, opts);
+    const draft = q.createDraft({ prospect_id: contact.prospect_id, contact_id: contact.id, to_name: contact.name, to_email: contact.email, subject: g.subject, body: g.body, language: opts.language, style: opts.style, generator: g.generator, created_by: actorOf(req) });
+    q.logOutreach(contact.prospect_id, { channel: 'gmail', action: 'note', note: `Email drafted: "${g.subject}"`, contact_name: contact.name, actor: actorOf(req) });
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.status(201).json({ draft, ...outreachData() });
+  });
+
+  r.post('/outreach/drafts/:id/regenerate', async (req, res) => {
+    const d = q.getDraft(idParam(req));
+    if (!d) throw new HttpError(404, 'Draft not found');
+    const opts = draftOpts((req.body ?? {}) as Record<string, unknown>, d);
+    const contact = d.contact_id ? q.getContact(d.contact_id) : null;
+    const g = await generateDraft(d.prospect_id, contact ?? { name: d.to_name, title: null, email: d.to_email }, opts);
+    const draft = q.updateDraft(d.id, { subject: g.subject, body: g.body, language: opts.language, style: opts.style, generator: g.generator, status: d.status === 'sent' ? d.status : 'draft' });
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json({ draft, ...outreachData() });
+  });
+
+  r.put('/outreach/drafts/:id', (req, res) => {
+    const d = q.getDraft(idParam(req));
+    if (!d) throw new HttpError(404, 'Draft not found');
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const patch: Parameters<Queries['updateDraft']>[1] = {};
+    if (b.subject !== undefined) { const v = optText(b.subject); if (!v) throw new HttpError(400, 'Subject cannot be empty.'); patch.subject = v; }
+    if (b.body !== undefined) { const v = String(b.body ?? '').replace(/\r\n/g, '\n').trim(); if (!v) throw new HttpError(400, 'Body cannot be empty.'); patch.body = v; }
+    if (b.to_email !== undefined) { const v = optText(b.to_email); if (!v || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v)) throw new HttpError(400, 'Enter a valid email address.'); patch.to_email = v; }
+    if (b.to_name !== undefined) { const v = optText(b.to_name); if (v) patch.to_name = v; }
+    const draft = q.updateDraft(d.id, patch);
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json({ draft, ...outreachData() });
+  });
+
+  /** Put the draft into Gmail (a real draft in the connected account) or, without OAuth, hand back a prefilled compose link. */
+  r.post('/outreach/drafts/:id/gmail', async (req, res) => {
+    const d = q.getDraft(idParam(req));
+    if (!d) throw new HttpError(404, 'Draft not found');
+    if (gmail.connected) {
+      try {
+        const g = await gmail.createDraft({ to: d.to_email, toName: d.to_name, subject: d.subject, body: d.body });
+        const draft = q.updateDraft(d.id, { status: d.status === 'sent' ? 'sent' : 'gmail', gmail_draft_id: g.draft_id, gmail_message_id: g.message_id, gmail_url: g.url });
+        q.logOutreach(d.prospect_id, { channel: 'gmail', action: 'note', note: `Draft "${d.subject}" saved to Gmail (${gmail.email})`, contact_name: d.to_name, actor: actorOf(req) });
+        liveEvents.emitUpdate({ kind: 'bd' });
+        return res.json({ mode: 'gmail', url: g.url, draft, ...outreachData() });
+      } catch (err) {
+        throw new HttpError(502, (err as Error).message);
+      }
+    }
+    const url = gmailComposeUrl({ to: d.to_email, subject: d.subject, body: d.body, account: gmail.email });
+    const draft = q.updateDraft(d.id, { status: d.status === 'sent' ? 'sent' : 'gmail', gmail_url: url });
+    q.logOutreach(d.prospect_id, { channel: 'gmail', action: 'note', note: `Draft "${d.subject}" opened in Gmail compose`, contact_name: d.to_name, actor: actorOf(req) });
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json({ mode: 'compose', url, draft, ...outreachData() });
+  });
+
+  /** Isaac confirms he sent it from Gmail: tick the Gmail channel and log the contact. */
+  r.post('/outreach/drafts/:id/sent', (req, res) => {
+    const d = q.getDraft(idParam(req));
+    if (!d) throw new HttpError(404, 'Draft not found');
+    q.updateDraft(d.id, { status: 'sent' });
+    const before = q.getProspect(d.prospect_id);
+    if (before && !before.outreach_gmail) q.patchProspect(d.prospect_id, { outreach_gmail: true, outreach_note: `Sent "${d.subject}" to ${d.to_email}`, outreach_contact: d.to_name }, actorOf(req));
+    else q.logOutreach(d.prospect_id, { channel: 'gmail', action: 'contacted', note: `Sent "${d.subject}" to ${d.to_email}`, contact_name: d.to_name, actor: actorOf(req) });
+    if (before && before.status === 'new') q.patchProspect(d.prospect_id, { status: 'contacted' }, actorOf(req));
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json({ draft: q.getDraft(d.id), ...outreachData() });
+  });
+
+  r.delete('/outreach/drafts/:id', (req, res) => {
+    if (!q.deleteDraft(idParam(req))) throw new HttpError(404, 'Draft not found');
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json(outreachData());
+  });
+
+  r.put('/outreach/settings', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const keys: Record<string, string> = { sender_name: 'outreach_sender_name', sender_title: 'outreach_sender_title', booking_url: 'outreach_booking_url', pitch: 'outreach_pitch', sent_query: 'outreach_sent_query' };
+    for (const [k, setting] of Object.entries(keys)) if (typeof b[k] === 'string') q.setSetting(setting, String(b[k]).trim());
+    res.json(outreachData());
+  });
+
+  r.post('/outreach/examples', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const subject = optText(b.subject);
+    const body = optText(b.body);
+    if (!subject || !body) throw new HttpError(400, 'Subject and body are required.');
+    const kind = (['cold', 'intro', 'reply', 'followup'] as const).find((k) => k === b.kind) ?? 'cold';
+    q.addExample({ subject, body, kind, source: 'manual' });
+    res.status(201).json(outreachData());
+  });
+
+  r.put('/outreach/examples/:id', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    if (typeof b.enabled === 'boolean' && !q.setExampleEnabled(idParam(req), b.enabled)) throw new HttpError(404, 'Example not found');
+    res.json(outreachData());
+  });
+
+  r.delete('/outreach/examples/:id', (req, res) => {
+    if (!q.deleteExample(idParam(req))) throw new HttpError(404, 'Example not found');
+    res.json(outreachData());
+  });
+
+  /** Pull recent sent outreach from the connected Gmail as fresh voice samples. */
+  r.post('/outreach/examples/pull', async (_req, res) => {
+    if (!gmail.connected) throw new HttpError(400, 'Connect Gmail first.');
+    const query = q.getSetting('outreach_sent_query', 'in:sent TikTok Shop');
+    try {
+      const sent = await gmail.listSent(query, 25);
+      let added = 0;
+      for (const m of sent) {
+        const kind: OutreachExample['kind'] = /^re:/i.test(m.subject) ? 'reply' : /introduc/i.test(m.body) ? 'intro' : 'cold';
+        const domain = m.to?.match(/@([a-z0-9.-]+)/i)?.[1]?.toLowerCase() ?? null;
+        if (q.addExample({ subject: m.subject.replace(/^(re|fwd?):\s*/i, ''), body: m.body, kind, to_domain: domain, sent_at: m.sent_at, source: 'gmail', gmail_id: m.id })) added += 1;
+      }
+      q.setSetting('outreach_last_pull_at', new Date().toISOString());
+      q.setSetting('outreach_last_pull_error', '');
+      res.json({ pulled: sent.length, added, ...outreachData() });
+    } catch (err) {
+      q.setSetting('outreach_last_pull_error', (err as Error).message);
+      throw new HttpError(502, (err as Error).message);
+    }
+  });
+
+  // Gmail OAuth: admin clicks Connect, Google sends them back to /api/gmail/callback, we keep the refresh token.
+  r.get('/gmail/connect', (req, res) => {
+    if (!isAdminReq(req)) return res.status(403).send('Admin only');
+    if (!gmail.configured) return res.status(400).send('Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env first.');
+    res.redirect(gmail.authUrl());
+  });
+
+  r.get('/gmail/callback', async (req, res) => {
+    const { code, state, error } = req.query as Record<string, string | undefined>;
+    const back = (msg: string, ok: boolean) => res.redirect(`/inbox?tab=outreach&${ok ? 'notice' : 'error'}=${encodeURIComponent(msg)}`);
+    if (!isAdminReq(req)) return back('Sign in as admin, then connect Gmail again.', false);
+    if (error) return back(`Google said: ${error}`, false);
+    if (!code || !gmail.validState(state)) return back('Gmail connect failed: bad state. Try again.', false);
+    try {
+      const { email } = await gmail.exchangeCode(code);
+      liveEvents.emitUpdate({ kind: 'settings' });
+      back(`Gmail connected as ${email}.`, true);
+    } catch (err) {
+      back((err as Error).message, false);
+    }
+  });
+
+  r.post('/gmail/disconnect', (_req, res) => {
+    gmail.disconnect();
+    liveEvents.emitUpdate({ kind: 'settings' });
+    res.json(outreachData());
+  });
 
   // ---- CS & affiliate inbox, context library, auto-reply ----
 

@@ -14,6 +14,8 @@ import type {
   CheckWithItems,
   Completion,
   ContextEntry,
+  BdEmailDraft,
+  OutreachExample,
   CruvaOutreach,
   InboxConversation,
   InboxMessage,
@@ -1162,6 +1164,85 @@ export class Queries {
 
   deleteOutreachEvent(id: number): boolean {
     return this.db.prepare('DELETE FROM bd_outreach_log WHERE id = ?').run(id).changes > 0;
+  }
+
+  // ---- Email drafts (BD outreach) ----
+
+  private rowToDraft(r: Row): BdEmailDraft {
+    return {
+      id: r.id as number, prospect_id: r.prospect_id as number, contact_id: (r.contact_id as number | null) ?? null,
+      shop_name: (r.shop_name as string) ?? '', market: (r.market as string) ?? '',
+      to_name: r.to_name as string, to_email: r.to_email as string, subject: r.subject as string, body: r.body as string,
+      language: r.language as string, style: r.style as BdEmailDraft['style'], status: r.status as BdEmailDraft['status'], generator: r.generator as BdEmailDraft['generator'],
+      gmail_draft_id: (r.gmail_draft_id as string | null) ?? null, gmail_message_id: (r.gmail_message_id as string | null) ?? null, gmail_url: (r.gmail_url as string | null) ?? null,
+      created_by: (r.created_by as string | null) ?? null, created_at: r.created_at as string, updated_at: r.updated_at as string,
+    };
+  }
+
+  private static DRAFT_SELECT = `SELECT d.*, p.shop_name, p.market FROM bd_email_drafts d JOIN bd_prospects p ON p.id = d.prospect_id`;
+
+  listDrafts(opts: { prospectId?: number; includeDiscarded?: boolean } = {}): BdEmailDraft[] {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.prospectId !== undefined) { where.push('d.prospect_id = ?'); params.push(opts.prospectId); }
+    if (!opts.includeDiscarded) where.push(`d.status != 'discarded'`);
+    const sql = `${Queries.DRAFT_SELECT}${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY d.updated_at DESC`;
+    return (this.db.prepare(sql).all(...params) as Row[]).map((r) => this.rowToDraft(r));
+  }
+
+  getDraft(id: number): BdEmailDraft | null {
+    const r = this.db.prepare(`${Queries.DRAFT_SELECT} WHERE d.id = ?`).get(id) as Row | undefined;
+    return r ? this.rowToDraft(r) : null;
+  }
+
+  createDraft(d: { prospect_id: number; contact_id: number | null; to_name: string; to_email: string; subject: string; body: string; language: string; style: BdEmailDraft['style']; generator: BdEmailDraft['generator']; created_by?: string | null }): BdEmailDraft {
+    const info = this.db
+      .prepare(`INSERT INTO bd_email_drafts (prospect_id, contact_id, to_name, to_email, subject, body, language, style, generator, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(d.prospect_id, d.contact_id, d.to_name, d.to_email, d.subject, d.body, d.language, d.style, d.generator, d.created_by ?? null);
+    return this.getDraft(Number(info.lastInsertRowid))!;
+  }
+
+  updateDraft(id: number, patch: Partial<Pick<BdEmailDraft, 'subject' | 'body' | 'language' | 'style' | 'status' | 'generator' | 'gmail_draft_id' | 'gmail_message_id' | 'gmail_url' | 'to_email' | 'to_name'>>): BdEmailDraft | null {
+    const sets: string[] = [];
+    const params: Record<string, unknown> = { id, now: new Date().toISOString() };
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined) continue;
+      sets.push(`${k} = @${k}`);
+      params[k] = v;
+    }
+    if (sets.length) this.db.prepare(`UPDATE bd_email_drafts SET ${sets.join(', ')}, updated_at = @now WHERE id = @id`).run(params);
+    return this.getDraft(id);
+  }
+
+  deleteDraft(id: number): boolean {
+    return this.db.prepare('DELETE FROM bd_email_drafts WHERE id = ?').run(id).changes > 0;
+  }
+
+  // ---- Outreach voice examples ----
+
+  private rowToExample(r: Row): OutreachExample {
+    return { id: r.id as number, subject: r.subject as string, body: r.body as string, kind: r.kind as OutreachExample['kind'], to_domain: (r.to_domain as string | null) ?? null, sent_at: (r.sent_at as string | null) ?? null, source: r.source as OutreachExample['source'], gmail_id: (r.gmail_id as string | null) ?? null, enabled: Boolean(r.enabled) };
+  }
+
+  listExamples(enabledOnly = false): OutreachExample[] {
+    return (this.db.prepare(`SELECT * FROM outreach_examples${enabledOnly ? ' WHERE enabled = 1' : ''} ORDER BY COALESCE(sent_at, created_at) DESC, id DESC`).all() as Row[]).map((r) => this.rowToExample(r));
+  }
+
+  /** Insert an example; one with a gmail_id that already exists is skipped (returns null). */
+  addExample(e: { subject: string; body: string; kind?: OutreachExample['kind']; to_domain?: string | null; sent_at?: string | null; source?: OutreachExample['source']; gmail_id?: string | null }): OutreachExample | null {
+    if (e.gmail_id && this.db.prepare('SELECT 1 FROM outreach_examples WHERE gmail_id = ?').get(e.gmail_id)) return null;
+    const info = this.db
+      .prepare(`INSERT INTO outreach_examples (subject, body, kind, to_domain, sent_at, source, gmail_id) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+      .run(e.subject, e.body, e.kind ?? 'cold', e.to_domain ?? null, e.sent_at ?? null, e.source ?? 'manual', e.gmail_id ?? null);
+    return this.rowToExample(this.db.prepare('SELECT * FROM outreach_examples WHERE id = ?').get(Number(info.lastInsertRowid)) as Row);
+  }
+
+  setExampleEnabled(id: number, enabled: boolean): boolean {
+    return this.db.prepare('UPDATE outreach_examples SET enabled = ? WHERE id = ?').run(enabled ? 1 : 0, id).changes > 0;
+  }
+
+  deleteExample(id: number): boolean {
+    return this.db.prepare('DELETE FROM outreach_examples WHERE id = ?').run(id).changes > 0;
   }
 
   deleteProspect(id: number): boolean {

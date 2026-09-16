@@ -48,6 +48,8 @@ export const config = {
   /** Anthropic API key used to draft and auto-send customer service / affiliate replies. */
   anthropicApiKey: process.env.ANTHROPIC_API_KEY?.trim() ?? '',
   replyModel: process.env.REPLY_MODEL?.trim() || 'claude-sonnet-5',
+  googleClientId: process.env.GOOGLE_CLIENT_ID?.trim() ?? '',
+  googleClientSecret: process.env.GOOGLE_CLIENT_SECRET?.trim() ?? '',
   /** Bearer token that lets an external job (e.g. a scheduled Claude routine) POST fresh FastMoss pulls to /api/bd/import. */
   ingestToken: process.env.INGEST_TOKEN?.trim() ?? '',
   asanaBaseUrl: (process.env.ASANA_BASE_URL?.trim() || 'https://app.asana.com/api/1.0').replace(/\/+$/, ''),

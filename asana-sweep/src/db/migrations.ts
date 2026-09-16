@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { SEED_CONTACTS, SEED_DOMAINS, SEED_PULLED_AT, SEED_SHOPS } from '../bd/seed.js';
+import { SEED_BOOKING_URL, SEED_EXAMPLES, SEED_PITCH, SEED_SENDER_NAME, SEED_SENDER_TITLE, SEED_SENT_QUERY } from '../bd/voice.js';
 
 interface Migration {
   version: number;
@@ -726,6 +727,55 @@ const migrations: Migration[] = [
       }
       const dom = db.prepare(`UPDATE bd_prospects SET domain = COALESCE(domain, ?), website = COALESCE(website, ?) WHERE seller_id = ?`);
       for (const [seller, domain] of Object.entries(SEED_DOMAINS)) dom.run(domain, domain, seller);
+    },
+  },
+  {
+    version: 14,
+    name: 'bd email drafts, outreach voice examples, gmail link',
+    up(db) {
+      db.exec(`
+        CREATE TABLE bd_email_drafts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          prospect_id INTEGER NOT NULL REFERENCES bd_prospects(id) ON DELETE CASCADE,
+          contact_id INTEGER REFERENCES bd_contacts(id) ON DELETE SET NULL,
+          to_name TEXT NOT NULL,
+          to_email TEXT NOT NULL,
+          subject TEXT NOT NULL,
+          body TEXT NOT NULL,
+          language TEXT NOT NULL DEFAULT 'en',
+          style TEXT NOT NULL DEFAULT 'short',
+          status TEXT NOT NULL DEFAULT 'draft',
+          generator TEXT NOT NULL DEFAULT 'template',
+          gmail_draft_id TEXT,
+          gmail_message_id TEXT,
+          gmail_url TEXT,
+          created_by TEXT,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+        CREATE INDEX bd_email_drafts_prospect ON bd_email_drafts(prospect_id, created_at DESC);
+
+        CREATE TABLE outreach_examples (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          subject TEXT NOT NULL,
+          body TEXT NOT NULL,
+          kind TEXT NOT NULL DEFAULT 'cold',
+          to_domain TEXT,
+          sent_at TEXT,
+          source TEXT NOT NULL DEFAULT 'manual',
+          gmail_id TEXT UNIQUE,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+      `);
+      const ins = db.prepare(`INSERT INTO outreach_examples (subject, body, kind, to_domain, sent_at, source) VALUES (?, ?, ?, ?, ?, 'seed')`);
+      for (const e of SEED_EXAMPLES) ins.run(e.subject, e.body, e.kind, e.to_domain, e.sent_at);
+      const set = db.prepare(`INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING`);
+      set.run('outreach_sender_name', SEED_SENDER_NAME);
+      set.run('outreach_sender_title', SEED_SENDER_TITLE);
+      set.run('outreach_booking_url', SEED_BOOKING_URL);
+      set.run('outreach_pitch', SEED_PITCH);
+      set.run('outreach_sent_query', SEED_SENT_QUERY);
     },
   },
 ];
