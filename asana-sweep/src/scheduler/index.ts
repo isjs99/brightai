@@ -8,6 +8,8 @@ import { syncGmv } from '../gmv/sync.js';
 import { LeadsWatcher } from '../leads/sync.js';
 import { InboxWatcher } from '../inbox/sync.js';
 import { importPullFiles } from '../bd/import.js';
+import { EnrichJob } from '../bd/enrich.js';
+import { apollo } from '../bd/apollo.js';
 import type { Rule } from '../sweep/types.js';
 import { nextRun } from './describe.js';
 
@@ -25,10 +27,12 @@ export class Scheduler {
   private gmvMonthlyTask: ScheduledTask | null = null;
   readonly leads: LeadsWatcher;
   readonly inbox: InboxWatcher;
+  readonly enrich: EnrichJob;
 
   constructor(private q: Queries) {
     this.leads = new LeadsWatcher(q);
     this.inbox = new InboxWatcher(q);
+    this.enrich = new EnrichJob(q);
   }
 
   start(): void {
@@ -47,8 +51,18 @@ export class Scheduler {
     // New FastMoss pulls dropped into data/bd-pulls: import at start and every morning.
     importPullFiles(this.q);
     this.q.markExistingClients();
-    this.pullsTask = cron.schedule('0 6 * * *', () => importPullFiles(this.q), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
+    this.autoEnrich();
+    this.pullsTask = cron.schedule('0 6 * * *', () => { importPullFiles(this.q); this.q.markExistingClients(); this.autoEnrich(); }, { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     log.info(`Scheduler started with ${this.tasks.size} active rule(s)`);
+  }
+
+  /** Apollo decision makers for every prospect that has none, with no one clicking: needs APOLLO_API_KEY and the switch on. */
+  autoEnrich(): void {
+    if (!apollo.configured || this.q.getSetting('apollo_auto_enrich', '1') !== '1' || this.enrich.state.running) return;
+    const n = this.enrich.candidates().length;
+    if (!n) return;
+    log.info(`Auto-enriching ${n} prospect(s) without contacts via Apollo`);
+    this.enrich.start();
   }
 
   /** (Re)register the daily checklist completion check from settings. */

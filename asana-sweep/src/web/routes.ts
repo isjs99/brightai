@@ -21,7 +21,7 @@ import type { LeadsData, PersonInput, ReminderSettings } from '../sweep/types.js
 import { importLeadsCsv, leadsSettings, leadsSyncStatus, syncLeads } from '../leads/sync.js';
 import { amSummary } from '../leads/points.js';
 import { apollo } from '../bd/apollo.js';
-import { EnrichJob, enrichProspect } from '../bd/enrich.js';
+import { enrichProspect } from '../bd/enrich.js';
 import { autoReplyBlocker, inboxSettings, sendReply, syncInbox } from '../inbox/sync.js';
 import { buildContext, renderPrompt } from '../inbox/context.js';
 import { draftWithClaude } from '../inbox/llm.js';
@@ -199,6 +199,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
       throw new HttpError(400, (err as Error).message);
     }
     liveEvents.emitUpdate({ kind: 'bd' });
+    if (result.added) scheduler.autoEnrich();
     res.json({ result });
   });
 
@@ -1081,7 +1082,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   const BD_STATUSES: BdStatus[] = ['new', 'researching', 'contacted', 'replied', 'meeting', 'won', 'lost'];
 
   const gmail = new GmailClient(q);
-  const enrichJob = new EnrichJob(q);
+  const enrichJob = scheduler.enrich;
 
   const bdData = (): BdData => {
     const prospects = q.listProspects(false);
@@ -1118,12 +1119,13 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
         gmv_started_30d: prospects.filter((p) => p.gmv_started_30d).length,
       },
       enrich: enrichJob.state,
+      auto_enrich: q.getSetting('apollo_auto_enrich', '1') === '1',
     };
   };
 
   r.get('/bd', (_req, res) => res.json(bdData()));
 
-  r.post('/bd/pulls/import', (_req, res) => res.json(importPullFiles(q)));
+  r.post('/bd/pulls/import', (_req, res) => { const r = importPullFiles(q); if (r.added) scheduler.autoEnrich(); res.json(r); });
 
   r.post('/bd/prospects', (req, res) => {
     const input = parseProspectInput({ source: 'manual', ...((req.body ?? {}) as Record<string, unknown>) });
@@ -1226,6 +1228,15 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const body = (req.body ?? {}) as { reveal?: number; ids?: number[] };
     const state = enrichJob.start({ reveal: Number.isFinite(Number(body.reveal)) ? Number(body.reveal) : undefined, ids: Array.isArray(body.ids) ? body.ids.map(Number).filter(Number.isFinite) : undefined });
     res.status(202).json({ ...bdData(), enrich: state, candidates: enrichJob.candidates().length });
+  });
+
+  r.put('/bd/settings', (req, res) => {
+    const b = (req.body ?? {}) as { auto_enrich?: unknown };
+    if (typeof b.auto_enrich === 'boolean') {
+      q.setSetting('apollo_auto_enrich', b.auto_enrich ? '1' : '0');
+      if (b.auto_enrich) scheduler.autoEnrich();
+    }
+    res.json(bdData());
   });
 
   r.post('/bd/enrich-all/stop', (_req, res) => {

@@ -763,6 +763,8 @@ export interface BdData {
   last_pull_at: string | null;
   totals: { prospects: number; complete: number; won: number; with_contacts: number; new_30d: number; gmv_started_30d: number };
   enrich: BdEnrichStatus;
+  /** Enrich new prospects with Apollo automatically after every pull or import. */
+  auto_enrich: boolean;
 }
 
 /** Progress of the background "find decision makers for every prospect" job. */

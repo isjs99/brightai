@@ -261,6 +261,7 @@ export const api = {
   findContacts: (prospectId: number, opts: { domain?: string; reveal?: number } = {}) => call<BdData & { matched: boolean; company: string | null; domain: string | null; found: number; kept: number; revealed: number; prospect: BdProspect }>('POST', `/bd/prospects/${prospectId}/find-contacts`, opts),
   enrichAll: (opts: { reveal?: number; ids?: number[] } = {}) => call<BdData & { candidates: number }>('POST', '/bd/enrich-all', opts),
   stopEnrich: () => call<BdData>('POST', '/bd/enrich-all/stop'),
+  saveBdSettings: (s: { auto_enrich?: boolean }) => call<BdData>('PUT', '/bd/settings', s),
   revealContact: (id: number) => call<BdData & { contact: BdContact; prospect: BdProspect }>('POST', `/bd/contacts/${id}/reveal`),
   importProspects: (prospects: Record<string, unknown>[]) => call<{ result: { added: number; updated: number } }>('POST', '/bd/import', { prospects }),
   leads: () => call<LeadsData>('GET', '/leads'),
