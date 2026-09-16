@@ -46,19 +46,44 @@ export default function RulesList() {
     }
   };
 
+  const [runningAll, setRunningAll] = useState(false);
+
   const runNow = async (rule: RuleSummary) => {
-    if (!rule.dry_run && !window.confirm(`Run "${rule.name}" now? This rule is LIVE and will delete matched tasks.`)) return;
+    const ok = window.confirm(
+      `Sweep "${rule.asana_project_name || rule.name}" now?\n\nCompleted tasks that have an incomplete twin are deleted from Asana straight away. This ignores dry run and the minimum age.`,
+    );
+    if (!ok) return;
     setBusy(rule.id);
     setNotice(null);
     try {
       const { run, rule: updated } = await api.runRule(rule.id);
       replace(updated);
-      const what = run.status === 'dry_run' ? `${run.matched_count} would be deleted` : `${run.deleted_count} deleted`;
-      setNotice(`${rule.name}: ${run.status === 'error' ? `error: ${run.error_message}` : `${run.scanned_count} scanned, ${what}.`}`);
+      setNotice(`${rule.name}: ${run.status === 'error' ? `error: ${run.error_message}` : `${run.scanned_count} scanned, ${run.deleted_count} deleted.`}`);
     } catch (err) {
       setError((err as Error).message);
     } finally {
       setBusy(null);
+    }
+  };
+
+  const runAll = async () => {
+    const n = (rules ?? []).filter((r) => r.enabled).length;
+    const ok = window.confirm(
+      `Sweep all ${n} enabled boards now?\n\nCompleted tasks that have an incomplete twin are deleted from Asana straight away. This ignores dry run and the minimum age.`,
+    );
+    if (!ok) return;
+    setRunningAll(true);
+    setNotice(null);
+    try {
+      const { runs, rules: updated } = await api.runAllRules();
+      setRules(updated);
+      const deleted = runs.reduce((s, r) => s + r.deleted_count, 0);
+      const errors = runs.filter((r) => r.status === 'error').length;
+      setNotice(`Swept ${runs.length} boards: ${deleted} tasks deleted${errors ? `, ${errors} board(s) errored` : ''}.`);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setRunningAll(false);
     }
   };
 
@@ -90,10 +115,15 @@ export default function RulesList() {
     <>
       <div className="page-head">
         <div>
-          <h1>Rules</h1>
-          <p className="hint" style={{ margin: 0 }}>One rule per Asana project. Each run deletes completed tasks that have an incomplete twin with the same name.</p>
+          <h1>Sweep rules</h1>
+          <p className="hint" style={{ margin: 0 }}>
+            One rule per checklist board, created automatically when an account is linked. Scheduled runs respect dry run and the minimum age. "Run now" deletes straight away.
+          </p>
         </div>
-        <Link to="/rules/new" className="btn">+ New rule</Link>
+        <div className="actions">
+          <button className="primary" onClick={runAll} disabled={runningAll || !rules?.length}>{runningAll ? 'Sweeping…' : 'Sweep all boards now'}</button>
+          <Link to="/rules/new" className="btn">+ New rule</Link>
+        </div>
       </div>
       {error && <div className="banner crit">{error}</div>}
       {notice && <div className="banner info">{notice}</div>}
@@ -166,8 +196,8 @@ export default function RulesList() {
                 </td>
                 <td>
                   <div className="actions">
-                    <button className="small" disabled={busy === r.id || r.is_running} onClick={() => runNow(r)}>
-                      {busy === r.id ? 'Working…' : 'Run now'}
+                    <button className="small" disabled={busy === r.id || r.is_running || runningAll} onClick={() => runNow(r)}>
+                      {busy === r.id ? 'Sweeping…' : 'Run now'}
                     </button>
                     <Link className="btn small" to={`/rules/${r.id}`}>Edit</Link>
                     <button className="small" disabled={busy === r.id} onClick={() => duplicate(r)}>Duplicate</button>

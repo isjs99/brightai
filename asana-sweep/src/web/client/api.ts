@@ -52,6 +52,7 @@ export const api = {
   deleteRule: (id: number) => call<{ ok: true }>('DELETE', `/rules/${id}`),
   duplicateRule: (id: number) => call<{ rule: RuleSummary }>('POST', `/rules/${id}/duplicate`),
   runRule: (id: number) => call<{ run: Run; rule: RuleSummary }>('POST', `/rules/${id}/run`),
+  runAllRules: () => call<{ runs: Run[]; rules: RuleSummary[] }>('POST', '/rules/run-all'),
   listRuns: (id: number) => call<{ runs: Run[] }>('GET', `/rules/${id}/runs`),
   getRun: (id: number) => call<{ run: Run; items: RunItem[] }>('GET', `/runs/${id}`),
   // Accounts + checklist checks

@@ -3,7 +3,7 @@ import { asana, AsanaError } from '../asana/client.js';
 import { Queries } from '../db/queries.js';
 import { Scheduler } from '../scheduler/index.js';
 import { CRON_PRESETS, describeSchedule, isValidTimezone, nextRun, validateCron } from '../scheduler/describe.js';
-import { isRuleRunning, previewRule, runRule } from '../sweep/runner.js';
+import { isRuleRunning, previewRule, runAllRules, runRule } from '../sweep/runner.js';
 import type { AccountInput, AccountStatusRow, Analytics, AnalyticsAccount, AnalyticsAm, CheckSettings, RuleInput, RuleSummary } from '../sweep/types.js';
 import { checkAccount, isCheckRunning, runAllChecks, todayIn } from '../checklist/checker.js';
 import type { AuthProvider } from './auth.js';
@@ -229,9 +229,15 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const id = idParam(req);
     const rule = q.getRule(id);
     if (!rule) throw new HttpError(404, 'Rule not found');
-    const run = await runRule(q, rule, { trigger: 'manual' });
+    // Run now deletes immediately: ignores dry run and the minimum age.
+    const run = await runRule(q, rule, { trigger: 'manual', force: true });
     if (!run) return res.status(409).json({ error: 'This rule is already running. Try again in a moment.' });
     res.json({ run, rule: summarise(id) });
+  });
+
+  r.post('/rules/run-all', async (_req, res) => {
+    const runs = await runAllRules(q, { force: true });
+    res.json({ runs, rules: q.listRules().map((rule) => summarise(rule.id)) });
   });
 
   r.get('/rules/:id/runs', (req, res) => {
@@ -281,8 +287,29 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     res.json({ accounts: accountRows(todayIn(checkTz())) });
   });
 
+  /** Every linked checklist board gets its own sweep rule (live, weekdays 06:30). */
+  const ensureSweepRule = (account: { name: string; asana_project_gid: string | null; asana_project_name: string }) => {
+    if (!account.asana_project_gid || q.ruleExistsForProject(account.asana_project_gid)) return null;
+    const rule = q.createRule({
+      name: `${account.name} AM Daily Checklist`,
+      asana_project_gid: account.asana_project_gid,
+      asana_project_name: account.asana_project_name,
+      enabled: true,
+      cron: '30 6 * * 1-5',
+      timezone: checkTz(),
+      dry_run: false,
+      min_age_hours: 12,
+      require_section_match: true,
+      max_deletes_per_run: 50,
+      notify_slack_webhook: null,
+    });
+    scheduler.reloadRule(rule.id);
+    return rule;
+  };
+
   r.post('/accounts', (req, res) => {
     const account = q.createAccount(parseAccountInput(req.body ?? {}));
+    ensureSweepRule(account);
     res.status(201).json({ account });
   });
 
@@ -290,6 +317,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const id = idParam(req);
     const account = q.updateAccount(id, parseAccountInput(req.body ?? {}));
     if (!account) throw new HttpError(404, 'Account not found');
+    ensureSweepRule(account);
     res.json({ account });
   });
 
@@ -307,26 +335,13 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     res.json({ ok: true });
   });
 
-  /** Create a sweep rule (dry run) for the account's checklist project. */
+  /** Create the sweep rule for the account's checklist project if it is missing. */
   r.post('/accounts/:id/sweep-rule', (req, res) => {
     const account = q.getAccount(idParam(req));
     if (!account) throw new HttpError(404, 'Account not found');
     if (!account.asana_project_gid) throw new HttpError(400, 'Link an Asana project first.');
-    if (q.ruleExistsForProject(account.asana_project_gid)) throw new HttpError(409, 'A sweep rule already exists for this project.');
-    const rule = q.createRule({
-      name: `${account.name} AM Daily Checklist`,
-      asana_project_gid: account.asana_project_gid,
-      asana_project_name: account.asana_project_name,
-      enabled: true,
-      cron: '30 6 * * 1-5',
-      timezone: checkTz(),
-      dry_run: true,
-      min_age_hours: 12,
-      require_section_match: true,
-      max_deletes_per_run: 50,
-      notify_slack_webhook: null,
-    });
-    scheduler.reloadRule(rule.id);
+    const rule = ensureSweepRule(account);
+    if (!rule) throw new HttpError(409, 'A sweep rule already exists for this project.');
     res.status(201).json({ rule: summarise(rule.id) });
   });
 

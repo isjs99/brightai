@@ -141,7 +141,7 @@ export default function Accounts() {
                 <td className="hide-sm">{a.aa_name ?? <span className="sub">any</span>}</td>
                 <td>{a.asana_project_gid ? <span>{a.asana_project_name || <span className="mono">{a.asana_project_gid}</span>}</span> : <span className="badge muted">not linked</span>}</td>
                 <td className="hide-sm">
-                  {!a.asana_project_gid ? <span className="sub">–</span> : has_sweep_rule ? <Link to="/">yes</Link> : <button className="small" disabled={busy === a.id} onClick={() => addRule(a)}>Add (dry run)</button>}
+                  {!a.asana_project_gid ? <span className="sub">–</span> : has_sweep_rule ? <Link to="/">yes</Link> : <button className="small" disabled={busy === a.id} onClick={() => addRule(a)}>Add</button>}
                 </td>
                 <td><label className="toggle"><input type="checkbox" checked={a.enabled} disabled={busy === a.id} onChange={() => toggle(a)} />{a.enabled ? 'Yes' : 'No'}</label></td>
                 <td><div className="actions"><button className="small" onClick={() => setEditing(a)}>Edit</button><button className="small danger" disabled={busy === a.id} onClick={() => remove(a)}>Remove</button></div></td>

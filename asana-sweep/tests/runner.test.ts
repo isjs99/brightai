@@ -49,12 +49,20 @@ describe('runRule', () => {
 
   beforeEach(() => {
     q = new Queries(openTestDb());
-    rule = q.getRule(1)!; // seed rule, dry run on
+    rule = q.getRule(1)!; // seed rule, put into dry run for these tests
     expect(rule).toBeTruthy();
-    expect(rule.dry_run).toBe(true);
+    rule = q.updateRule(rule.id, { ...rule, dry_run: true })!;
   });
 
-  it('seeds the pilot rule in dry run', () => {
+  it('seeds a live sweep rule for every linked checklist board', () => {
+    const rules = q.listRules();
+    const linked = q.listAccounts().filter((a) => a.asana_project_gid);
+    expect(rules.length).toBe(linked.length);
+    for (const a of linked) expect(rules.some((r) => r.asana_project_gid === a.asana_project_gid)).toBe(true);
+    expect(rules.filter((r) => r.id !== rule.id).every((r) => !r.dry_run && r.enabled)).toBe(true);
+  });
+
+  it('seeds the pilot rule', () => {
     expect(rule.asana_project_gid).toBe('1216709753301754');
     expect(rule.cron).toBe('30 6 * * 1-5');
     expect(rule.timezone).toBe('Europe/Madrid');
@@ -136,6 +144,27 @@ describe('runRule', () => {
     expect(second).toBeNull();
     release();
     expect((await first)!.status).toBe('dry_run');
+  });
+
+  it('force run deletes immediately, ignoring dry run and the minimum age', async () => {
+    const recent = [
+      T('r1', 'Orders - AM daily checks', true, 1), // completed 1h ago, under the 12h minimum
+      T('r2', 'Orders - AM daily checks', false, null),
+    ];
+    const { client, deleted } = stubClient(recent);
+    expect(rule.dry_run).toBe(true);
+    const run = (await runRule(q, rule, { trigger: 'manual', client, force: true }))!;
+    expect(run.status).toBe('ok');
+    expect(run.dry_run).toBe(false);
+    expect(run.deleted_count).toBe(1);
+    expect(deleted).toEqual(['r1']);
+    expect(run.warnings.some((w) => w.startsWith('Run now'))).toBe(true);
+    // Without force the same task is protected by dry run and the minimum age.
+    const { client: c2, deleted: d2 } = stubClient(recent);
+    const safe = (await runRule(q, rule, { trigger: 'schedule', client: c2 }))!;
+    expect(safe.status).toBe('dry_run');
+    expect(safe.matched_count).toBe(0);
+    expect(d2).toEqual([]);
   });
 
   it('preview never writes', async () => {

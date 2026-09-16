@@ -48,21 +48,19 @@ Set `PUBLIC_URL` in `.env` to wherever the dashboard is reachable so the "View r
 
 ## Using the dashboard
 
-Sign in with the dashboard password. You will see the seeded rule, **GreatVita AM Daily Checklist (Pilot)**, scheduled weekdays 06:30 Madrid time, in dry run.
+Sign in with the dashboard password. Every account that is linked to an Asana checklist board has its own sweep rule, scheduled weekdays 06:30 Madrid time and live. Linking a new board on the Accounts page creates its rule automatically.
 
-**Rules list.** One row per project: schedule in plain English, on/off toggle, dry run or live, last run result, next run time. Buttons: Run now, Edit, Duplicate, Delete.
+**Sweep rules list.** One row per board: schedule in plain English, on/off toggle, dry run or live, last run result, next run time. Buttons: Run now, Edit, Duplicate, Delete. **Sweep all boards now** at the top runs every enabled rule in one go.
+
+**Run now deletes straight away.** It ignores the rule's dry run flag and the minimum age, so a task completed five minutes ago is removed if it has an incomplete twin. Scheduled 06:30 runs keep both safeguards. You get a confirmation prompt either way.
 
 **Rule editor.** Pick the Asana project by typing its name (no GIDs to paste), choose a schedule preset or type a cron expression, adjust the safeguards, optionally add a Slack webhook. The **Preview what would be deleted** button runs the matching logic live against Asana with the settings on screen and shows every completed task with the action it would take and why. It saves nothing and deletes nothing.
 
 **Run history.** Every run, with counts and any warnings. Click a run to see every task it looked at: deleted, would delete, or skipped (no twin, too recent, section mismatch), with the reason. This is the audit trail for "what did you delete yesterday and why". Runs are kept for 90 days.
 
-### Going from dry run to live
+### Dry run
 
-1. Open the rule, click **Preview what would be deleted** and read the list. Do this a couple of mornings in a row, or check the dry-run entries in Run history.
-2. When the list looks right, untick **Dry run** in the editor and save, or untick the Live checkbox's twin on the rules list. Either way you get a confirmation prompt.
-3. The next scheduled run deletes for real. Check Run history or the Slack message afterwards.
-
-If anything looks wrong, tick Dry run again or switch the rule off. Both take effect immediately.
+Rules are live by default. If you want to watch a board before it is swept on schedule, tick **Dry run** on the rules list: scheduled runs then only log what they would delete. **Preview what would be deleted** in the editor does the same on demand without saving anything. Switch a rule off to pause its schedule entirely. Both take effect immediately.
 
 ### Adding another project
 

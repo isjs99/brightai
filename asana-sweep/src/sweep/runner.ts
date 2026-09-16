@@ -51,6 +51,8 @@ export async function previewRule(input: Pick<RuleInput, 'asana_project_gid' | '
 export interface RunOptions {
   trigger: Run['trigger'];
   client?: AsanaClient;
+  /** Delete immediately: ignore the rule's dry_run flag and min_age_hours. Used by "Run now". */
+  force?: boolean;
 }
 
 /**
@@ -64,17 +66,20 @@ export async function runRule(q: Queries, rule: Rule, opts: RunOptions): Promise
   }
   running.add(rule.id);
   const client = opts.client ?? asana;
-  const run = q.createRun(rule.id, opts.trigger, rule.dry_run);
-  log.info(`Run ${run.id} started for rule ${rule.id} (${rule.name}) via ${opts.trigger}${rule.dry_run ? ' [dry run]' : ''}`);
+  const dryRun = opts.force ? false : rule.dry_run;
+  const minAgeHours = opts.force ? 0 : rule.min_age_hours;
+  const run = q.createRun(rule.id, opts.trigger, dryRun);
+  log.info(`Run ${run.id} started for rule ${rule.id} (${rule.name}) via ${opts.trigger}${dryRun ? ' [dry run]' : ''}${opts.force ? ' [immediate]' : ''}`);
 
   let finished: Run;
   try {
     const project = await client.getProject(rule.asana_project_gid);
     q.setRuleProjectName(rule.id, project.name);
     const tasks = await client.listProjectTasks(rule.asana_project_gid);
-    const plan = buildPlan(tasks, { minAgeHours: rule.min_age_hours, requireSectionMatch: rule.require_section_match });
+    const plan = buildPlan(tasks, { minAgeHours, requireSectionMatch: rule.require_section_match });
     const warnings = [...plan.warnings];
-    for (const w of warnings) log.warn(`Run ${run.id}: ${w}`);
+    if (opts.force) warnings.push('Run now: deleted immediately, ignoring dry run and the minimum age.');
+    for (const w of plan.warnings) log.warn(`Run ${run.id}: ${w}`);
 
     const capError = checkCap(plan, rule.max_deletes_per_run);
     if (capError) {
@@ -87,7 +92,7 @@ export async function runRule(q: Queries, rule: Rule, opts: RunOptions): Promise
         error_message: capError,
         warnings,
       });
-    } else if (rule.dry_run) {
+    } else if (dryRun) {
       q.addRunItems(run.id, plan.items.map((p) => planToItem(p, planActionToRunAction(p, true))));
       finished = q.finishRun(run.id, {
         status: 'dry_run',
@@ -145,6 +150,16 @@ export async function runRule(q: Queries, rule: Rule, opts: RunOptions): Promise
     await postSlack(rule.notify_slack_webhook, slackMessage(rule, finished));
   }
   return finished;
+}
+
+/** Run every enabled rule in sequence. Skips rules that are already running. */
+export async function runAllRules(q: Queries, opts: { force: boolean; client?: AsanaClient }): Promise<Run[]> {
+  const out: Run[] = [];
+  for (const rule of q.listRules().filter((r) => r.enabled)) {
+    const run = await runRule(q, rule, { trigger: 'manual', force: opts.force, client: opts.client });
+    if (run) out.push(run);
+  }
+  return out;
 }
 
 export function slackMessage(rule: Rule, run: Run): string {

@@ -163,6 +163,28 @@ const migrations: Migration[] = [
       for (const r of roster) acc.run(...r);
     },
   },
+  {
+    version: 3,
+    name: 'sweep rule for every linked checklist board, rules live',
+    up(db) {
+      // Every account with a linked checklist project gets its own sweep rule.
+      const accounts = db.prepare(`SELECT name, asana_project_gid, asana_project_name FROM accounts WHERE asana_project_gid IS NOT NULL`).all() as {
+        name: string;
+        asana_project_gid: string;
+        asana_project_name: string;
+      }[];
+      const exists = db.prepare(`SELECT 1 FROM rules WHERE asana_project_gid = ?`);
+      const ins = db.prepare(
+        `INSERT INTO rules (name, asana_project_gid, asana_project_name, enabled, cron, timezone, dry_run, min_age_hours, require_section_match, max_deletes_per_run)
+         VALUES (?, ?, ?, 1, '30 6 * * 1-5', 'Europe/Madrid', 0, 12, 1, 50)`,
+      );
+      for (const a of accounts) {
+        if (!exists.get(a.asana_project_gid)) ins.run(`${a.name} AM Daily Checklist`, a.asana_project_gid, a.asana_project_name);
+      }
+      // Sweeps are live from here on. Toggle a rule back to dry run from the dashboard if needed.
+      db.exec(`UPDATE rules SET dry_run = 0`);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {
