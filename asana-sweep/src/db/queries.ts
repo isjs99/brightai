@@ -1,5 +1,22 @@
 import type Database from 'better-sqlite3';
-import type { Account, AccountInput, Check, CheckItem, CheckStatus, CheckWithItems, Rule, RuleInput, Run, RunItem, RunItemAction, RunStatus } from '../sweep/types.js';
+import type {
+  Account,
+  AccountInput,
+  AccountShop,
+  Check,
+  CheckItem,
+  CheckStatus,
+  CheckWithItems,
+  GmvSync,
+  Person,
+  PersonInput,
+  Rule,
+  RuleInput,
+  Run,
+  RunItem,
+  RunItemAction,
+  RunStatus,
+} from '../sweep/types.js';
 
 type Row = Record<string, unknown>;
 
@@ -363,5 +380,146 @@ export class Queries {
   pruneRuns(olderThanDays: number): number {
     const cutoff = new Date(Date.now() - olderThanDays * 86400000).toISOString();
     return this.db.prepare('DELETE FROM runs WHERE started_at < ?').run(cutoff).changes;
+  }
+
+  // ---- People ----
+
+  listPeople(): Person[] {
+    return this.db.prepare('SELECT * FROM people ORDER BY name COLLATE NOCASE').all().map((r) => this.rowToPerson(r as Row));
+  }
+
+  getPerson(id: number): Person | null {
+    const r = this.db.prepare('SELECT * FROM people WHERE id = ?').get(id) as Row | undefined;
+    return r ? this.rowToPerson(r) : null;
+  }
+
+  private rowToPerson(r: Row): Person {
+    return {
+      id: r.id as number,
+      name: r.name as string,
+      role: (r.role as Person['role']) ?? 'am',
+      email: (r.email as string | null) || null,
+      slack_user_id: (r.slack_user_id as string | null) || null,
+      notify: Boolean(r.notify),
+    };
+  }
+
+  createPerson(input: PersonInput): Person {
+    const res = this.db
+      .prepare(`INSERT INTO people (name, role, email, slack_user_id, notify) VALUES (@name, @role, @email, @slack_user_id, @notify)`)
+      .run({ ...input, notify: input.notify ? 1 : 0 });
+    return this.getPerson(Number(res.lastInsertRowid))!;
+  }
+
+  updatePerson(id: number, input: PersonInput): Person | null {
+    const res = this.db
+      .prepare(
+        `UPDATE people SET name=@name, role=@role, email=@email, slack_user_id=@slack_user_id, notify=@notify,
+            updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id=@id`,
+      )
+      .run({ ...input, id, notify: input.notify ? 1 : 0 });
+    return res.changes ? this.getPerson(id) : null;
+  }
+
+  deletePerson(id: number): boolean {
+    return this.db.prepare('DELETE FROM people WHERE id = ?').run(id).changes > 0;
+  }
+
+  // ---- Cruva shops ----
+
+  listShops(): AccountShop[] {
+    return this.db.prepare('SELECT * FROM account_shops ORDER BY shop_name COLLATE NOCASE').all().map((r) => this.rowToShop(r as Row));
+  }
+
+  private rowToShop(r: Row): AccountShop {
+    return {
+      id: r.id as number,
+      account_id: r.account_id as number,
+      shop_id: r.shop_id as string,
+      shop_name: r.shop_name as string,
+      currency: (r.currency as string) ?? '$',
+    };
+  }
+
+  addShop(accountId: number, shopId: string, shopName: string, currency = '$'): AccountShop {
+    this.db
+      .prepare(
+        `INSERT INTO account_shops (account_id, shop_id, shop_name, currency) VALUES (?, ?, ?, ?)
+         ON CONFLICT(shop_id) DO UPDATE SET account_id = excluded.account_id, shop_name = excluded.shop_name, currency = excluded.currency`,
+      )
+      .run(accountId, shopId, shopName, currency);
+    return this.rowToShop(this.db.prepare('SELECT * FROM account_shops WHERE shop_id = ?').get(shopId) as Row);
+  }
+
+  removeShop(id: number): boolean {
+    return this.db.prepare('DELETE FROM account_shops WHERE id = ?').run(id).changes > 0;
+  }
+
+  // ---- GMV ----
+
+  upsertGmv(rows: { shop_id: string; date: string; total_gmv: number; affiliate_gmv: number; units: number; source?: string }[]): number {
+    const stmt = this.db.prepare(
+      `INSERT INTO gmv_daily (shop_id, date, total_gmv, affiliate_gmv, units, source, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(shop_id, date) DO UPDATE SET total_gmv = excluded.total_gmv, affiliate_gmv = excluded.affiliate_gmv,
+         units = excluded.units, source = excluded.source, synced_at = excluded.synced_at`,
+    );
+    const now = new Date().toISOString();
+    let n = 0;
+    this.db.transaction(() => {
+      for (const r of rows) {
+        stmt.run(r.shop_id, r.date, r.total_gmv, r.affiliate_gmv, r.units, r.source ?? 'cruva', now);
+        n += 1;
+      }
+    })();
+    return n;
+  }
+
+  listGmvBetween(from: string, to: string): { shop_id: string; date: string; total_gmv: number; affiliate_gmv: number; units: number; synced_at: string }[] {
+    return this.db
+      .prepare('SELECT shop_id, date, total_gmv, affiliate_gmv, units, synced_at FROM gmv_daily WHERE date >= ? AND date <= ? ORDER BY date')
+      .all(from, to) as { shop_id: string; date: string; total_gmv: number; affiliate_gmv: number; units: number; synced_at: string }[];
+  }
+
+  getTargets(month: string): Map<number, number> {
+    const rows = this.db.prepare('SELECT account_id, target FROM gmv_targets WHERE month = ?').all(month) as { account_id: number; target: number }[];
+    return new Map(rows.map((r) => [r.account_id, r.target]));
+  }
+
+  setTarget(accountId: number, month: string, target: number | null): void {
+    if (target === null) this.db.prepare('DELETE FROM gmv_targets WHERE account_id = ? AND month = ?').run(accountId, month);
+    else
+      this.db
+        .prepare(`INSERT INTO gmv_targets (account_id, month, target) VALUES (?, ?, ?) ON CONFLICT(account_id, month) DO UPDATE SET target = excluded.target`)
+        .run(accountId, month, target);
+  }
+
+  copyTargets(fromMonth: string, toMonth: string): number {
+    return this.db
+      .prepare(`INSERT OR IGNORE INTO gmv_targets (account_id, month, target) SELECT account_id, ?, target FROM gmv_targets WHERE month = ?`)
+      .run(toMonth, fromMonth).changes;
+  }
+
+  startGmvSync(): GmvSync {
+    const res = this.db.prepare(`INSERT INTO gmv_syncs (started_at, status) VALUES (?, 'running')`).run(new Date().toISOString());
+    return this.getGmvSync(Number(res.lastInsertRowid))!;
+  }
+
+  finishGmvSync(id: number, status: 'ok' | 'error', shopsSynced: number, error: string | null): GmvSync {
+    this.db.prepare(`UPDATE gmv_syncs SET finished_at = ?, status = ?, shops_synced = ?, error_message = ? WHERE id = ?`).run(new Date().toISOString(), status, shopsSynced, error, id);
+    return this.getGmvSync(id)!;
+  }
+
+  getGmvSync(id: number): GmvSync | null {
+    const r = this.db.prepare('SELECT * FROM gmv_syncs WHERE id = ?').get(id) as GmvSync | undefined;
+    return r ?? null;
+  }
+
+  lastGmvSync(): GmvSync | null {
+    const r = this.db.prepare('SELECT * FROM gmv_syncs ORDER BY id DESC LIMIT 1').get() as GmvSync | undefined;
+    return r ?? null;
+  }
+
+  failStaleGmvSyncs(): void {
+    this.db.prepare(`UPDATE gmv_syncs SET status = 'error', finished_at = ?, error_message = 'Process restarted during sync.' WHERE status = 'running'`).run(new Date().toISOString());
   }
 }

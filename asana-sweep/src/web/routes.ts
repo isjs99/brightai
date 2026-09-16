@@ -5,7 +5,12 @@ import { Scheduler } from '../scheduler/index.js';
 import { CRON_PRESETS, describeSchedule, isValidTimezone, nextRun, validateCron } from '../scheduler/describe.js';
 import { isRuleRunning, previewRule, runAllRules, runRule } from '../sweep/runner.js';
 import type { AccountInput, AccountStatusRow, Analytics, AnalyticsAccount, AnalyticsAm, CheckSettings, RuleInput, RuleSummary } from '../sweep/types.js';
-import { checkAccount, isCheckRunning, runAllChecks, todayIn } from '../checklist/checker.js';
+import { checkAccount, deadlineLabel, isCheckRunning, runAllChecks, todayIn } from '../checklist/checker.js';
+import { DEFAULT_REMINDER_TEXT, incompleteByPerson, notifyAms, renderReminder } from '../checklist/reminders.js';
+import { slackBot } from '../notify/slackbot.js';
+import { buildCalendar, buildGmv, buildGrades } from '../reports/index.js';
+import { syncGmv } from '../gmv/sync.js';
+import type { PersonInput, ReminderSettings } from '../sweep/types.js';
 import type { AuthProvider } from './auth.js';
 import { requireAuth } from './auth.js';
 import { config } from '../config.js';
@@ -403,6 +408,169 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     q.setSetting('check_slack_webhook', webhook);
     scheduler.reloadCheckSchedule();
     res.json({ settings: settingsPayload() });
+  });
+
+  // ---- People (AMs) and Slack reminders ----
+  const parsePerson = (body: Record<string, unknown>): PersonInput => {
+    const name = String(body.name ?? '').trim();
+    if (!name) throw new HttpError(400, 'Name is required.');
+    const role = body.role === 'aa' ? 'aa' : 'am';
+    const email = optText(body.email);
+    if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new HttpError(400, 'Email looks wrong.');
+    const slack = optText(body.slack_user_id);
+    if (slack && !/^[UW][A-Z0-9]{6,}$/.test(slack)) throw new HttpError(400, 'Slack user id should look like U0123ABCDEF.');
+    return { name, role, email, slack_user_id: slack, notify: bool(body.notify, true) };
+  };
+
+  r.get('/people', (_req, res) => res.json({ people: q.listPeople() }));
+  r.post('/people', (req, res) => res.status(201).json({ person: q.createPerson(parsePerson(req.body ?? {})) }));
+  r.put('/people/:id', (req, res) => {
+    const person = q.updatePerson(idParam(req), parsePerson(req.body ?? {}));
+    if (!person) throw new HttpError(404, 'Person not found');
+    res.json({ person });
+  });
+  r.delete('/people/:id', (req, res) => {
+    if (!q.deletePerson(idParam(req))) throw new HttpError(404, 'Person not found');
+    res.json({ ok: true });
+  });
+
+  /** Send a test DM to one person. */
+  r.post('/people/:id/test-dm', async (req, res) => {
+    const person = q.getPerson(idParam(req));
+    if (!person) throw new HttpError(404, 'Person not found');
+    if (!slackBot.configured) throw new HttpError(400, 'SLACK_BOT_TOKEN is not set. Add it to .env and restart.');
+    const to = person.slack_user_id || person.email;
+    if (!to) throw new HttpError(400, 'Add a Slack user id or email first.');
+    const error = await slackBot.tryDm(to, `Test from the AM checklist dashboard. Reminders for ${person.name} will arrive here. <${config.publicUrl}/checklists|Open dashboard>`);
+    if (error) throw new HttpError(502, error);
+    res.json({ ok: true });
+  });
+
+  /** Send the reminder now to every AM whose checklist is not done, based on the latest checks. */
+  r.post('/reminders/send', async (_req, res) => {
+    const tz = checkTz();
+    const checks = q.listChecksForDate(todayIn(tz));
+    if (!checks.length) throw new HttpError(400, 'No checks recorded today yet. Run "Check all now" first.');
+    if (!slackBot.configured) throw new HttpError(400, 'SLACK_BOT_TOKEN is not set. Add it to .env and restart.');
+    const results = await notifyAms(q, checks, { deadline: deadlineLabel(q), force: true });
+    res.json({ results });
+  });
+
+  /** Preview what each AM would receive right now. No DMs are sent. */
+  r.get('/reminders/preview', (_req, res) => {
+    const tz = checkTz();
+    const checks = q.listChecksForDate(todayIn(tz));
+    const template = q.getSetting('reminder_text', '') || DEFAULT_REMINDER_TEXT;
+    const groups = incompleteByPerson(q.listPeople(), q.listAccounts(), checks);
+    res.json({
+      messages: [...groups.values()].map(({ person, accounts }) => ({
+        person: person.name,
+        to: person.slack_user_id || person.email || null,
+        notify: person.notify,
+        text: renderReminder(template, person, accounts, deadlineLabel(q)),
+      })),
+    });
+  });
+
+  const reminderSettings = (): ReminderSettings => ({
+    notify_ams_enabled: q.getSetting('notify_ams_enabled', '0') === '1',
+    reminder_cron: q.getSetting('reminder_cron', '0 14 * * 1-5'),
+    reminder_text: q.getSetting('reminder_text', '') || DEFAULT_REMINDER_TEXT,
+    next_reminder_at: scheduler.nextReminderAt()?.toISOString() ?? null,
+    slack_bot_configured: slackBot.configured,
+  });
+
+  r.get('/reminder-settings', (_req, res) => res.json({ settings: reminderSettings() }));
+  r.put('/reminder-settings', (req, res) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const cronExpr = String(body.reminder_cron ?? '').trim();
+    const cronError = validateCron(cronExpr);
+    if (cronError) throw new HttpError(400, cronError);
+    q.setSetting('reminder_cron', cronExpr);
+    q.setSetting('notify_ams_enabled', bool(body.notify_ams_enabled, false) ? '1' : '0');
+    q.setSetting('reminder_text', String(body.reminder_text ?? '').trim());
+    scheduler.reloadReminderSchedule();
+    res.json({ settings: reminderSettings() });
+  });
+
+  // ---- Calendar ----
+  const monthParam = (req: Request): string => {
+    const m = String(req.query.month ?? '') || todayIn(checkTz()).slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(m)) throw new HttpError(400, 'month must be YYYY-MM');
+    return m;
+  };
+
+  r.get('/calendar', (req, res) => res.json(buildCalendar(q, monthParam(req))));
+
+  // ---- GMV ----
+  r.get('/gmv', (req, res) => res.json(buildGmv(q, monthParam(req))));
+
+  r.put('/gmv/targets', (req, res) => {
+    const body = (req.body ?? {}) as { month?: string; targets?: Record<string, unknown> };
+    const month = String(body.month ?? '');
+    if (!/^\d{4}-\d{2}$/.test(month)) throw new HttpError(400, 'month must be YYYY-MM');
+    for (const [id, v] of Object.entries(body.targets ?? {})) {
+      const accountId = Number(id);
+      if (!q.getAccount(accountId)) continue;
+      const n = v === null || v === '' ? null : Number(v);
+      if (n !== null && (!Number.isFinite(n) || n < 0)) throw new HttpError(400, `Bad target for account ${id}`);
+      q.setTarget(accountId, month, n);
+    }
+    res.json(buildGmv(q, month));
+  });
+
+  r.post('/gmv/targets/copy', (req, res) => {
+    const body = (req.body ?? {}) as { from?: string; to?: string };
+    if (!/^\d{4}-\d{2}$/.test(String(body.from)) || !/^\d{4}-\d{2}$/.test(String(body.to))) throw new HttpError(400, 'from and to must be YYYY-MM');
+    res.json({ copied: q.copyTargets(String(body.from), String(body.to)) });
+  });
+
+  r.post('/gmv/sync', async (_req, res) => {
+    const sync = await syncGmv(q, { days: 40 });
+    if (!sync) return res.status(409).json({ error: 'A sync is already running.' });
+    res.json({ sync });
+  });
+
+  /** Manual import: rows of { shop_id, date, total_gmv, affiliate_gmv?, units? }. Used when the API key is not set. */
+  r.post('/gmv/import', (req, res) => {
+    const body = (req.body ?? {}) as { rows?: Record<string, unknown>[] };
+    const rows = Array.isArray(body.rows) ? body.rows : [];
+    const known = new Set(q.listShops().map((s) => s.shop_id));
+    const clean = rows
+      .map((r) => ({
+        shop_id: String(r.shop_id ?? ''),
+        date: String(r.date ?? '').slice(0, 10),
+        total_gmv: Number(r.total_gmv ?? r.gmv ?? 0),
+        affiliate_gmv: Number(r.affiliate_gmv ?? 0),
+        units: Math.round(Number(r.units ?? r.total_units_sold ?? 0)),
+        source: 'import',
+      }))
+      .filter((r) => known.has(r.shop_id) && /^\d{4}-\d{2}-\d{2}$/.test(r.date) && Number.isFinite(r.total_gmv));
+    res.json({ imported: q.upsertGmv(clean), skipped: rows.length - clean.length });
+  });
+
+  r.get('/gmv/shops', (_req, res) => res.json({ shops: q.listShops() }));
+  r.post('/gmv/shops', (req, res) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const accountId = Number(body.account_id);
+    const shopId = String(body.shop_id ?? '').trim();
+    const shopName = String(body.shop_name ?? '').trim() || shopId;
+    if (!q.getAccount(accountId)) throw new HttpError(404, 'Account not found');
+    if (!/^[a-f0-9]{24}$/i.test(shopId)) throw new HttpError(400, 'Cruva shop id should be 24 hex characters.');
+    res.status(201).json({ shop: q.addShop(accountId, shopId, shopName) });
+  });
+  r.delete('/gmv/shops/:id', (req, res) => {
+    if (!q.removeShop(idParam(req))) throw new HttpError(404, 'Shop not found');
+    res.json({ ok: true });
+  });
+
+  // ---- Grades ----
+  r.get('/grades', (req, res) => res.json(buildGrades(q, monthParam(req))));
+  r.put('/grade-settings', (req, res) => {
+    const w = Number((req.body ?? {}).weight_checklist);
+    if (!Number.isFinite(w) || w < 0 || w > 100) throw new HttpError(400, 'weight_checklist must be 0..100');
+    q.setSetting('grade_weight_checklist', String(Math.round(w)));
+    res.json({ weight_checklist: Math.round(w) });
   });
 
   // ---- Analytics ----

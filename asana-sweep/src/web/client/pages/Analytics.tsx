@@ -1,8 +1,100 @@
 import { useEffect, useState } from 'react';
-import type { Analytics } from '../../../sweep/types';
-import { api } from '../api';
+import type { Analytics, GradeRow, GradesData } from '../../../sweep/types';
+import { api, currentMonth, fmtMoney, fmtPct, monthLabel, shiftMonth } from '../api';
 
 const pct = (v: number | null) => (v === null ? '–' : `${v}%`);
+
+function GradeBadge({ grade }: { grade: GradeRow['grade'] }) {
+  return grade ? <span className={`grade ${grade}`}>{grade}</span> : <span className="sub">–</span>;
+}
+
+function GradeTable({ rows, showAm }: { rows: GradeRow[]; showAm: boolean }) {
+  return (
+    <table>
+      <thead>
+        <tr>
+          <th>{showAm ? 'Account' : 'AM'}</th>
+          {showAm && <th>AM</th>}
+          <th>Grade</th>
+          <th className="num">Score</th>
+          <th className="num">Checklist</th>
+          <th className="num hide-sm">Missed</th>
+          <th className="num">GMV</th>
+          <th className="num hide-sm">Target</th>
+          <th className="num">GMV %</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((r) => (
+          <tr key={`${r.account_id ?? 'am'}-${r.name}`}>
+            <td><b>{r.name}</b></td>
+            {showAm && <td className="sub">{r.am_name ?? ''}</td>}
+            <td><GradeBadge grade={r.grade} /></td>
+            <td className="num">{r.score ?? '–'}</td>
+            <td className="num"><span className={`frac ${r.compliance === null ? '' : r.compliance >= 100 ? 'ok' : r.compliance >= 80 ? 'warn-ink' : 'bad'}`}>{fmtPct(r.compliance)}</span><div className="sub">{r.checked_days} day{r.checked_days === 1 ? '' : 's'}</div></td>
+            <td className="num hide-sm">{r.missed || <span className="sub">0</span>}</td>
+            <td className="num">{fmtMoney(r.gmv)}</td>
+            <td className="num hide-sm">{fmtMoney(r.target)}</td>
+            <td className="num"><span className={`frac ${r.attainment === null ? '' : r.attainment >= 100 ? 'ok' : r.attainment >= 80 ? 'warn-ink' : 'bad'}`}>{fmtPct(r.attainment)}</span></td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function GradesSection() {
+  const [month, setMonth] = useState(currentMonth());
+  const [data, setData] = useState<GradesData | null>(null);
+  const [weight, setWeight] = useState<number | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setData(null);
+    api.grades(month).then((d) => { setData(d); setWeight(d.weight_checklist); }).catch((e) => setError((e as Error).message));
+  }, [month]);
+
+  const saveWeight = async () => {
+    if (weight === null) return;
+    try {
+      await api.saveGradeWeight(weight);
+      setData(await api.grades(month));
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+
+  return (
+    <section style={{ marginBottom: 28 }}>
+      <div className="page-head">
+        <div>
+          <h2 style={{ margin: 0 }}>Grades</h2>
+          <p className="hint" style={{ margin: 0 }}>Checklist compliance (target 100%) blended with GMV against the monthly target. GMV uses the projected month-end figure while the month is running.</p>
+        </div>
+        <div className="toolbar" style={{ margin: 0 }}>
+          <button className="small" onClick={() => setMonth(shiftMonth(month, -1))}>‹</button>
+          <b>{monthLabel(month)}</b>
+          <button className="small" onClick={() => setMonth(shiftMonth(month, 1))} disabled={month >= currentMonth()}>›</button>
+          {weight !== null && (
+            <label className="sub" style={{ marginLeft: 12 }}>
+              checklist weight <input type="number" min={0} max={100} value={weight} onChange={(e) => setWeight(Number(e.target.value))} onBlur={saveWeight} style={{ width: 64 }} /> %
+            </label>
+          )}
+        </div>
+      </div>
+      {error && <div className="banner crit">{error}</div>}
+      {data === null ? <p>Loading…</p> : (
+        <>
+          <div className="legend"><span className="grade A">A</span> 90+ <span className="grade B">B</span> 80+ <span className="grade C">C</span> 70+ <span className="grade D">D</span> 60+ <span className="grade F">F</span> below 60 · score = {data.weight_checklist}% checklist + {100 - data.weight_checklist}% GMV attainment (capped at 100)</div>
+          <h2>Account managers</h2>
+          <GradeTable rows={data.ams} showAm={false} />
+          <h2>Accounts</h2>
+          <GradeTable rows={data.accounts.filter((r) => r.checked_days > 0 || r.gmv > 0 || r.target !== null)} showAm={true} />
+        </>
+      )}
+    </section>
+  );
+}
 
 function Bar({ value }: { value: number | null }) {
   return (
@@ -54,6 +146,8 @@ export default function AnalyticsPage() {
         </div>
       </div>
       {error && <div className="banner crit">{error}</div>}
+      <GradesSection />
+      <h2>Checklist completion</h2>
       {data === null ? <p>Loading…</p> : data.dates.length === 0 ? (
         <div className="empty">No checks recorded yet. Use "Check all now" on the Checklists page, or wait for the 16:00 run.</div>
       ) : (

@@ -131,5 +131,17 @@ table.heat td.cell { padding: 3px; text-align: center; }
 .item-list ul { margin: 4px 0 0 0; padding-left: 16px; list-style: disc; }
 .item-list ul li { display: block; padding: 2px 0; border: 0; }
 .flag { display: inline-block; margin-left: 6px; font-size: 11px; padding: 0 6px; border-radius: 999px; background: var(--crit-bg); color: var(--crit-ink); }
+.cell .s-future { background: transparent; }
+.frac.warn-ink { color: var(--warn-ink); }
+tr.am-row td { background: var(--surface-2); border-top: 2px solid var(--border); }
+tr.sub-row td { background: var(--surface); }
+.spark { display: block; }
+.grade { display: inline-block; min-width: 28px; text-align: center; padding: 2px 6px; border-radius: 6px; font-weight: 600; }
+.grade.A { background: var(--good-bg); color: var(--good-ink); }
+.grade.B { background: #e4ecf7; color: var(--accent); }
+.grade.C { background: var(--warn-bg); color: var(--warn-ink); }
+.grade.D { background: #f7e3d6; color: #8a4a1a; }
+.grade.F { background: var(--crit-bg); color: var(--crit-ink); }
+textarea { font: inherit; padding: 7px 9px; border: 1px solid var(--border); border-radius: 6px; background: #fff; color: var(--ink); }
 .inline-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
 .inline-form label.field { min-width: 140px; }

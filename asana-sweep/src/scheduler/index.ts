@@ -4,6 +4,7 @@ import { log } from '../logger.js';
 import { config } from '../config.js';
 import { runRule } from '../sweep/runner.js';
 import { runAllChecks } from '../checklist/checker.js';
+import { syncGmv } from '../gmv/sync.js';
 import type { Rule } from '../sweep/types.js';
 import { nextRun } from './describe.js';
 
@@ -15,6 +16,8 @@ export class Scheduler {
   private tasks = new Map<number, ScheduledTask>();
   private pruneTask: ScheduledTask | null = null;
   private checkTask: ScheduledTask | null = null;
+  private reminderTask: ScheduledTask | null = null;
+  private gmvTask: ScheduledTask | null = null;
 
   constructor(private q: Queries) {}
 
@@ -45,8 +48,44 @@ export class Scheduler {
       log.error(`Checklist check cron "${expr}" is invalid, not scheduled`);
       return;
     }
-    this.checkTask = cron.schedule(expr, () => runAllChecks(this.q, { trigger: 'schedule' }), { timezone: tz, name: 'checklist-check' });
+    // The final check also DMs AMs who missed the deadline (when reminders are on).
+    this.checkTask = cron.schedule(expr, () => runAllChecks(this.q, { trigger: 'schedule', remind: true }), { timezone: tz, name: 'checklist-check' });
     log.info(`Checklist check scheduled: "${expr}" ${tz}, next ${nextRun(expr, tz)?.toISOString() ?? 'unknown'}`);
+    this.reloadReminderSchedule(tz);
+    this.reloadGmvSchedule();
+  }
+
+  /** Earlier reminder: run the check and DM AMs whose checklists are not done yet. */
+  reloadReminderSchedule(tz = this.q.getSetting('check_timezone', 'Europe/Madrid')): void {
+    this.reminderTask?.destroy();
+    this.reminderTask = null;
+    if (this.q.getSetting('notify_ams_enabled', '0') !== '1') return;
+    const expr = this.q.getSetting('reminder_cron', '0 14 * * 1-5');
+    if (!cron.validate(expr)) {
+      log.error(`Reminder cron "${expr}" is invalid, not scheduled`);
+      return;
+    }
+    this.reminderTask = cron.schedule(expr, () => runAllChecks(this.q, { trigger: 'schedule', notify: false, remind: true }), { timezone: tz, name: 'am-reminder' });
+    log.info(`AM reminder scheduled: "${expr}" ${tz}, next ${nextRun(expr, tz)?.toISOString() ?? 'unknown'}`);
+  }
+
+  nextReminderAt(): Date | null {
+    if (this.q.getSetting('notify_ams_enabled', '0') !== '1') return null;
+    return nextRun(this.q.getSetting('reminder_cron', '0 14 * * 1-5'), this.q.getSetting('check_timezone', 'Europe/Madrid'));
+  }
+
+  reloadGmvSchedule(): void {
+    this.gmvTask?.destroy();
+    this.gmvTask = null;
+    if (this.q.getSetting('gmv_sync_enabled', '1') !== '1') return;
+    const expr = this.q.getSetting('gmv_sync_cron', '15 7 * * *');
+    const tz = this.q.getSetting('check_timezone', 'Europe/Madrid');
+    if (!cron.validate(expr)) {
+      log.error(`GMV sync cron "${expr}" is invalid, not scheduled`);
+      return;
+    }
+    this.gmvTask = cron.schedule(expr, () => syncGmv(this.q, { days: 10 }), { timezone: tz, name: 'gmv-sync' });
+    log.info(`GMV sync scheduled: "${expr}" ${tz}`);
   }
 
   nextCheckAt(): Date | null {
@@ -63,6 +102,10 @@ export class Scheduler {
     this.pruneTask = null;
     this.checkTask?.destroy();
     this.checkTask = null;
+    this.reminderTask?.destroy();
+    this.reminderTask = null;
+    this.gmvTask?.destroy();
+    this.gmvTask = null;
   }
 
   /** Re-read a rule from the database and (re)register or unregister it. */

@@ -1,4 +1,48 @@
-import type { Account, AccountInput, AccountStatusRow, Analytics, CheckSettings, CheckWithItems, PreviewResult, Rule, RuleInput, RuleSummary, Run, RunItem } from '../../sweep/types';
+import type {
+  Account,
+  AccountInput,
+  AccountShop,
+  AccountStatusRow,
+  Analytics,
+  CalendarData,
+  CheckSettings,
+  CheckWithItems,
+  GmvData,
+  GmvSync,
+  GradesData,
+  Person,
+  PersonInput,
+  PreviewResult,
+  ReminderSettings,
+  Rule,
+  RuleInput,
+  RuleSummary,
+  Run,
+  RunItem,
+} from '../../sweep/types';
+
+export function fmtMoney(n: number | null | undefined, currency = '$'): string {
+  if (n === null || n === undefined) return '–';
+  return `${currency}${Math.round(n).toLocaleString('en-GB')}`;
+}
+
+export function fmtPct(n: number | null | undefined): string {
+  return n === null || n === undefined ? '–' : `${Math.round(n)}%`;
+}
+
+export function monthLabel(month: string): string {
+  const [y, m] = month.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
+
+export function shiftMonth(month: string, delta: number): string {
+  const [y, m] = month.split('-').map(Number);
+  return new Date(Date.UTC(y, m - 1 + delta, 1)).toISOString().slice(0, 7);
+}
+
+export function currentMonth(): string {
+  return new Date().toISOString().slice(0, 7);
+}
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -69,6 +113,27 @@ export const api = {
   getCheckSettings: () => call<{ settings: CheckSettings }>('GET', '/check-settings'),
   saveCheckSettings: (s: Pick<CheckSettings, 'check_cron' | 'check_timezone' | 'check_enabled' | 'check_slack_webhook'>) => call<{ settings: CheckSettings }>('PUT', '/check-settings', s),
   analytics: (days: number) => call<Analytics>('GET', `/analytics?days=${days}`),
+  // People + reminders
+  listPeople: () => call<{ people: Person[] }>('GET', '/people'),
+  createPerson: (p: PersonInput) => call<{ person: Person }>('POST', '/people', p),
+  updatePerson: (id: number, p: PersonInput) => call<{ person: Person }>('PUT', `/people/${id}`, p),
+  deletePerson: (id: number) => call<{ ok: true }>('DELETE', `/people/${id}`),
+  testDm: (id: number) => call<{ ok: true }>('POST', `/people/${id}/test-dm`),
+  sendReminders: () => call<{ results: { person: string; sent: boolean; error: string | null; accounts: string[] }[] }>('POST', '/reminders/send'),
+  previewReminders: () => call<{ messages: { person: string; to: string | null; notify: boolean; text: string }[] }>('GET', '/reminders/preview'),
+  getReminderSettings: () => call<{ settings: ReminderSettings }>('GET', '/reminder-settings'),
+  saveReminderSettings: (s: Pick<ReminderSettings, 'notify_ams_enabled' | 'reminder_cron' | 'reminder_text'>) => call<{ settings: ReminderSettings }>('PUT', '/reminder-settings', s),
+  // Calendar, GMV, grades
+  calendar: (month: string) => call<CalendarData>('GET', `/calendar?month=${month}`),
+  gmv: (month: string) => call<GmvData>('GET', `/gmv?month=${month}`),
+  saveTargets: (month: string, targets: Record<number, number | null>) => call<GmvData>('PUT', '/gmv/targets', { month, targets }),
+  copyTargets: (from: string, to: string) => call<{ copied: number }>('POST', '/gmv/targets/copy', { from, to }),
+  syncGmv: () => call<{ sync: GmvSync }>('POST', '/gmv/sync'),
+  importGmv: (rows: unknown[]) => call<{ imported: number; skipped: number }>('POST', '/gmv/import', { rows }),
+  addShop: (account_id: number, shop_id: string, shop_name: string) => call<{ shop: AccountShop }>('POST', '/gmv/shops', { account_id, shop_id, shop_name }),
+  removeShop: (id: number) => call<{ ok: true }>('DELETE', `/gmv/shops/${id}`),
+  grades: (month: string) => call<GradesData>('GET', `/grades?month=${month}`),
+  saveGradeWeight: (weight_checklist: number) => call<{ weight_checklist: number }>('PUT', '/grade-settings', { weight_checklist }),
   preview: (input: Pick<RuleInput, 'asana_project_gid' | 'min_age_hours' | 'require_section_match' | 'max_deletes_per_run'>) =>
     call<PreviewResult>('POST', '/preview', input),
 };

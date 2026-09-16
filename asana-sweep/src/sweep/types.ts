@@ -187,3 +187,154 @@ export interface Analytics {
   accounts: AnalyticsAccount[];
   ams: AnalyticsAm[];
 }
+
+// ---- People (AMs / AAs) and Slack reminders ----
+
+export interface Person {
+  id: number;
+  name: string;
+  role: 'am' | 'aa';
+  email: string | null;
+  slack_user_id: string | null;
+  notify: boolean;
+}
+
+export type PersonInput = Omit<Person, 'id'>;
+
+export interface ReminderSettings {
+  notify_ams_enabled: boolean;
+  reminder_cron: string;
+  reminder_text: string;
+  next_reminder_at: string | null;
+  slack_bot_configured: boolean;
+}
+
+// ---- Calendar ----
+
+export interface CalendarCell {
+  date: string;
+  status: CheckStatus | null;
+  combined_complete: boolean;
+  am_complete: boolean;
+  aa_complete: boolean;
+  am_done: number;
+  am_total: number;
+  aa_done: number;
+  aa_total: number;
+}
+
+export interface CalendarAccountRow {
+  account: Account;
+  cells: CalendarCell[];
+  checked_days: number;
+  complete_days: number;
+  missed: number;
+  compliance: number | null;
+}
+
+export interface CalendarAmRow {
+  am_name: string;
+  accounts: CalendarAccountRow[];
+  checked_days: number;
+  complete_days: number;
+  missed: number;
+  compliance: number | null;
+}
+
+export interface CalendarData {
+  month: string;
+  workdays: string[];
+  today: string;
+  target: number;
+  ams: CalendarAmRow[];
+  totals: { checked_days: number; complete_days: number; missed: number; compliance: number | null };
+}
+
+// ---- GMV (Cruva) ----
+
+export interface AccountShop {
+  id: number;
+  account_id: number;
+  shop_id: string;
+  shop_name: string;
+  currency: string;
+}
+
+export interface GmvShopRow {
+  shop: AccountShop;
+  gmv: number;
+  affiliate_gmv: number;
+  units: number;
+  last_synced: string | null;
+}
+
+export interface GmvAccountRow {
+  account: Account;
+  shops: GmvShopRow[];
+  gmv: number;
+  affiliate_gmv: number;
+  units: number;
+  target: number | null;
+  attainment: number | null;
+  projected: number | null;
+  projected_attainment: number | null;
+  daily: { date: string; gmv: number }[];
+}
+
+export interface GmvAmRow {
+  am_name: string;
+  accounts: number;
+  gmv: number;
+  target: number | null;
+  attainment: number | null;
+  projected: number | null;
+  projected_attainment: number | null;
+}
+
+export interface GmvData {
+  month: string;
+  from: string;
+  to: string;
+  days_in_month: number;
+  days_elapsed: number;
+  currency: string;
+  accounts: GmvAccountRow[];
+  ams: GmvAmRow[];
+  totals: { gmv: number; target: number | null; attainment: number | null; projected: number | null };
+  last_sync: GmvSync | null;
+  cruva_configured: boolean;
+}
+
+export interface GmvSync {
+  id: number;
+  started_at: string;
+  finished_at: string | null;
+  status: 'running' | 'ok' | 'error';
+  shops_synced: number;
+  error_message: string | null;
+}
+
+// ---- Grading ----
+
+export type Grade = 'A' | 'B' | 'C' | 'D' | 'F';
+
+export interface GradeRow {
+  name: string;
+  am_name: string | null;
+  account_id: number | null;
+  compliance: number | null;
+  missed: number;
+  checked_days: number;
+  gmv: number;
+  target: number | null;
+  attainment: number | null;
+  score: number | null;
+  grade: Grade | null;
+}
+
+export interface GradesData {
+  month: string;
+  weight_checklist: number;
+  ams: GradeRow[];
+  accounts: GradeRow[];
+}

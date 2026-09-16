@@ -9,6 +9,7 @@ const db = openDb();
 const q = new Queries(db);
 const stale = q.failStaleRuns();
 if (stale) log.warn(`Marked ${stale} interrupted run(s) as errored`);
+q.failStaleGmvSyncs();
 
 const scheduler = new Scheduler(q);
 scheduler.start();

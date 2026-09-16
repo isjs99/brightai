@@ -7,6 +7,9 @@ import RunHistory from './pages/RunHistory';
 import Accounts from './pages/Accounts';
 import Checklists from './pages/Checklists';
 import AnalyticsPage from './pages/Analytics';
+import CalendarPage from './pages/Calendar';
+import GmvPage from './pages/Gmv';
+import PeoplePage from './pages/People';
 
 function Login({ onDone }: { onDone: () => void }) {
   const [password, setPassword] = useState('');
@@ -80,8 +83,11 @@ export default function App() {
         <nav>
           {status?.asana_user && <span className="sub">Asana: {status.asana_user.name}</span>}
           <NavLink to="/checklists" className={({ isActive }) => (isActive ? 'active' : '')}>Checklists</NavLink>
+          <NavLink to="/calendar" className={({ isActive }) => (isActive ? 'active' : '')}>Calendar</NavLink>
+          <NavLink to="/gmv" className={({ isActive }) => (isActive ? 'active' : '')}>GMV</NavLink>
           <NavLink to="/analytics" className={({ isActive }) => (isActive ? 'active' : '')}>Analytics</NavLink>
           <NavLink to="/accounts" className={({ isActive }) => (isActive ? 'active' : '')}>Accounts</NavLink>
+          <NavLink to="/people" className={({ isActive }) => (isActive ? 'active' : '')}>Team</NavLink>
           <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}>Sweep rules</NavLink>
           <button className="small" onClick={logout}>Sign out</button>
         </nav>
@@ -100,6 +106,9 @@ export default function App() {
           <Route path="/accounts" element={<Accounts />} />
           <Route path="/checklists" element={<Checklists />} />
           <Route path="/analytics" element={<AnalyticsPage />} />
+          <Route path="/calendar" element={<CalendarPage />} />
+          <Route path="/gmv" element={<GmvPage />} />
+          <Route path="/people" element={<PeoplePage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

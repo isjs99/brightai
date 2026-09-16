@@ -83,6 +83,36 @@ Screens:
 
 If a Slack webhook is set under Checklists > Settings, a digest is posted after each scheduled check.
 
+### Slack DM reminders to AMs
+
+Team page › Slack DM reminders. Needs a Slack bot token in `.env` (`SLACK_BOT_TOKEN`, scopes `chat:write`, `users:read`, `users:read.email`). Each AM on the Team page gets an email or Slack member id. When switched on:
+
+- at the reminder time (default weekdays 14:00) every AM with an incomplete checklist gets a DM listing the accounts and what is missing;
+- at the final 16:00 check they get a second DM if it is still not done.
+
+"Preview today's reminders" shows the exact messages without sending. "Send reminders now" sends them immediately. "Test DM" on a person checks the Slack wiring.
+
+### Calendar
+
+One row per AM with their accounts underneath, one column per working day of the month. Each cell shows whether the checklist was complete at the check time. The right-hand side counts complete days, **missed instances** (account-days not complete) and compliance against the 100% target.
+
+### GMV (Cruva)
+
+GMV page. Every account is mapped to its Cruva shops (Accounts › shops, or the seed mapping). Figures come in two ways:
+
+- **Daily sync** at 07:15 from the Cruva REST API when `CRUVA_API_KEY` is set. The endpoint path defaults to `/v1/shop/stats` on `https://api.cruva.com`; override with `CRUVA_STATS_PATH` if Cruva's docs say otherwise. "Sync from Cruva" pulls the last 40 days on demand.
+- **Import**: paste JSON rows of `{ shop_id, date, total_gmv, affiliate_gmv, units }`.
+
+Set a monthly GMV target per account with "Set monthly targets" ("Copy from last month" carries them forward). The page shows month-to-date GMV, attainment, and a straight-line projection to month end, per account and per AM.
+
+### Grades
+
+Analytics page, top section. Each account and AM gets a score out of 100 and a letter:
+
+- score = checklist weight × compliance + (100 − weight) × GMV attainment, with attainment capped at 100. Default weight 50/50, adjustable on the page.
+- A 90+, B 80+, C 70+, D 60+, F below.
+- During the running month GMV attainment uses the projected month-end figure so mid-month grades are fair. If an account has no target, it is graded on checklist alone.
+
 ### Recurrence warnings
 
 The Asana API cannot set or read a task's repeat setting, so the check infers it. Two flags show up per item:
@@ -112,7 +142,9 @@ Dry runs say "would be deleted" instead. If a run fails (token expired, project 
 ```
 src/asana       Asana REST client: pagination, 429 backoff
 src/sweep       match.ts (pure matching logic), runner.ts (fetch, plan, delete, record, notify)
-src/checklist   evaluate.ts (pure completion logic), checker.ts (daily check, Slack digest)
+src/checklist   evaluate.ts (pure completion logic), checker.ts (daily check, Slack digest), reminders.ts (AM DMs), calendar.ts
+src/gmv         cruva.ts (REST client), sync.ts (daily pull), grading.ts (pure score + letter)
+src/reports     calendar, GMV and grade aggregations for the dashboard
 src/scheduler   node-cron registration per rule and for the daily check, plain-English schedule text
 src/db          SQLite schema, migrations (seed rule), queries
 src/notify      Slack webhook
@@ -132,3 +164,6 @@ Auth is a single shared password behind a signed cookie, in `src/web/auth.ts` be
 | `DATABASE_PATH` | SQLite file path (`/data/sweep.db` in Docker) |
 | `PUBLIC_URL` | Public dashboard URL for Slack links |
 | `SESSION_SECRET` | Optional cookie signing secret, derived from the password if blank |
+| `SLACK_BOT_TOKEN` | Optional Slack bot token for DM reminders to AMs |
+| `CRUVA_API_KEY` | Optional Cruva REST API key for the daily GMV sync |
+| `CRUVA_BASE_URL`, `CRUVA_STATS_PATH` | Optional overrides for the Cruva stats endpoint |

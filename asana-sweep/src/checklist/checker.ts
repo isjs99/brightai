@@ -48,8 +48,14 @@ export async function checkAccount(q: Queries, account: Account, opts: { trigger
   }
 }
 
-/** Check every enabled account. Returns null if a check is already in progress. */
-export async function runAllChecks(q: Queries, opts: { trigger: 'schedule' | 'manual'; client?: AsanaClient; notify?: boolean }): Promise<CheckWithItems[] | null> {
+/**
+ * Check every enabled account. Returns null if a check is already in progress.
+ * `remind` DMs each AM whose accounts are incomplete (if AM reminders are switched on).
+ */
+export async function runAllChecks(
+  q: Queries,
+  opts: { trigger: 'schedule' | 'manual'; client?: AsanaClient; notify?: boolean; remind?: boolean },
+): Promise<CheckWithItems[] | null> {
   if (checkRunning) {
     log.warn(`Checklist check already running, skipping ${opts.trigger} trigger.`);
     return null;
@@ -69,10 +75,24 @@ export async function runAllChecks(q: Queries, opts: { trigger: 'schedule' | 'ma
     if (opts.notify !== false && webhook) {
       await postSlack(webhook, digestMessage(q, results, tz));
     }
+    if (opts.remind) {
+      const { notifyAms } = await import('./reminders.js');
+      await notifyAms(q, results, { deadline: deadlineLabel(q) });
+    }
   } finally {
     checkRunning = false;
   }
   return results;
+}
+
+/** "16:00 CEST" from the check cron, for reminder text. */
+export function deadlineLabel(q: Queries): string {
+  const cron = q.getSetting('check_cron', '0 16 * * 1-5').trim().split(/\s+/);
+  const tz = q.getSetting('check_timezone', 'Europe/Madrid');
+  const [min, hour] = cron;
+  const abbr = new Intl.DateTimeFormat('en-GB', { timeZone: tz, timeZoneName: 'short' }).formatToParts(new Date()).find((p) => p.type === 'timeZoneName')?.value ?? tz;
+  if (/^\d{1,2}$/.test(min) && /^\d{1,2}$/.test(hour)) return `${hour.padStart(2, '0')}:${min.padStart(2, '0')} ${abbr}`;
+  return `the daily check (${cron.join(' ')} ${abbr})`;
 }
 
 export function digestMessage(q: Queries, checks: CheckWithItems[], tz: string): string {
