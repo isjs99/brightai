@@ -219,3 +219,12 @@ tr.sub-row td { background: var(--surface); }
 .grade.F { background: var(--crit-bg); color: var(--crit-ink); }
 .inline-form { display: flex; gap: 8px; flex-wrap: wrap; align-items: flex-end; }
 .inline-form label.field { min-width: 140px; }
+
+/* BD pipeline */
+.checks { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; min-width: 250px; }
+.chk { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); font-size: 12px; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.chk.on { background: var(--good-bg); color: var(--good-ink); border-color: var(--good-border); }
+.chk input { margin: 0; }
+tr.open td { border-bottom: none; }
+.detail-row > td { padding-top: 0; }
+a.button { display: inline-block; padding: 7px 12px; border: 1px solid var(--border-strong); border-radius: 8px; text-decoration: none; color: var(--ink); font-size: 13px; align-self: flex-end; }

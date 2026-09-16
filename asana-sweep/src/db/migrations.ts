@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { SEED_PULLED_AT, SEED_SHOPS } from '../bd/seed.js';
 
 interface Migration {
   version: number;
@@ -525,6 +526,79 @@ const migrations: Migration[] = [
       set.run('leads_points_signed', '1');
       set.run('leads_points_sourced', '1');
       set.run('leads_currency', 'GBP');
+    },
+  },
+  {
+    version: 11,
+    name: 'bd pipeline: prospects, contacts, outreach checklist',
+    up(db) {
+      db.exec(`
+        CREATE TABLE bd_prospects (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          seller_id TEXT,
+          shop_name TEXT NOT NULL,
+          brand TEXT,
+          market TEXT NOT NULL,
+          category TEXT,
+          gmv_7d REAL,
+          gmv_total REAL,
+          units_7d INTEGER,
+          units_total INTEGER,
+          currency TEXT NOT NULL DEFAULT 'EUR',
+          shop_type TEXT,
+          tiktok_handle TEXT,
+          rating REAL,
+          products INTEGER,
+          domain TEXT,
+          website TEXT,
+          status TEXT NOT NULL DEFAULT 'new',
+          owner_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+          notes TEXT,
+          outreach_tts_am INTEGER NOT NULL DEFAULT 0,
+          outreach_tts_am_at TEXT,
+          outreach_gmail INTEGER NOT NULL DEFAULT 0,
+          outreach_gmail_at TEXT,
+          outreach_linkedin INTEGER NOT NULL DEFAULT 0,
+          outreach_linkedin_at TEXT,
+          source TEXT NOT NULL DEFAULT 'manual',
+          pulled_at TEXT,
+          archived INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+        CREATE UNIQUE INDEX bd_prospects_seller ON bd_prospects(seller_id) WHERE seller_id IS NOT NULL;
+        CREATE INDEX bd_prospects_market ON bd_prospects(market, status);
+
+        CREATE TABLE bd_contacts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          prospect_id INTEGER NOT NULL REFERENCES bd_prospects(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          title TEXT,
+          email TEXT,
+          linkedin_url TEXT,
+          phone TEXT,
+          source TEXT NOT NULL DEFAULT 'manual',
+          apollo_id TEXT,
+          enriched INTEGER NOT NULL DEFAULT 0,
+          notes TEXT,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+        CREATE INDEX bd_contacts_prospect ON bd_contacts(prospect_id);
+      `);
+      const ins = db.prepare(`INSERT OR IGNORE INTO bd_prospects (seller_id, shop_name, brand, market, category, gmv_7d, gmv_total, units_7d, units_total, currency, shop_type, tiktok_handle, rating, products, source, pulled_at)
+        VALUES (@seller_id, @shop_name, @brand, @market, @category, @gmv_7d, @gmv_total, @units_7d, @units_total, @currency, @shop_type, @tiktok_handle, @rating, @products, 'fastmoss', @pulled_at)`);
+      for (const s of SEED_SHOPS) ins.run({ ...s, pulled_at: SEED_PULLED_AT });
+      // Decision makers found through Apollo search at seed time. Last names stay masked until enriched.
+      const contact = db.prepare(`INSERT INTO bd_contacts (prospect_id, name, title, source, apollo_id, notes) SELECT id, ?, ?, 'apollo', ?, ? FROM bd_prospects WHERE seller_id = ?`);
+      const seeded: [string, string, string, string][] = [
+        ['7495337003120626279', 'Rishi Sh***h', 'Co-Founder', '5f59a95f12140c000148ad1f'],
+        ['7495337003120626279', 'Dayo Ka***n', 'Co-Founder', '5d6f376bf3e5bb0e2879a64e'],
+        ['7495337003120626279', 'Jai Sh***h', 'Co-Founder', '66f25dc2ed5e23000159a8cf'],
+        ['7495185995129325568', 'Victor Co***n', 'Commercial Director', '54a548b9746869344275a88b'],
+        ['7495613047709207418', 'Preta Ku***r', 'Head of Operations & Finance Support', '673c7a3e8ebde00001f645f7'],
+        ['7495613047709207418', 'Leena Sa***t', 'Finance Executive', '54ebc5a6746869444cae8e21'],
+      ];
+      for (const [seller, name, title, apolloId] of seeded) contact.run(name, title, apolloId, 'Found via Apollo search; reveal to get the full name, email and LinkedIn.', seller);
     },
   },
 ];

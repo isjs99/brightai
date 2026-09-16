@@ -3,6 +3,10 @@ import type {
   Account,
   AccountInput,
   AccountShop,
+  BdContact,
+  BdProspect,
+  BdProspectInput,
+  BdProspectPatch,
   Check,
   CheckItem,
   CheckStatus,
@@ -26,6 +30,7 @@ import type {
   RunStatus,
 } from '../sweep/types.js';
 import { isSignedStage, leadKey, matchPerson, type SheetLead } from '../leads/sheet.js';
+import { outreachComplete, riseScore } from '../bd/score.js';
 
 type Row = Record<string, unknown>;
 
@@ -952,6 +957,201 @@ export class Queries {
     if (patch.onboarding_id !== undefined) sets.push('onboarding_id = @onboarding_id');
     if (sets.length) this.db.prepare(`UPDATE leads SET ${sets.join(', ')}, updated_at = @now WHERE id = @id`).run({ ...patch, id, now: new Date().toISOString() });
     return this.getLead(id);
+  }
+
+  // ---- BD pipeline ----
+
+  private rowToContact(r: Row): BdContact {
+    return {
+      id: r.id as number,
+      prospect_id: r.prospect_id as number,
+      name: r.name as string,
+      title: (r.title as string | null) ?? null,
+      email: (r.email as string | null) ?? null,
+      linkedin_url: (r.linkedin_url as string | null) ?? null,
+      phone: (r.phone as string | null) ?? null,
+      source: (r.source as BdContact['source']) ?? 'manual',
+      apollo_id: (r.apollo_id as string | null) ?? null,
+      enriched: Boolean(r.enriched),
+      notes: (r.notes as string | null) ?? null,
+      created_at: r.created_at as string,
+    };
+  }
+
+  private rowToProspect(r: Row, contacts: BdContact[]): BdProspect {
+    const o = { outreach_tts_am: Boolean(r.outreach_tts_am), outreach_gmail: Boolean(r.outreach_gmail), outreach_linkedin: Boolean(r.outreach_linkedin) };
+    return {
+      id: r.id as number,
+      seller_id: (r.seller_id as string | null) ?? null,
+      shop_name: r.shop_name as string,
+      brand: (r.brand as string | null) ?? null,
+      market: r.market as string,
+      category: (r.category as string | null) ?? null,
+      gmv_7d: (r.gmv_7d as number | null) ?? null,
+      gmv_total: (r.gmv_total as number | null) ?? null,
+      units_7d: (r.units_7d as number | null) ?? null,
+      units_total: (r.units_total as number | null) ?? null,
+      currency: (r.currency as string) ?? 'EUR',
+      shop_type: (r.shop_type as string | null) ?? null,
+      tiktok_handle: (r.tiktok_handle as string | null) ?? null,
+      rating: (r.rating as number | null) ?? null,
+      products: (r.products as number | null) ?? null,
+      rise_score: riseScore(r.gmv_7d as number | null, r.gmv_total as number | null),
+      domain: (r.domain as string | null) ?? null,
+      website: (r.website as string | null) ?? null,
+      status: (r.status as BdProspect['status']) ?? 'new',
+      owner_id: (r.owner_id as number | null) ?? null,
+      owner_name: (r.owner_name as string | null) ?? null,
+      notes: (r.notes as string | null) ?? null,
+      ...o,
+      outreach_tts_am_at: (r.outreach_tts_am_at as string | null) ?? null,
+      outreach_gmail_at: (r.outreach_gmail_at as string | null) ?? null,
+      outreach_linkedin_at: (r.outreach_linkedin_at as string | null) ?? null,
+      outreach_complete: outreachComplete(o),
+      source: (r.source as string) ?? 'manual',
+      pulled_at: (r.pulled_at as string | null) ?? null,
+      archived: Boolean(r.archived),
+      created_at: r.created_at as string,
+      updated_at: r.updated_at as string,
+      contacts,
+    };
+  }
+
+  private static PROSPECT_SELECT = `SELECT p.*, o.name AS owner_name FROM bd_prospects p LEFT JOIN people o ON o.id = p.owner_id`;
+
+  listProspects(includeArchived = false): BdProspect[] {
+    const contacts = new Map<number, BdContact[]>();
+    for (const r of this.db.prepare('SELECT * FROM bd_contacts ORDER BY enriched DESC, id').all() as Row[]) {
+      const c = this.rowToContact(r);
+      contacts.set(c.prospect_id, [...(contacts.get(c.prospect_id) ?? []), c]);
+    }
+    const where = includeArchived ? '' : 'WHERE p.archived = 0';
+    return (this.db.prepare(`${Queries.PROSPECT_SELECT} ${where} ORDER BY p.market, p.gmv_7d DESC, p.shop_name COLLATE NOCASE`).all() as Row[]).map((r) => this.rowToProspect(r, contacts.get(r.id as number) ?? []));
+  }
+
+  getProspect(id: number): BdProspect | null {
+    const r = this.db.prepare(`${Queries.PROSPECT_SELECT} WHERE p.id = ?`).get(id) as Row | undefined;
+    if (!r) return null;
+    const contacts = (this.db.prepare('SELECT * FROM bd_contacts WHERE prospect_id = ? ORDER BY enriched DESC, id').all(id) as Row[]).map((c) => this.rowToContact(c));
+    return this.rowToProspect(r, contacts);
+  }
+
+  /** Insert new shops or refresh the numbers of ones we already track (by seller id). Never touches status, owner or outreach. */
+  upsertProspects(rows: BdProspectInput[]): { added: number; updated: number } {
+    const insert = this.db.prepare(`INSERT INTO bd_prospects (seller_id, shop_name, brand, market, category, gmv_7d, gmv_total, units_7d, units_total, currency, shop_type, tiktok_handle, rating, products, domain, website, notes, source, pulled_at)
+      VALUES (@seller_id, @shop_name, @brand, @market, @category, @gmv_7d, @gmv_total, @units_7d, @units_total, @currency, @shop_type, @tiktok_handle, @rating, @products, @domain, @website, @notes, @source, @pulled_at)`);
+    const update = this.db.prepare(`UPDATE bd_prospects SET shop_name = @shop_name, brand = COALESCE(@brand, brand), category = COALESCE(@category, category), gmv_7d = @gmv_7d, gmv_total = @gmv_total, units_7d = @units_7d, units_total = @units_total,
+      currency = @currency, shop_type = COALESCE(@shop_type, shop_type), tiktok_handle = COALESCE(@tiktok_handle, tiktok_handle), rating = COALESCE(@rating, rating), products = COALESCE(@products, products), domain = COALESCE(domain, @domain), website = COALESCE(website, @website),
+      pulled_at = @pulled_at, archived = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE seller_id = @seller_id`);
+    const result = { added: 0, updated: 0 };
+    this.db.transaction(() => {
+      for (const r of rows) {
+        const row = {
+          seller_id: r.seller_id ?? null,
+          shop_name: r.shop_name,
+          brand: r.brand ?? null,
+          market: r.market,
+          category: r.category ?? null,
+          gmv_7d: r.gmv_7d ?? null,
+          gmv_total: r.gmv_total ?? null,
+          units_7d: r.units_7d ?? null,
+          units_total: r.units_total ?? null,
+          currency: r.currency ?? (r.market === 'UK' ? 'GBP' : 'EUR'),
+          shop_type: r.shop_type ?? null,
+          tiktok_handle: r.tiktok_handle ?? null,
+          rating: r.rating ?? null,
+          products: r.products ?? null,
+          domain: r.domain ?? null,
+          website: r.website ?? null,
+          notes: r.notes ?? null,
+          source: r.source ?? 'manual',
+          pulled_at: r.pulled_at ?? null,
+        };
+        if (row.seller_id && update.run(row).changes) result.updated += 1;
+        else {
+          insert.run(row);
+          result.added += 1;
+        }
+      }
+    })();
+    return result;
+  }
+
+  createProspect(input: BdProspectInput): BdProspect {
+    const r = this.upsertProspects([input]);
+    const id = r.added ? (this.db.prepare('SELECT last_insert_rowid() AS id').get() as { id: number }).id : (this.db.prepare('SELECT id FROM bd_prospects WHERE seller_id = ?').get(input.seller_id) as { id: number }).id;
+    return this.getProspect(id)!;
+  }
+
+  patchProspect(id: number, patch: BdProspectPatch): BdProspect | null {
+    const sets: string[] = [];
+    const params: Record<string, unknown> = { id, now: new Date().toISOString() };
+    const simple: (keyof BdProspectPatch)[] = ['status', 'owner_id', 'notes', 'domain', 'website'];
+    for (const k of simple) {
+      if (patch[k] !== undefined) {
+        sets.push(`${k} = @${k}`);
+        params[k] = patch[k];
+      }
+    }
+    if (patch.archived !== undefined) {
+      sets.push('archived = @archived');
+      params.archived = patch.archived ? 1 : 0;
+    }
+    for (const ch of ['tts_am', 'gmail', 'linkedin'] as const) {
+      const v = patch[`outreach_${ch}`];
+      if (v === undefined) continue;
+      sets.push(`outreach_${ch} = @o_${ch}`, `outreach_${ch}_at = CASE WHEN @o_${ch} = 1 THEN COALESCE(outreach_${ch}_at, @now) ELSE NULL END`);
+      params[`o_${ch}`] = v ? 1 : 0;
+    }
+    if (sets.length) this.db.prepare(`UPDATE bd_prospects SET ${sets.join(', ')}, updated_at = @now WHERE id = @id`).run(params);
+    return this.getProspect(id);
+  }
+
+  deleteProspect(id: number): boolean {
+    return this.db.prepare('DELETE FROM bd_prospects WHERE id = ?').run(id).changes > 0;
+  }
+
+  addContact(prospectId: number, c: { name: string; title?: string | null; email?: string | null; linkedin_url?: string | null; phone?: string | null; source?: 'apollo' | 'manual'; apollo_id?: string | null; enriched?: boolean; notes?: string | null }): BdContact {
+    // One row per Apollo person; re-finding the same person updates it instead of duplicating.
+    if (c.apollo_id) {
+      const existing = this.db.prepare('SELECT id FROM bd_contacts WHERE prospect_id = ? AND apollo_id = ?').get(prospectId, c.apollo_id) as { id: number } | undefined;
+      if (existing) return this.updateContact(existing.id, c)!;
+    }
+    const info = this.db
+      .prepare(`INSERT INTO bd_contacts (prospect_id, name, title, email, linkedin_url, phone, source, apollo_id, enriched, notes) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(prospectId, c.name, c.title ?? null, c.email ?? null, c.linkedin_url ?? null, c.phone ?? null, c.source ?? 'manual', c.apollo_id ?? null, c.enriched ? 1 : 0, c.notes ?? null);
+    return this.getContact(Number(info.lastInsertRowid))!;
+  }
+
+  getContact(id: number): BdContact | null {
+    const r = this.db.prepare('SELECT * FROM bd_contacts WHERE id = ?').get(id) as Row | undefined;
+    return r ? this.rowToContact(r) : null;
+  }
+
+  updateContact(id: number, c: { name?: string; title?: string | null; email?: string | null; linkedin_url?: string | null; phone?: string | null; apollo_id?: string | null; enriched?: boolean; notes?: string | null }): BdContact | null {
+    const sets: string[] = [];
+    const params: Record<string, unknown> = { id };
+    for (const k of ['name', 'title', 'email', 'linkedin_url', 'phone', 'apollo_id', 'notes'] as const) {
+      if (c[k] !== undefined) {
+        sets.push(`${k} = COALESCE(@${k}, ${k})`);
+        params[k] = c[k];
+      }
+    }
+    if (c.enriched !== undefined) {
+      sets.push('enriched = @enriched');
+      params.enriched = c.enriched ? 1 : 0;
+    }
+    if (sets.length) this.db.prepare(`UPDATE bd_contacts SET ${sets.join(', ')} WHERE id = @id`).run(params);
+    return this.getContact(id);
+  }
+
+  deleteContact(id: number): boolean {
+    return this.db.prepare('DELETE FROM bd_contacts WHERE id = ?').run(id).changes > 0;
+  }
+
+  lastProspectPull(): string | null {
+    const r = this.db.prepare('SELECT MAX(pulled_at) AS at FROM bd_prospects').get() as { at: string | null };
+    return r.at ?? null;
   }
 
 }

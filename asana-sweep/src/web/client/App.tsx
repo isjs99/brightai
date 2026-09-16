@@ -14,6 +14,7 @@ import PeoplePage from './pages/People';
 import PromotionsPage from './pages/Promotions';
 import GmvMaxPage from './pages/GmvMax';
 import LeadsPage from './pages/Leads';
+import BdPage from './pages/Bd';
 
 type Theme = 'system' | 'light' | 'dark';
 
@@ -111,7 +112,10 @@ const NAV: { section: string; items: { to: string; label: string; end?: boolean 
   },
   {
     section: 'Growth',
-    items: [{ to: '/leads', label: 'Leads' }],
+    items: [
+      { to: '/leads', label: 'Leads' },
+      { to: '/bd', label: 'BD pipeline' },
+    ],
   },
   {
     section: 'Account management',
@@ -215,6 +219,7 @@ export default function App() {
               <Route path="/promotions" element={<PromotionsPage />} />
               <Route path="/gmv-max" element={<GmvMaxPage />} />
               <Route path="/leads" element={<LeadsPage />} />
+              <Route path="/bd" element={<BdPage />} />
               <Route path="*" element={<Navigate to="/checklists" replace />} />
             </Routes>
           </main>

@@ -43,5 +43,9 @@ export const config = {
     process.env.SESSION_SECRET?.trim() ||
     createHash('sha256').update('asana-sweep:' + required('DASHBOARD_PASSWORD')).digest('hex'),
   runRetentionDays: 90,
+  /** Apollo.io REST API key for finding and enriching decision makers on the BD pipeline. */
+  apolloApiKey: process.env.APOLLO_API_KEY?.trim() ?? '',
+  /** Bearer token that lets an external job (e.g. a scheduled Claude routine) POST fresh FastMoss pulls to /api/bd/import. */
+  ingestToken: process.env.INGEST_TOKEN?.trim() ?? '',
   asanaBaseUrl: (process.env.ASANA_BASE_URL?.trim() || 'https://app.asana.com/api/1.0').replace(/\/+$/, ''),
 };

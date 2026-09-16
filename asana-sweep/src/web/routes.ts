@@ -20,6 +20,9 @@ import type { GmvMaxPatch, PromotionInput, TtsStatus } from '../sweep/types.js';
 import type { LeadsData, PersonInput, ReminderSettings } from '../sweep/types.js';
 import { importLeadsCsv, leadsSettings, leadsSyncStatus, syncLeads } from '../leads/sync.js';
 import { amSummary } from '../leads/points.js';
+import { apollo } from '../bd/apollo.js';
+import { normaliseDomain } from '../bd/score.js';
+import type { BdCountryRow, BdData, BdProspectInput, BdProspectPatch, BdStatus } from '../sweep/types.js';
 import type { AuthProvider } from './auth.js';
 import { requireAdminForWrites, requireAuth, SharedPasswordAuth } from './auth.js';
 import { config } from '../config.js';
@@ -167,6 +170,48 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   r.get('/me', (req, res) => {
     const role = auth instanceof SharedPasswordAuth ? auth.roleOf(req) : auth.isAuthenticated(req) ? 'admin' : null;
     res.json({ authenticated: role !== null, role, am_login_enabled: Boolean(config.amPassword) });
+  });
+
+  // ---- BD import: a scheduled job (or an admin session) posts fresh FastMoss pulls here ----
+  const parseProspectInput = (b: Record<string, unknown>): BdProspectInput => {
+    const shop_name = String(b.shop_name ?? b.name ?? '').trim();
+    const market = String(b.market ?? b.region ?? '').trim().toUpperCase().replace(/^GB$/, 'UK');
+    if (!shop_name || !market) throw new HttpError(400, 'Each prospect needs shop_name and market.');
+    const num = (v: unknown): number | null => (v === undefined || v === null || v === '' ? null : Number.isFinite(Number(v)) ? Number(v) : null);
+    return {
+      shop_name,
+      market,
+      brand: optText(b.brand ?? b.brand_name),
+      category: optText(b.category ?? (b.main_category as { name?: string } | undefined)?.name),
+      seller_id: optText(b.seller_id),
+      domain: normaliseDomain(optText(b.domain ?? b.website)),
+      website: optText(b.website),
+      tiktok_handle: optText(b.tiktok_handle ?? (b.linked_creator as { unique_id?: string } | undefined)?.unique_id),
+      gmv_7d: num(b.gmv_7d ?? b.gmv_last_7d),
+      gmv_total: num(b.gmv_total ?? b.total_gmv),
+      units_7d: num(b.units_7d ?? b.units_sold_last_7d),
+      units_total: num(b.units_total ?? b.total_units_sold),
+      currency: String(b.currency ?? b.currency_code ?? '').toUpperCase() || (market === 'UK' ? 'GBP' : 'EUR'),
+      shop_type: optText(b.shop_type ?? b.shop_type_code)?.replace('_shop', '') ?? null,
+      rating: num(b.rating ?? b.shop_rating),
+      products: num(b.products ?? b.active_product_count),
+      notes: optText(b.notes),
+      source: optText(b.source) ?? 'import',
+      pulled_at: optText(b.pulled_at) ?? new Date().toISOString(),
+    };
+  };
+  r.post('/bd/import', (req, res) => {
+    const bearer = String(req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
+    const viaToken = Boolean(config.ingestToken) && bearer === config.ingestToken;
+    const viaAdmin = auth instanceof SharedPasswordAuth ? auth.roleOf(req) === 'admin' : auth.isAuthenticated(req);
+    if (!viaToken && !viaAdmin) return res.status(401).json({ error: 'Send a valid INGEST_TOKEN bearer token or sign in as admin.' });
+    const body = (req.body ?? {}) as { prospects?: Record<string, unknown>[]; shops?: Record<string, unknown>[]; pulled_at?: string };
+    const rows = Array.isArray(body.prospects) ? body.prospects : Array.isArray(body.shops) ? body.shops : [];
+    if (!rows.length) throw new HttpError(400, 'Send { prospects: [...] } (FastMoss shop_search rows work as-is).');
+    const pulledAt = optText(body.pulled_at) ?? new Date().toISOString();
+    const result = q.upsertProspects(rows.map((row) => parseProspectInput({ pulled_at: pulledAt, source: 'fastmoss', ...row })));
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json({ result });
   });
 
   // ---- Everything below needs a session ----
@@ -959,13 +1004,6 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   });
 
   // ---- Errors ----
-  r.use((err: unknown, _req: Request, res: Response, _next: unknown) => {
-    const status = err instanceof HttpError ? err.status : err instanceof AsanaError ? 502 : 500;
-    const message = (err as Error)?.message ?? 'Unknown error';
-    if (status === 500) console.error(err);
-    else if (status === 502) console.warn(`Asana error on ${_req.method} ${_req.path}: ${message}`);
-    res.status(status).json({ error: message });
-  });
 
   // ---- Leads (lead sheet sync, sourced-by / onboarding, AM points) ----
 
@@ -1046,6 +1084,143 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     scheduler.leads.start();
     liveEvents.emitUpdate({ kind: 'settings' });
     res.json(leadsData());
+  });
+
+  // ---- BD pipeline ----
+
+  const BD_STATUSES: BdStatus[] = ['new', 'researching', 'contacted', 'replied', 'meeting', 'won', 'lost'];
+
+  const bdData = (): BdData => {
+    const prospects = q.listProspects(false);
+    const byMarket = new Map<string, BdCountryRow>();
+    for (const p of prospects) {
+      const row = byMarket.get(p.market) ?? { market: p.market, prospects: 0, new: 0, in_progress: 0, contacted_any: 0, complete: 0, won: 0, lost: 0, gmv_7d: 0, currency: p.currency };
+      row.prospects += 1;
+      if (p.status === 'new') row.new += 1;
+      else if (p.status === 'won') row.won += 1;
+      else if (p.status === 'lost') row.lost += 1;
+      else row.in_progress += 1;
+      if (p.outreach_tts_am || p.outreach_gmail || p.outreach_linkedin) row.contacted_any += 1;
+      if (p.outreach_complete) row.complete += 1;
+      row.gmv_7d += p.gmv_7d ?? 0;
+      byMarket.set(p.market, row);
+    }
+    return {
+      prospects,
+      countries: [...byMarket.values()].sort((a, b) => b.prospects - a.prospects || a.market.localeCompare(b.market)),
+      people: q.listPeople(),
+      markets: [...byMarket.keys()].sort(),
+      categories: [...new Set(prospects.map((p) => p.category).filter((c): c is string => Boolean(c)))].sort(),
+      apollo_configured: apollo.configured,
+      ingest_configured: Boolean(config.ingestToken),
+      last_pull_at: q.lastProspectPull(),
+      totals: {
+        prospects: prospects.length,
+        complete: prospects.filter((p) => p.outreach_complete).length,
+        won: prospects.filter((p) => p.status === 'won').length,
+        with_contacts: prospects.filter((p) => p.contacts.length > 0).length,
+      },
+    };
+  };
+
+  r.get('/bd', (_req, res) => res.json(bdData()));
+
+  r.post('/bd/prospects', (req, res) => {
+    const input = parseProspectInput({ source: 'manual', ...((req.body ?? {}) as Record<string, unknown>) });
+    const prospect = q.createProspect(input);
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.status(201).json({ prospect, ...bdData() });
+  });
+
+  r.patch('/bd/prospects/:id', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const patch: BdProspectPatch = {};
+    if (b.status !== undefined) {
+      if (!BD_STATUSES.includes(b.status as BdStatus)) throw new HttpError(400, 'Unknown status');
+      patch.status = b.status as BdStatus;
+    }
+    if (b.owner_id !== undefined) {
+      const id = b.owner_id === null || b.owner_id === '' ? null : Number(b.owner_id);
+      if (id !== null && !q.getPerson(id)) throw new HttpError(400, 'Unknown team member');
+      patch.owner_id = id;
+    }
+    if (b.notes !== undefined) patch.notes = optText(b.notes);
+    if (b.website !== undefined) {
+      patch.website = optText(b.website);
+      patch.domain = normaliseDomain(patch.website);
+    }
+    if (b.domain !== undefined) patch.domain = normaliseDomain(optText(b.domain));
+    for (const ch of ['tts_am', 'gmail', 'linkedin'] as const) if (b[`outreach_${ch}`] !== undefined) patch[`outreach_${ch}`] = Boolean(b[`outreach_${ch}`]);
+    if (b.archived !== undefined) patch.archived = Boolean(b.archived);
+    const prospect = q.patchProspect(idParam(req), patch);
+    if (!prospect) throw new HttpError(404, 'Prospect not found');
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json({ prospect, ...bdData() });
+  });
+
+  r.delete('/bd/prospects/:id', (req, res) => {
+    if (!q.deleteProspect(idParam(req))) throw new HttpError(404, 'Prospect not found');
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json(bdData());
+  });
+
+  r.post('/bd/prospects/:id/contacts', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const name = String(b.name ?? '').trim();
+    if (!name) throw new HttpError(400, 'Contact name is required.');
+    if (!q.getProspect(idParam(req))) throw new HttpError(404, 'Prospect not found');
+    q.addContact(idParam(req), { name, title: optText(b.title), email: optText(b.email), linkedin_url: optText(b.linkedin_url), phone: optText(b.phone), notes: optText(b.notes), source: 'manual', enriched: true });
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.status(201).json({ prospect: q.getProspect(idParam(req)), ...bdData() });
+  });
+
+  r.delete('/bd/contacts/:id', (req, res) => {
+    if (!q.deleteContact(idParam(req))) throw new HttpError(404, 'Contact not found');
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json(bdData());
+  });
+
+  /** Apollo people search for the prospect's company. Free (no credits). */
+  r.post('/bd/prospects/:id/find-contacts', async (req, res) => {
+    const prospect = q.getProspect(idParam(req));
+    if (!prospect) throw new HttpError(404, 'Prospect not found');
+    const body = (req.body ?? {}) as { domain?: string; company?: string };
+    const domain = normaliseDomain(body.domain) ?? prospect.domain;
+    const company = optText(body.company) ?? prospect.brand ?? prospect.shop_name.replace(/\b(uk|de|fr|it|es|eu|shop|store|official|deutschland|france|italia|españa|espana)\b/gi, '').trim();
+    try {
+      const people = await apollo.searchPeople({ domain, company, limit: 10 });
+      for (const p of people) q.addContact(prospect.id, { name: p.name, title: p.title, email: p.email, linkedin_url: p.linkedin_url, phone: p.phone, source: 'apollo', apollo_id: p.id, enriched: Boolean(p.email), notes: p.organization ? `At ${p.organization}` : null });
+      if (domain && !prospect.domain) q.patchProspect(prospect.id, { domain });
+      liveEvents.emitUpdate({ kind: 'bd' });
+      res.json({ found: people.length, prospect: q.getProspect(prospect.id), ...bdData() });
+    } catch (err) {
+      throw new HttpError(502, (err as Error).message);
+    }
+  });
+
+  /** Apollo enrichment: full name, work email, LinkedIn. Costs one credit; the UI confirms first. */
+  r.post('/bd/contacts/:id/reveal', async (req, res) => {
+    const contact = q.getContact(idParam(req));
+    if (!contact) throw new HttpError(404, 'Contact not found');
+    const prospect = q.getProspect(contact.prospect_id)!;
+    try {
+      const p = await apollo.matchPerson({ id: contact.apollo_id, name: contact.apollo_id ? null : contact.name, domain: prospect.domain, company: prospect.brand ?? prospect.shop_name });
+      if (!p) return res.status(404).json({ error: 'Apollo has no match for this person.' });
+      q.updateContact(contact.id, { name: p.name, title: p.title, email: p.email, linkedin_url: p.linkedin_url, phone: p.phone, apollo_id: p.id, enriched: true, notes: p.email_status ? `Email status: ${p.email_status}` : null });
+      liveEvents.emitUpdate({ kind: 'bd' });
+      res.json({ contact: q.getContact(contact.id), prospect: q.getProspect(prospect.id), ...bdData() });
+    } catch (err) {
+      throw new HttpError(502, (err as Error).message);
+    }
+  });
+
+  // Error handler last, so every route above (including the ones appended later) returns JSON.
+  r.use((err: unknown, _req: Request, res: Response, _next: unknown) => {
+    const status = err instanceof HttpError ? err.status : err instanceof AsanaError ? 502 : 500;
+    const message = (err as Error)?.message ?? 'Unknown error';
+    if (status === 500) console.error(err);
+    else if (status === 502) console.warn(`Asana error on ${_req.method} ${_req.path}: ${message}`);
+    res.status(status).json({ error: message });
   });
 
   return r;

@@ -599,3 +599,120 @@ export interface LeadsData {
   countries: string[];
   totals: { leads: number; signed: number; open: number; pipeline_value: number; signed_value: number; close_rate: number | null };
 }
+
+// ---- BD pipeline (fast-rising TikTok shops, decision makers, outreach) ----
+
+export type BdStatus = 'new' | 'researching' | 'contacted' | 'replied' | 'meeting' | 'won' | 'lost';
+export type BdChannel = 'tts_am' | 'gmail' | 'linkedin';
+
+export interface BdContact {
+  id: number;
+  prospect_id: number;
+  name: string;
+  title: string | null;
+  email: string | null;
+  linkedin_url: string | null;
+  phone: string | null;
+  source: 'apollo' | 'manual';
+  apollo_id: string | null;
+  enriched: boolean;
+  notes: string | null;
+  created_at: string;
+}
+
+export interface BdProspect {
+  id: number;
+  seller_id: string | null;
+  shop_name: string;
+  brand: string | null;
+  market: string;
+  category: string | null;
+  gmv_7d: number | null;
+  gmv_total: number | null;
+  units_7d: number | null;
+  units_total: number | null;
+  currency: string;
+  shop_type: string | null;
+  tiktok_handle: string | null;
+  rating: number | null;
+  products: number | null;
+  rise_score: number | null; // share of lifetime GMV made in the last 7 days
+  domain: string | null;
+  website: string | null;
+  status: BdStatus;
+  owner_id: number | null;
+  owner_name: string | null;
+  notes: string | null;
+  outreach_tts_am: boolean;
+  outreach_tts_am_at: string | null;
+  outreach_gmail: boolean;
+  outreach_gmail_at: string | null;
+  outreach_linkedin: boolean;
+  outreach_linkedin_at: string | null;
+  outreach_complete: boolean;
+  source: string;
+  pulled_at: string | null;
+  archived: boolean;
+  created_at: string;
+  updated_at: string;
+  contacts: BdContact[];
+}
+
+export interface BdCountryRow {
+  market: string;
+  prospects: number;
+  new: number;
+  in_progress: number;
+  contacted_any: number;
+  complete: number;
+  won: number;
+  lost: number;
+  gmv_7d: number;
+  currency: string;
+}
+
+export interface BdData {
+  prospects: BdProspect[];
+  countries: BdCountryRow[];
+  people: Person[];
+  markets: string[];
+  categories: string[];
+  apollo_configured: boolean;
+  ingest_configured: boolean;
+  last_pull_at: string | null;
+  totals: { prospects: number; complete: number; won: number; with_contacts: number };
+}
+
+export interface BdProspectInput {
+  shop_name: string;
+  market: string;
+  brand?: string | null;
+  category?: string | null;
+  seller_id?: string | null;
+  domain?: string | null;
+  website?: string | null;
+  tiktok_handle?: string | null;
+  gmv_7d?: number | null;
+  gmv_total?: number | null;
+  units_7d?: number | null;
+  units_total?: number | null;
+  currency?: string;
+  shop_type?: string | null;
+  rating?: number | null;
+  products?: number | null;
+  notes?: string | null;
+  source?: string;
+  pulled_at?: string | null;
+}
+
+export interface BdProspectPatch {
+  status?: BdStatus;
+  owner_id?: number | null;
+  notes?: string | null;
+  domain?: string | null;
+  website?: string | null;
+  outreach_tts_am?: boolean;
+  outreach_gmail?: boolean;
+  outreach_linkedin?: boolean;
+  archived?: boolean;
+}
