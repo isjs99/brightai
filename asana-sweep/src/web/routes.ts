@@ -1433,7 +1433,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
 
   r.get('/gmail/callback', async (req, res) => {
     const { code, state, error } = req.query as Record<string, string | undefined>;
-    const back = (msg: string, ok: boolean) => res.redirect(`/inbox?tab=outreach&${ok ? 'notice' : 'error'}=${encodeURIComponent(msg)}`);
+    const back = (msg: string, ok: boolean) => res.redirect(`/outreach?${ok ? 'notice' : 'error'}=${encodeURIComponent(msg)}`);
     if (!isAdminReq(req)) return back('Sign in as admin, then connect Gmail again.', false);
     if (error) return back(`Google said: ${error}`, false);
     if (!code || !gmail.validState(state)) return back('Gmail connect failed: bad state. Try again.', false);

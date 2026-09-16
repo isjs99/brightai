@@ -155,7 +155,7 @@ export class GmailClient {
     if (this.accessToken && this.accessToken.expires > Date.now()) return this.accessToken.token;
     const refresh = this.q.getSetting(SETTING_REFRESH, '');
     if (!this.configured) throw new Error('Gmail is not configured: set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env.');
-    if (!refresh) throw new Error('Gmail is not connected. Connect it from the Outreach tab.');
+    if (!refresh) throw new Error('Gmail is not connected. Connect it from Growth > Outreach emails.');
     const body = new URLSearchParams({ refresh_token: refresh, client_id: config.googleClientId, client_secret: config.googleClientSecret, grant_type: 'refresh_token' });
     const res = await this.fetchFn(TOKEN_URL, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body });
     const data = (await res.json().catch(() => ({}))) as { access_token?: string; expires_in?: number; error?: string; error_description?: string };

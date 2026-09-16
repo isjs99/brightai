@@ -2,7 +2,7 @@
  * Isaac's outreach voice. The examples are real emails he sent from isaac@brightform.agency
  * (signatures and tracking links stripped); the pitch is the intro block he pastes into
  * introductions. Both are seeded into the database on first run and editable from the
- * Outreach tab, and more examples can be pulled from Gmail once it is connected.
+ * Outreach emails page, and more examples can be pulled from Gmail once it is connected.
  */
 
 export const SEED_SENDER_NAME = 'Isaac Sinclair';

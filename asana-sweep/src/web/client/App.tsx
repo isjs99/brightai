@@ -16,6 +16,7 @@ import GmvMaxPage from './pages/GmvMax';
 import LeadsPage from './pages/Leads';
 import BdPage from './pages/Bd';
 import InboxPage from './pages/Inbox';
+import OutreachPage from './pages/Outreach';
 
 type Theme = 'system' | 'light' | 'dark';
 
@@ -116,6 +117,7 @@ const NAV: { section: string; items: { to: string; label: string; end?: boolean 
     items: [
       { to: '/leads', label: 'Leads' },
       { to: '/bd', label: 'BD pipeline' },
+      { to: '/outreach', label: 'Outreach emails' },
     ],
   },
   {
@@ -222,6 +224,7 @@ export default function App() {
               <Route path="/gmv-max" element={<GmvMaxPage />} />
               <Route path="/leads" element={<LeadsPage />} />
               <Route path="/bd" element={<BdPage />} />
+              <Route path="/outreach" element={<OutreachPage />} />
               <Route path="/inbox" element={<InboxPage />} />
               <Route path="*" element={<Navigate to="/checklists" replace />} />
             </Routes>

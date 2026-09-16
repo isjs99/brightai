@@ -105,7 +105,7 @@ export default function BdPage() {
     setError(null);
     try {
       const r = await api.draftEmail(c.id, { style });
-      navigate(`/inbox?tab=outreach&draft=${r.draft.id}`);
+      navigate(`/outreach?draft=${r.draft.id}`);
     } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   };
 
@@ -143,7 +143,7 @@ export default function BdPage() {
       <td className="sub">{c.phone ?? ''}</td>
       <td>
         <div className="actions">
-          {isAdmin && c.email && <button className="small primary" onClick={() => draftEmail(c, 'short')} disabled={busy === `d${c.id}`} title="Draft a short note in Isaac's voice, tailored to this shop, then review it in the inbox and send from Gmail">{busy === `d${c.id}` ? 'Drafting…' : 'Draft email'}</button>}
+          {isAdmin && c.email && <button className="small primary" onClick={() => draftEmail(c, 'short')} disabled={busy === `d${c.id}`} title="Draft a short note in Isaac's voice, tailored to this shop, then review it under Growth > Outreach emails and send from Gmail">{busy === `d${c.id}` ? 'Drafting…' : 'Draft email'}</button>}
           {isAdmin && c.email && <button className="small" onClick={() => draftEmail(c, 'intro')} disabled={busy === `d${c.id}`} title="Full introduction with the Who we are / Credentials / What we do blocks">Draft intro</button>}
           {isAdmin && !c.enriched && data.apollo_configured && <button className="small" onClick={() => reveal(c)} disabled={busy === `c${c.id}`}>Reveal</button>}
           {isAdmin && <button className="small danger" onClick={() => window.confirm(`Remove ${c.name}?`) && run(`c${c.id}`, () => api.deleteContact(c.id))}>×</button>}
