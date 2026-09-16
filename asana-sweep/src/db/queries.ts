@@ -12,6 +12,12 @@ import type {
   CheckStatus,
   CheckWithItems,
   Completion,
+  ContextEntry,
+  CruvaOutreach,
+  InboxConversation,
+  InboxMessage,
+  InboxReply,
+  AccountReplySettings,
   GmvMaxPatch,
   GmvMaxRow,
   GmvSync,
@@ -1152,6 +1158,261 @@ export class Queries {
   lastProspectPull(): string | null {
     const r = this.db.prepare('SELECT MAX(pulled_at) AS at FROM bd_prospects').get() as { at: string | null };
     return r.at ?? null;
+  }
+
+  // ---- CS & affiliate inbox ----
+
+  private rowToConversation(r: Row): InboxConversation {
+    const lastSender = (r.last_sender as InboxConversation['last_sender']) ?? null;
+    const status = (r.status as InboxConversation['status']) ?? 'open';
+    const channel = r.channel as InboxConversation['channel'];
+    const autoOn = channel === 'cs' ? Boolean(r.auto_reply_cs) : Boolean(r.auto_reply_affiliate);
+    return {
+      id: r.id as number,
+      tts_shop_id: r.tts_shop_id as string,
+      shop_name: (r.shop_name as string) ?? '',
+      account_id: (r.account_id as number | null) ?? null,
+      account_name: (r.account_name as string | null) ?? null,
+      market: (r.market as string | null) ?? null,
+      channel,
+      conversation_id: r.conversation_id as string,
+      counterpart_name: (r.counterpart_name as string | null) ?? null,
+      counterpart_id: (r.counterpart_id as string | null) ?? null,
+      unread_count: (r.unread_count as number) ?? 0,
+      last_message_at: (r.last_message_at as string | null) ?? null,
+      last_message_text: (r.last_message_text as string | null) ?? null,
+      last_sender: lastSender,
+      last_message_id: (r.last_message_id as string | null) ?? null,
+      can_send: Boolean(r.can_send),
+      status,
+      language: (r.language as string | null) ?? null,
+      needs_reply: lastSender === 'them' && status !== 'closed',
+      auto_reply_on: autoOn,
+      synced_at: r.synced_at as string,
+      updated_at: r.updated_at as string,
+    };
+  }
+
+  private static CONV_SELECT = `SELECT c.*, s.name AS shop_name, s.account_id, s.market, a.name AS account_name, a.auto_reply_cs, a.auto_reply_affiliate
+    FROM inbox_conversations c JOIN tts_shops s ON s.id = c.tts_shop_id LEFT JOIN accounts a ON a.id = s.account_id`;
+
+  listConversations(opts: { channel?: InboxConversation['channel']; accountId?: number; limit?: number } = {}): InboxConversation[] {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.channel) {
+      where.push('c.channel = ?');
+      params.push(opts.channel);
+    }
+    if (opts.accountId) {
+      where.push('s.account_id = ?');
+      params.push(opts.accountId);
+    }
+    const sql = `${Queries.CONV_SELECT} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY c.last_message_at DESC NULLS LAST, c.id DESC LIMIT ?`;
+    params.push(opts.limit ?? 500);
+    return (this.db.prepare(sql).all(...params) as Row[]).map((r) => this.rowToConversation(r));
+  }
+
+  getConversation(id: number): InboxConversation | null {
+    const r = this.db.prepare(`${Queries.CONV_SELECT} WHERE c.id = ?`).get(id) as Row | undefined;
+    return r ? this.rowToConversation(r) : null;
+  }
+
+  /** Insert or refresh a conversation from a TikTok listing. Returns its row id and whether the newest message changed. */
+  upsertConversation(c: { tts_shop_id: string; channel: InboxConversation['channel']; conversation_id: string; counterpart_name?: string | null; counterpart_id?: string | null; unread_count?: number; can_send?: boolean; last_message_at?: string | null; last_message_text?: string | null; last_sender?: InboxConversation['last_sender']; last_message_id?: string | null }, now = new Date().toISOString()): { id: number; changed: boolean } {
+    const prev = this.db.prepare('SELECT id, last_message_id, status FROM inbox_conversations WHERE tts_shop_id = ? AND channel = ? AND conversation_id = ?').get(c.tts_shop_id, c.channel, c.conversation_id) as { id: number; last_message_id: string | null; status: string } | undefined;
+    const changed = !prev || (c.last_message_id !== undefined && c.last_message_id !== prev.last_message_id);
+    if (!prev) {
+      const info = this.db
+        .prepare(`INSERT INTO inbox_conversations (tts_shop_id, channel, conversation_id, counterpart_name, counterpart_id, unread_count, can_send, last_message_at, last_message_text, last_sender, last_message_id, status, synced_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`)
+        .run(c.tts_shop_id, c.channel, c.conversation_id, c.counterpart_name ?? null, c.counterpart_id ?? null, c.unread_count ?? 0, c.can_send === false ? 0 : 1, c.last_message_at ?? null, c.last_message_text ?? null, c.last_sender ?? null, c.last_message_id ?? null, now, now);
+      return { id: Number(info.lastInsertRowid), changed: true };
+    }
+    // A new message from the other side re-opens a replied / closed thread.
+    const reopen = changed && c.last_sender === 'them' && prev.status !== 'open';
+    this.db
+      .prepare(`UPDATE inbox_conversations SET counterpart_name = COALESCE(?, counterpart_name), counterpart_id = COALESCE(?, counterpart_id), unread_count = COALESCE(?, unread_count), can_send = COALESCE(?, can_send),
+        last_message_at = COALESCE(?, last_message_at), last_message_text = COALESCE(?, last_message_text), last_sender = COALESCE(?, last_sender), last_message_id = COALESCE(?, last_message_id),
+        status = CASE WHEN ? THEN 'open' ELSE status END, synced_at = ?, updated_at = CASE WHEN ? THEN ? ELSE updated_at END WHERE id = ?`)
+      .run(c.counterpart_name ?? null, c.counterpart_id ?? null, c.unread_count ?? null, c.can_send === undefined ? null : c.can_send ? 1 : 0, c.last_message_at ?? null, c.last_message_text ?? null, c.last_sender ?? null, c.last_message_id ?? null, reopen ? 1 : 0, now, changed ? 1 : 0, now, prev.id);
+    return { id: prev.id, changed };
+  }
+
+  setConversationStatus(id: number, status: InboxConversation['status']): void {
+    this.db.prepare(`UPDATE inbox_conversations SET status = ?, updated_at = ? WHERE id = ?`).run(status, new Date().toISOString(), id);
+  }
+
+  setConversationLanguage(id: number, language: string | null): void {
+    this.db.prepare(`UPDATE inbox_conversations SET language = ? WHERE id = ?`).run(language, id);
+  }
+
+  upsertMessages(conversationRef: number, rows: { message_id: string; sender_role: InboxMessage['sender_role']; sender_name?: string | null; type?: string; text?: string | null; created_at: string }[]): number {
+    const stmt = this.db.prepare(`INSERT OR IGNORE INTO inbox_messages (conversation_ref, message_id, sender_role, sender_name, type, text, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`);
+    let n = 0;
+    this.db.transaction(() => {
+      for (const m of rows) n += stmt.run(conversationRef, m.message_id, m.sender_role, m.sender_name ?? null, m.type ?? 'TEXT', m.text ?? null, m.created_at).changes;
+    })();
+    return n;
+  }
+
+  listMessages(conversationRef: number, limit = 60): InboxMessage[] {
+    return (this.db.prepare('SELECT * FROM inbox_messages WHERE conversation_ref = ? ORDER BY created_at DESC, id DESC LIMIT ?').all(conversationRef, limit) as Row[])
+      .reverse()
+      .map((r) => ({ id: r.id as number, conversation_ref: r.conversation_ref as number, message_id: r.message_id as string, sender_role: r.sender_role as InboxMessage['sender_role'], sender_name: (r.sender_name as string | null) ?? null, type: r.type as string, text: (r.text as string | null) ?? null, created_at: r.created_at as string }));
+  }
+
+  /** Other conversations with the same buyer / creator on this shop: the "past history" part of the context. */
+  historyForCounterpart(conversation: InboxConversation, limit = 30): { when: string; who: string; text: string }[] {
+    if (!conversation.counterpart_id && !conversation.counterpart_name) return [];
+    const rows = this.db
+      .prepare(`SELECT m.created_at, m.sender_role, m.text FROM inbox_messages m JOIN inbox_conversations c ON c.id = m.conversation_ref
+        WHERE c.id != ? AND c.tts_shop_id = ? AND c.channel = ? AND ((c.counterpart_id IS NOT NULL AND c.counterpart_id = ?) OR (c.counterpart_name IS NOT NULL AND c.counterpart_name = ?)) AND m.text IS NOT NULL
+        ORDER BY m.created_at DESC LIMIT ?`)
+      .all(conversation.id, conversation.tts_shop_id, conversation.channel, conversation.counterpart_id, conversation.counterpart_name, limit) as Row[];
+    return rows.reverse().map((r) => ({ when: r.created_at as string, who: r.sender_role === 'us' ? 'us' : r.sender_role === 'them' ? (conversation.channel === 'cs' ? 'buyer' : 'creator') : 'system', text: r.text as string }));
+  }
+
+  private rowToReply(r: Row): InboxReply {
+    return { id: r.id as number, conversation_ref: r.conversation_ref as number, text: r.text as string, mode: r.mode as InboxReply['mode'], created_by: (r.created_by as string | null) ?? null, created_at: r.created_at as string, sent_at: (r.sent_at as string | null) ?? null, tts_message_id: (r.tts_message_id as string | null) ?? null, error_message: (r.error_message as string | null) ?? null, in_reply_to: (r.in_reply_to as string | null) ?? null };
+  }
+
+  addReply(r: { conversation_ref: number; text: string; mode: InboxReply['mode']; created_by?: string | null; in_reply_to?: string | null }): InboxReply {
+    const info = this.db.prepare(`INSERT INTO inbox_replies (conversation_ref, text, mode, created_by, in_reply_to) VALUES (?, ?, ?, ?, ?)`).run(r.conversation_ref, r.text, r.mode, r.created_by ?? null, r.in_reply_to ?? null);
+    return this.getReply(Number(info.lastInsertRowid))!;
+  }
+
+  getReply(id: number): InboxReply | null {
+    const r = this.db.prepare('SELECT * FROM inbox_replies WHERE id = ?').get(id) as Row | undefined;
+    return r ? this.rowToReply(r) : null;
+  }
+
+  markReplySent(id: number, ttsMessageId: string | null, error: string | null): void {
+    this.db.prepare(`UPDATE inbox_replies SET sent_at = CASE WHEN ? IS NULL THEN ? ELSE sent_at END, tts_message_id = ?, error_message = ? WHERE id = ?`).run(error, new Date().toISOString(), ttsMessageId, error, id);
+  }
+
+  listReplies(conversationRef: number): InboxReply[] {
+    return (this.db.prepare('SELECT * FROM inbox_replies WHERE conversation_ref = ? ORDER BY created_at DESC, id DESC LIMIT 20').all(conversationRef) as Row[]).map((r) => this.rowToReply(r));
+  }
+
+  /** Has an auto reply already gone out for this exact incoming message? */
+  autoRepliedTo(conversationRef: number, messageId: string): boolean {
+    return Boolean(this.db.prepare(`SELECT 1 FROM inbox_replies WHERE conversation_ref = ? AND mode = 'auto' AND in_reply_to = ? AND sent_at IS NOT NULL`).get(conversationRef, messageId));
+  }
+
+  lastAutoReplyAt(conversationRef: number): string | null {
+    const r = this.db.prepare(`SELECT MAX(sent_at) AS at FROM inbox_replies WHERE conversation_ref = ? AND mode = 'auto'`).get(conversationRef) as { at: string | null };
+    return r.at ?? null;
+  }
+
+  countAutoRepliesSince(iso: string): number {
+    return (this.db.prepare(`SELECT COUNT(*) AS n FROM inbox_replies WHERE mode = 'auto' AND sent_at >= ?`).get(iso) as { n: number }).n;
+  }
+
+  // ---- Context library ----
+
+  private rowToContext(r: Row): ContextEntry {
+    return { id: r.id as number, language: r.language as string, scope: r.scope as ContextEntry['scope'], account_id: (r.account_id as number | null) ?? null, account_name: (r.account_name as string | null) ?? null, title: r.title as string, body: r.body as string, enabled: Boolean(r.enabled), updated_at: r.updated_at as string };
+  }
+
+  listContext(): ContextEntry[] {
+    return (this.db.prepare(`SELECT l.*, a.name AS account_name FROM context_library l LEFT JOIN accounts a ON a.id = l.account_id ORDER BY l.language, l.scope, l.account_id NULLS FIRST, l.id`).all() as Row[]).map((r) => this.rowToContext(r));
+  }
+
+  /** Entries that apply to one conversation: global + that language, for the channel, for all accounts or this one. */
+  contextFor(language: string, channel: 'cs' | 'affiliate', accountId: number | null): ContextEntry[] {
+    return (this.db
+      .prepare(`SELECT l.*, a.name AS account_name FROM context_library l LEFT JOIN accounts a ON a.id = l.account_id
+        WHERE l.enabled = 1 AND (l.language = '*' OR l.language = ?) AND (l.scope = 'both' OR l.scope = ?) AND (l.account_id IS NULL OR l.account_id = ?)
+        ORDER BY l.account_id NULLS FIRST, l.language, l.id`)
+      .all(language, channel, accountId) as Row[]).map((r) => this.rowToContext(r));
+  }
+
+  createContext(e: { language: string; scope: ContextEntry['scope']; account_id: number | null; title: string; body: string; enabled?: boolean }): ContextEntry {
+    const info = this.db.prepare(`INSERT INTO context_library (language, scope, account_id, title, body, enabled) VALUES (?, ?, ?, ?, ?, ?)`).run(e.language, e.scope, e.account_id, e.title, e.body, e.enabled === false ? 0 : 1);
+    return this.listContext().find((c) => c.id === Number(info.lastInsertRowid))!;
+  }
+
+  updateContext(id: number, e: Partial<{ language: string; scope: ContextEntry['scope']; account_id: number | null; title: string; body: string; enabled: boolean }>): ContextEntry | null {
+    const sets: string[] = [];
+    const params: Record<string, unknown> = { id, now: new Date().toISOString() };
+    for (const k of ['language', 'scope', 'account_id', 'title', 'body'] as const) {
+      if (e[k] !== undefined) {
+        sets.push(`${k} = @${k}`);
+        params[k] = e[k];
+      }
+    }
+    if (e.enabled !== undefined) {
+      sets.push('enabled = @enabled');
+      params.enabled = e.enabled ? 1 : 0;
+    }
+    if (sets.length) this.db.prepare(`UPDATE context_library SET ${sets.join(', ')}, updated_at = @now WHERE id = @id`).run(params);
+    return this.listContext().find((c) => c.id === id) ?? null;
+  }
+
+  deleteContext(id: number): boolean {
+    return this.db.prepare('DELETE FROM context_library WHERE id = ?').run(id).changes > 0;
+  }
+
+  // ---- Cruva outreach memory ----
+
+  upsertCruvaOutreach(rows: { account_id: number | null; creator_handle: string; summary: string; occurred_at?: string | null; source?: string }[]): number {
+    // NULL account ids are distinct to a UNIQUE index, so dedupe by hand.
+    const exists = this.db.prepare(`SELECT 1 FROM cruva_outreach WHERE account_id IS ? AND creator_handle = ? AND summary = ?`);
+    const stmt = this.db.prepare(`INSERT INTO cruva_outreach (account_id, creator_handle, summary, occurred_at, source) VALUES (?, ?, ?, ?, ?)`);
+    let n = 0;
+    this.db.transaction(() => {
+      for (const r of rows) {
+        const handle = r.creator_handle.replace(/^@/, '').toLowerCase();
+        if (exists.get(r.account_id, handle, r.summary)) continue;
+        n += stmt.run(r.account_id, handle, r.summary, r.occurred_at ?? null, r.source ?? 'import').changes;
+      }
+    })();
+    return n;
+  }
+
+  cruvaOutreachFor(creatorHandle: string | null, accountId: number | null, limit = 10): CruvaOutreach[] {
+    if (!creatorHandle) return [];
+    return (this.db
+      .prepare(`SELECT * FROM cruva_outreach WHERE creator_handle = ? AND (account_id IS NULL OR account_id = ?) ORDER BY occurred_at DESC LIMIT ?`)
+      .all(creatorHandle.replace(/^@/, '').toLowerCase(), accountId, limit) as Row[]).map((r) => ({ id: r.id as number, account_id: (r.account_id as number | null) ?? null, creator_handle: r.creator_handle as string, summary: r.summary as string, occurred_at: (r.occurred_at as string | null) ?? null, source: r.source as string }));
+  }
+
+  countCruvaOutreach(): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM cruva_outreach').get() as { n: number }).n;
+  }
+
+  // ---- Per-account auto-reply switches ----
+
+  listAccountReplySettings(): AccountReplySettings[] {
+    const shops = this.listTtsShops();
+    return (this.db.prepare('SELECT id, name, markets, auto_reply_cs, auto_reply_affiliate, reply_language FROM accounts WHERE enabled = 1 ORDER BY name COLLATE NOCASE').all() as Row[]).map((r) => ({
+      account_id: r.id as number,
+      account_name: r.name as string,
+      markets: (r.markets as string | null) ?? null,
+      auto_reply_cs: Boolean(r.auto_reply_cs),
+      auto_reply_affiliate: Boolean(r.auto_reply_affiliate),
+      reply_language: (r.reply_language as string | null) ?? null,
+      shops: shops.filter((s) => s.account_id === r.id).map((s) => ({ id: s.id, name: s.name, market: s.market, token_ok: s.token_ok })),
+    }));
+  }
+
+  setAccountReply(accountId: number, s: Partial<{ auto_reply_cs: boolean; auto_reply_affiliate: boolean; reply_language: string | null }>): boolean {
+    const sets: string[] = [];
+    const params: Record<string, unknown> = { id: accountId, now: new Date().toISOString() };
+    if (s.auto_reply_cs !== undefined) {
+      sets.push('auto_reply_cs = @cs');
+      params.cs = s.auto_reply_cs ? 1 : 0;
+    }
+    if (s.auto_reply_affiliate !== undefined) {
+      sets.push('auto_reply_affiliate = @aff');
+      params.aff = s.auto_reply_affiliate ? 1 : 0;
+    }
+    if (s.reply_language !== undefined) {
+      sets.push('reply_language = @lang');
+      params.lang = s.reply_language;
+    }
+    if (!sets.length) return true;
+    return this.db.prepare(`UPDATE accounts SET ${sets.join(', ')}, updated_at = @now WHERE id = @id`).run(params).changes > 0;
   }
 
 }

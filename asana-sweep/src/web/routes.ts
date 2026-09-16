@@ -21,6 +21,11 @@ import type { LeadsData, PersonInput, ReminderSettings } from '../sweep/types.js
 import { importLeadsCsv, leadsSettings, leadsSyncStatus, syncLeads } from '../leads/sync.js';
 import { amSummary } from '../leads/points.js';
 import { apollo } from '../bd/apollo.js';
+import { autoReplyBlocker, inboxSettings, sendReply, syncInbox } from '../inbox/sync.js';
+import { buildContext, renderPrompt } from '../inbox/context.js';
+import { draftWithClaude } from '../inbox/llm.js';
+import { LANGUAGE_NAMES } from '../inbox/language.js';
+import type { ConversationDetail, ContextEntry, InboxData } from '../sweep/types.js';
 import { normaliseDomain } from '../bd/score.js';
 import type { BdCountryRow, BdData, BdProspectInput, BdProspectPatch, BdStatus } from '../sweep/types.js';
 import type { AuthProvider } from './auth.js';
@@ -1212,6 +1217,176 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     } catch (err) {
       throw new HttpError(502, (err as Error).message);
     }
+  });
+
+
+  // ---- CS & affiliate inbox, context library, auto-reply ----
+
+  const inboxData = (): InboxData => {
+    const conversations = q.listConversations();
+    const today = new Date();
+    today.setUTCHours(0, 0, 0, 0);
+    return {
+      conversations,
+      accounts: q.listAccountReplySettings(),
+      settings: inboxSettings(q),
+      counts: {
+        open: conversations.filter((c) => c.status !== 'closed').length,
+        needs_reply: conversations.filter((c) => c.needs_reply).length,
+        auto_replied_today: q.countAutoRepliesSince(today.toISOString()),
+        cs: conversations.filter((c) => c.channel === 'cs').length,
+        affiliate: conversations.filter((c) => c.channel === 'affiliate').length,
+      },
+    };
+  };
+
+  r.get('/inbox', (_req, res) => res.json({ ...inboxData(), languages: LANGUAGE_NAMES }));
+
+  r.post('/inbox/sync', async (_req, res) => {
+    const result = await syncInbox(q);
+    if (!result.ok) return res.status(502).json({ error: result.error, result, ...inboxData() });
+    res.json({ result, ...inboxData() });
+  });
+
+  r.put('/inbox/settings', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    if (b.auto_reply_master !== undefined) q.setSetting('auto_reply_master', b.auto_reply_master ? '1' : '0');
+    if (b.inbox_enabled !== undefined) q.setSetting('inbox_enabled', b.inbox_enabled ? '1' : '0');
+    if (b.poll_seconds !== undefined) q.setSetting('inbox_poll_seconds', String(Math.max(30, int(b.poll_seconds, 120))));
+    if (b.max_age_hours !== undefined) q.setSetting('auto_reply_max_age_hours', String(Math.max(1, int(b.max_age_hours, 48))));
+    scheduler.inbox.start();
+    liveEvents.emitUpdate({ kind: 'settings' });
+    res.json(inboxData());
+  });
+
+  r.put('/inbox/accounts/:id', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    if (!q.getAccount(idParam(req))) throw new HttpError(404, 'Account not found');
+    q.setAccountReply(idParam(req), {
+      auto_reply_cs: b.auto_reply_cs === undefined ? undefined : Boolean(b.auto_reply_cs),
+      auto_reply_affiliate: b.auto_reply_affiliate === undefined ? undefined : Boolean(b.auto_reply_affiliate),
+      reply_language: b.reply_language === undefined ? undefined : optText(b.reply_language),
+    });
+    liveEvents.emitUpdate({ kind: 'inbox' });
+    res.json(inboxData());
+  });
+
+  const conversationDetail = (id: number, language?: string | null): ConversationDetail => {
+    const conversation = q.getConversation(id);
+    if (!conversation) throw new HttpError(404, 'Conversation not found');
+    const messages = q.listMessages(id);
+    return { conversation, messages, replies: q.listReplies(id), context: buildContext(q, conversation, messages, language) };
+  };
+
+  r.get('/inbox/conversations/:id', (req, res) => {
+    const d = conversationDetail(idParam(req));
+    const s = inboxSettings(q);
+    res.json({ ...d, auto_reply_blocker: autoReplyBlocker(d.conversation, s, d.conversation.last_message_id ? q.autoRepliedTo(d.conversation.id, d.conversation.last_message_id) : false, q.lastAutoReplyAt(d.conversation.id)) });
+  });
+
+  r.put('/inbox/conversations/:id', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    if (!q.getConversation(idParam(req))) throw new HttpError(404, 'Conversation not found');
+    if (b.status !== undefined) {
+      if (!['open', 'replied', 'auto_replied', 'closed'].includes(String(b.status))) throw new HttpError(400, 'Bad status');
+      q.setConversationStatus(idParam(req), b.status as 'open');
+    }
+    if (b.language !== undefined) q.setConversationLanguage(idParam(req), optText(b.language));
+    liveEvents.emitUpdate({ kind: 'inbox' });
+    res.json(conversationDetail(idParam(req)));
+  });
+
+  /** Draft a reply with Claude using the full context. Nothing is sent. */
+  r.post('/inbox/conversations/:id/draft', async (req, res) => {
+    const b = (req.body ?? {}) as { language?: string; instructions?: string };
+    const d = conversationDetail(idParam(req), optText(b.language));
+    const { system, user } = renderPrompt(d.conversation, d.messages, d.context);
+    const extra = optText(b.instructions);
+    try {
+      const text = await draftWithClaude(system, extra ? `${user}\n\nExtra instruction from the team: ${extra}` : user);
+      const reply = q.addReply({ conversation_ref: d.conversation.id, text, mode: 'draft', created_by: 'dashboard', in_reply_to: d.conversation.last_message_id });
+      res.json({ reply, ...conversationDetail(d.conversation.id, optText(b.language)) });
+    } catch (err) {
+      throw new HttpError(502, (err as Error).message);
+    }
+  });
+
+  /** Send a reply (typed or drafted) through TikTok. */
+  r.post('/inbox/conversations/:id/send', async (req, res) => {
+    const b = (req.body ?? {}) as { text?: string };
+    const text = String(b.text ?? '').trim();
+    if (!text) throw new HttpError(400, 'Reply text is empty.');
+    if (text.length > 2000) throw new HttpError(400, 'TikTok limits messages to 2000 characters.');
+    const c = q.getConversation(idParam(req));
+    if (!c) throw new HttpError(404, 'Conversation not found');
+    if (!c.can_send) throw new HttpError(409, 'TikTok does not allow the shop to message this buyer right now (no recent order or conversation).');
+    const reply = q.addReply({ conversation_ref: c.id, text, mode: 'manual', created_by: 'dashboard', in_reply_to: c.last_message_id });
+    try {
+      await sendReply(q, c, reply.id, text);
+      res.json(conversationDetail(c.id));
+    } catch (err) {
+      throw new HttpError(502, (err as Error).message);
+    }
+  });
+
+  // Context library
+  const parseContext = (b: Record<string, unknown>, partial = false) => {
+    const out: Partial<{ language: string; scope: ContextEntry['scope']; account_id: number | null; title: string; body: string; enabled: boolean }> = {};
+    if (b.language !== undefined || !partial) {
+      const lang = String(b.language ?? '*').trim().toLowerCase();
+      if (!/^(\*|[a-z]{2})$/.test(lang)) throw new HttpError(400, 'Language must be a two-letter code or *');
+      out.language = lang;
+    }
+    if (b.scope !== undefined || !partial) {
+      const scope = String(b.scope ?? 'both');
+      if (!['cs', 'affiliate', 'both'].includes(scope)) throw new HttpError(400, 'Scope must be cs, affiliate or both');
+      out.scope = scope as ContextEntry['scope'];
+    }
+    if (b.account_id !== undefined || !partial) {
+      const id = b.account_id === null || b.account_id === '' || b.account_id === undefined ? null : Number(b.account_id);
+      if (id !== null && !q.getAccount(id)) throw new HttpError(400, 'Unknown account');
+      out.account_id = id;
+    }
+    if (b.title !== undefined || !partial) {
+      out.title = String(b.title ?? '').trim();
+      if (!out.title) throw new HttpError(400, 'Title is required');
+    }
+    if (b.body !== undefined || !partial) {
+      out.body = String(b.body ?? '').trim();
+      if (!out.body) throw new HttpError(400, 'Body is required');
+    }
+    if (b.enabled !== undefined) out.enabled = Boolean(b.enabled);
+    return out;
+  };
+  r.get('/inbox/context', (_req, res) => res.json({ entries: q.listContext(), languages: LANGUAGE_NAMES }));
+  r.post('/inbox/context', (req, res) => {
+    const e = parseContext((req.body ?? {}) as Record<string, unknown>);
+    res.status(201).json({ entry: q.createContext(e as Required<typeof e>), entries: q.listContext() });
+  });
+  r.put('/inbox/context/:id', (req, res) => {
+    const entry = q.updateContext(idParam(req), parseContext((req.body ?? {}) as Record<string, unknown>, true));
+    if (!entry) throw new HttpError(404, 'Entry not found');
+    res.json({ entry, entries: q.listContext() });
+  });
+  r.delete('/inbox/context/:id', (req, res) => {
+    if (!q.deleteContext(idParam(req))) throw new HttpError(404, 'Entry not found');
+    res.json({ entries: q.listContext() });
+  });
+
+  /** Cruva outreach memory: rows of { creator_handle, summary, occurred_at?, account_id? } (e.g. exported from Cruva outreach logs). */
+  r.post('/inbox/cruva-outreach/import', (req, res) => {
+    const b = (req.body ?? {}) as { rows?: Record<string, unknown>[]; account_id?: number | null };
+    const rows = (Array.isArray(b.rows) ? b.rows : [])
+      .map((r) => ({
+        account_id: r.account_id === undefined || r.account_id === null || r.account_id === '' ? (b.account_id ?? null) : Number(r.account_id),
+        creator_handle: String(r.creator_handle ?? r.handle ?? r.username ?? r.creator ?? '').trim(),
+        summary: String(r.summary ?? r.message ?? r.note ?? r.status ?? '').trim(),
+        occurred_at: optText(r.occurred_at ?? r.date ?? r.sent_at),
+        source: 'cruva',
+      }))
+      .filter((r) => r.creator_handle && r.summary);
+    if (!rows.length) throw new HttpError(400, 'Send { rows: [{ creator_handle, summary, occurred_at? }] }');
+    res.json({ imported: q.upsertCruvaOutreach(rows), total: q.countCruvaOutreach() });
   });
 
   // Error handler last, so every route above (including the ones appended later) returns JSON.

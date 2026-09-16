@@ -716,3 +716,126 @@ export interface BdProspectPatch {
   outreach_linkedin?: boolean;
   archived?: boolean;
 }
+
+// ---- CS & affiliate inbox, context library, auto-reply ----
+
+export type InboxChannel = 'cs' | 'affiliate';
+export type InboxStatus = 'open' | 'replied' | 'auto_replied' | 'closed';
+
+export interface InboxConversation {
+  id: number;
+  tts_shop_id: string;
+  shop_name: string;
+  account_id: number | null;
+  account_name: string | null;
+  market: string | null;
+  channel: InboxChannel;
+  conversation_id: string;
+  counterpart_name: string | null;
+  counterpart_id: string | null;
+  unread_count: number;
+  last_message_at: string | null;
+  last_message_text: string | null;
+  last_sender: 'them' | 'us' | 'system' | null;
+  last_message_id: string | null;
+  can_send: boolean;
+  status: InboxStatus;
+  language: string | null;
+  needs_reply: boolean;
+  auto_reply_on: boolean;
+  synced_at: string;
+  updated_at: string;
+}
+
+export interface InboxMessage {
+  id: number;
+  conversation_ref: number;
+  message_id: string;
+  sender_role: 'them' | 'us' | 'system';
+  sender_name: string | null;
+  type: string;
+  text: string | null;
+  created_at: string;
+}
+
+export interface InboxReply {
+  id: number;
+  conversation_ref: number;
+  text: string;
+  mode: 'draft' | 'manual' | 'auto';
+  created_by: string | null;
+  created_at: string;
+  sent_at: string | null;
+  tts_message_id: string | null;
+  error_message: string | null;
+  in_reply_to: string | null;
+}
+
+export interface ContextEntry {
+  id: number;
+  language: string; // ISO 639-1, or '*' for every language
+  scope: 'cs' | 'affiliate' | 'both';
+  account_id: number | null;
+  account_name: string | null;
+  title: string;
+  body: string;
+  enabled: boolean;
+  updated_at: string;
+}
+
+export interface CruvaOutreach {
+  id: number;
+  account_id: number | null;
+  creator_handle: string;
+  summary: string;
+  occurred_at: string | null;
+  source: string;
+}
+
+export interface AccountReplySettings {
+  account_id: number;
+  account_name: string;
+  markets: string | null;
+  auto_reply_cs: boolean;
+  auto_reply_affiliate: boolean;
+  reply_language: string | null;
+  shops: { id: string; name: string; market: string | null; token_ok: boolean }[];
+}
+
+export interface InboxSettings {
+  auto_reply_master: boolean;
+  inbox_enabled: boolean;
+  poll_seconds: number;
+  max_age_hours: number;
+  llm_configured: boolean;
+  model: string;
+  tts_configured: boolean;
+  last_sync_at: string | null;
+  last_sync_error: string | null;
+  cruva_configured: boolean;
+}
+
+export interface InboxData {
+  conversations: InboxConversation[];
+  accounts: AccountReplySettings[];
+  settings: InboxSettings;
+  counts: { open: number; needs_reply: number; auto_replied_today: number; cs: number; affiliate: number };
+}
+
+export interface ConversationDetail {
+  conversation: InboxConversation;
+  messages: InboxMessage[];
+  replies: InboxReply[];
+  context: ReplyContext;
+}
+
+export interface ReplyContext {
+  language: string;
+  account: string | null;
+  market: string | null;
+  promotions: { name: string; discount: string; period: string; status: string }[];
+  products: { id: string; title: string }[];
+  history: { when: string; who: string; text: string }[];
+  cruva_outreach: { when: string | null; summary: string }[];
+  library: { title: string; body: string; language: string; scope: string }[];
+}

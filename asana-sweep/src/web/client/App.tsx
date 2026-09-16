@@ -15,6 +15,7 @@ import PromotionsPage from './pages/Promotions';
 import GmvMaxPage from './pages/GmvMax';
 import LeadsPage from './pages/Leads';
 import BdPage from './pages/Bd';
+import InboxPage from './pages/Inbox';
 
 type Theme = 'system' | 'light' | 'dark';
 
@@ -122,6 +123,7 @@ const NAV: { section: string; items: { to: string; label: string; end?: boolean 
     items: [
       { to: '/promotions', label: 'Promotions' },
       { to: '/gmv-max', label: 'GMV Max' },
+      { to: '/inbox', label: 'CS & affiliate inbox' },
     ],
   },
   {
@@ -220,6 +222,7 @@ export default function App() {
               <Route path="/gmv-max" element={<GmvMaxPage />} />
               <Route path="/leads" element={<LeadsPage />} />
               <Route path="/bd" element={<BdPage />} />
+              <Route path="/inbox" element={<InboxPage />} />
               <Route path="*" element={<Navigate to="/checklists" replace />} />
             </Routes>
           </main>

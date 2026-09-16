@@ -601,6 +601,100 @@ const migrations: Migration[] = [
       for (const [seller, name, title, apolloId] of seeded) contact.run(name, title, apolloId, 'Found via Apollo search; reveal to get the full name, email and LinkedIn.', seller);
     },
   },
+  {
+    version: 12,
+    name: 'cs and affiliate inbox, context library, auto-reply switches',
+    up(db) {
+      db.exec(`
+        ALTER TABLE accounts ADD COLUMN auto_reply_cs INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE accounts ADD COLUMN auto_reply_affiliate INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE accounts ADD COLUMN reply_language TEXT;
+
+        CREATE TABLE inbox_conversations (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          tts_shop_id TEXT NOT NULL REFERENCES tts_shops(id) ON DELETE CASCADE,
+          channel TEXT NOT NULL,
+          conversation_id TEXT NOT NULL,
+          counterpart_name TEXT,
+          counterpart_id TEXT,
+          unread_count INTEGER NOT NULL DEFAULT 0,
+          last_message_at TEXT,
+          last_message_text TEXT,
+          last_sender TEXT,
+          last_message_id TEXT,
+          can_send INTEGER NOT NULL DEFAULT 1,
+          status TEXT NOT NULL DEFAULT 'open',
+          language TEXT,
+          synced_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          UNIQUE(tts_shop_id, channel, conversation_id)
+        );
+        CREATE INDEX inbox_conversations_recent ON inbox_conversations(last_message_at DESC);
+
+        CREATE TABLE inbox_messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          conversation_ref INTEGER NOT NULL REFERENCES inbox_conversations(id) ON DELETE CASCADE,
+          message_id TEXT NOT NULL,
+          sender_role TEXT NOT NULL,
+          sender_name TEXT,
+          type TEXT NOT NULL DEFAULT 'TEXT',
+          text TEXT,
+          created_at TEXT NOT NULL,
+          UNIQUE(conversation_ref, message_id)
+        );
+
+        CREATE TABLE inbox_replies (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          conversation_ref INTEGER NOT NULL REFERENCES inbox_conversations(id) ON DELETE CASCADE,
+          text TEXT NOT NULL,
+          mode TEXT NOT NULL DEFAULT 'draft',
+          created_by TEXT,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          sent_at TEXT,
+          tts_message_id TEXT,
+          error_message TEXT,
+          in_reply_to TEXT
+        );
+        CREATE INDEX inbox_replies_conv ON inbox_replies(conversation_ref, created_at DESC);
+
+        CREATE TABLE context_library (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          language TEXT NOT NULL DEFAULT '*',
+          scope TEXT NOT NULL DEFAULT 'both',
+          account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+          title TEXT NOT NULL,
+          body TEXT NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+
+        CREATE TABLE cruva_outreach (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+          creator_handle TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          occurred_at TEXT,
+          source TEXT NOT NULL DEFAULT 'import',
+          UNIQUE(account_id, creator_handle, summary)
+        );
+        CREATE INDEX cruva_outreach_handle ON cruva_outreach(creator_handle);
+      `);
+      const set = db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`);
+      set.run('auto_reply_master', '0');
+      set.run('inbox_enabled', '1');
+      set.run('inbox_poll_seconds', '120');
+      set.run('auto_reply_max_age_hours', '48');
+      const lib = db.prepare(`INSERT INTO context_library (language, scope, title, body) VALUES (?, ?, ?, ?)`);
+      lib.run('*', 'both', 'Voice and rules', 'You reply on behalf of the brand\'s own TikTok Shop team (never mention an agency). Be warm, short and concrete: one to four sentences, no bullet lists, no emojis unless the other person uses them. Never invent order details, tracking numbers, stock levels or discounts that are not in the context. If something needs a human (refund disputes, damaged goods, legal or health claims, anything you are unsure of), say the team will follow up within one working day and stop there.');
+      lib.run('*', 'cs', 'Customer service basics', 'Thank the buyer, acknowledge the issue in one line, then give the next step. For delivery questions point to the tracking in their TikTok order page and give the usual delivery window for the market. For returns explain they can start it from Orders > Return/Refund in the TikTok app within the return window. Ask for the order number only if it is not already in the conversation.');
+      lib.run('*', 'affiliate', 'Affiliate basics', 'Creators are partners: thank them for the interest, confirm whether they are already on the open or targeted collaboration, and mention the commission and free sample process only if it is in the context. Ask for their TikTok username and which product they want to feature. If they ask for higher commission or paid deals, say the partnerships team will come back to them.');
+      lib.run('en', 'both', 'English sign-off', 'Sign off with "Best, the [brand] team".');
+      lib.run('de', 'both', 'Deutsch', 'Duze auf TikTok, freundlich und direkt. Abschluss: "Liebe Grüße, dein [brand] Team".');
+      lib.run('fr', 'both', 'Français', 'Tutoiement chaleureux comme sur TikTok. Signature : "À bientôt, l\'équipe [brand]".');
+      lib.run('it', 'both', 'Italiano', 'Tono amichevole, dai del tu. Firma: "A presto, il team [brand]".');
+      lib.run('es', 'both', 'Español', 'Tono cercano, tutea. Firma: "Un saludo, el equipo de [brand]".');
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

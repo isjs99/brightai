@@ -173,6 +173,50 @@ export class TtsClient {
       body: { status: 'ACTIVATED' },
     });
   }
+  // ---- Customer service (buyer) conversations, customer_service 202309 ----
+
+  async csConversations(shop: { accessToken: string; cipher: string }, pageToken = ''): Promise<{ conversations: Record<string, unknown>[]; next_page_token?: string }> {
+    const query: Record<string, string> = { page_size: '20' };
+    if (pageToken) query.page_token = pageToken;
+    const d = await this.call<{ conversations?: Record<string, unknown>[]; next_page_token?: string }>('GET', '/customer_service/202309/conversations', { accessToken: shop.accessToken, shopCipher: shop.cipher, query });
+    return { conversations: d.conversations ?? [], next_page_token: d.next_page_token };
+  }
+
+  async csMessages(shop: { accessToken: string; cipher: string }, conversationId: string, pageToken = ''): Promise<{ messages: Record<string, unknown>[]; next_page_token?: string }> {
+    const query: Record<string, string> = { page_size: '10', sort_order: 'DESC', sort_field: 'create_time' };
+    if (pageToken) query.page_token = pageToken;
+    const d = await this.call<{ messages?: Record<string, unknown>[]; next_page_token?: string }>('GET', `/customer_service/202309/conversations/${encodeURIComponent(conversationId)}/messages`, { accessToken: shop.accessToken, shopCipher: shop.cipher, query });
+    return { messages: d.messages ?? [], next_page_token: d.next_page_token };
+  }
+
+  async csSendText(shop: { accessToken: string; cipher: string }, conversationId: string, text: string): Promise<{ message_id: string }> {
+    return this.call<{ message_id: string }>('POST', `/customer_service/202309/conversations/${encodeURIComponent(conversationId)}/messages`, { accessToken: shop.accessToken, shopCipher: shop.cipher, body: { type: 'TEXT', content: JSON.stringify({ content: text.slice(0, 2000) }) } });
+  }
+
+  async csMarkRead(shop: { accessToken: string; cipher: string }, conversationId: string): Promise<void> {
+    await this.call('POST', `/customer_service/202309/conversations/${encodeURIComponent(conversationId)}/messages/read`, { accessToken: shop.accessToken, shopCipher: shop.cipher, body: {} });
+  }
+
+  // ---- Affiliate (creator) conversations, affiliate_seller 202412 / 202505 ----
+
+  async affConversations(shop: { accessToken: string; cipher: string }, pageToken = ''): Promise<{ conversations: Record<string, unknown>[]; next_page_token?: string }> {
+    const query: Record<string, string> = { page_size: '50', only_need_conversation_id: 'false' };
+    if (pageToken) query.page_token = pageToken;
+    const d = await this.call<{ conversations?: Record<string, unknown>[]; next_page_token?: string }>('GET', '/affiliate_seller/202505/conversations', { accessToken: shop.accessToken, shopCipher: shop.cipher, query });
+    return { conversations: d.conversations ?? [], next_page_token: d.next_page_token };
+  }
+
+  async affMessages(shop: { accessToken: string; cipher: string }, conversationId: string, pageToken = ''): Promise<{ messages: Record<string, unknown>[]; has_more?: boolean; next_page_token?: string }> {
+    const query: Record<string, string> = { page_size: '20' };
+    if (pageToken) query.page_token = pageToken;
+    const d = await this.call<{ messages?: Record<string, unknown>[]; has_more?: boolean; next_page_token?: string }>('GET', `/affiliate_seller/202412/conversation/${encodeURIComponent(conversationId)}/messages`, { accessToken: shop.accessToken, shopCipher: shop.cipher, query });
+    return { messages: d.messages ?? [], has_more: d.has_more, next_page_token: d.next_page_token };
+  }
+
+  async affSendText(shop: { accessToken: string; cipher: string }, conversationId: string, text: string): Promise<{ message_id: string }> {
+    return this.call<{ message_id: string }>('POST', `/affiliate_seller/202412/conversations/${encodeURIComponent(conversationId)}/messages`, { accessToken: shop.accessToken, shopCipher: shop.cipher, body: { msg_type: 'TEXT', content: JSON.stringify({ content: text.slice(0, 2000) }) } });
+  }
+
 }
 
 export const tts = new TtsClient();
