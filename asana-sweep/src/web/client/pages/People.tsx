@@ -99,13 +99,13 @@ export default function PeoplePage() {
           <h1>Team</h1>
           <p className="hint" style={{ margin: 0 }}>Account managers and assistants. Names must match the AM on each account (first name is enough). Add a Slack id or email to DM them.</p>
         </div>
-        <button onClick={() => setForm({ id: null, data: EMPTY })}>+ Add person</button>
+        <button className="admin-only" onClick={() => setForm({ id: null, data: EMPTY })}>+ Add person</button>
       </div>
       {error && <div className="banner crit">{error}</div>}
       {notice && <div className="banner info">{notice}</div>}
 
       {settings && (
-        <form className="card" onSubmit={saveSettings} style={{ marginBottom: 16 }}>
+        <form className="card admin-only" onSubmit={saveSettings} style={{ marginBottom: 16 }}>
           <h2 style={{ marginTop: 0 }}>Slack DM reminders</h2>
           {!settings.slack_bot_configured && (
             <div className="banner warn">
@@ -178,7 +178,7 @@ export default function PeoplePage() {
                 <td className="hide-sm mono">{p.slack_user_id ?? <span className="sub">–</span>}</td>
                 <td>{p.notify ? <span className="badge good">on</span> : <span className="badge muted">off</span>}</td>
                 <td>
-                  <div className="actions">
+                  <div className="actions admin-only">
                     <button className="small" onClick={() => setForm({ id: p.id, data: { name: p.name, role: p.role, email: p.email ?? '', slack_user_id: p.slack_user_id ?? '', notify: p.notify } })}>Edit</button>
                     <button className="small" disabled={busy === `dm-${p.id}` || !settings?.slack_bot_configured || (!p.email && !p.slack_user_id)} onClick={() => testDm(p)}>{busy === `dm-${p.id}` ? '…' : 'Test DM'}</button>
                     <button className="small danger" onClick={() => remove(p)}>Remove</button>

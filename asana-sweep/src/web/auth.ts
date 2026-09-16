@@ -37,12 +37,22 @@ function safeEqual(a: string, b: string): boolean {
   return ba.length === bb.length && timingSafeEqual(ba, bb);
 }
 
+export type Role = 'admin' | 'am';
+
+/**
+ * Two shared passwords: DASHBOARD_PASSWORD signs in as admin (can change settings),
+ * AM_PASSWORD signs in as account manager (read only). The role is baked into the signed cookie.
+ */
 export class SharedPasswordAuth implements AuthProvider {
   login(req: Request, res: Response): boolean {
     const password = String((req.body as { password?: unknown })?.password ?? '');
-    if (!password || !safeEqual(password, config.dashboardPassword)) return false;
+    if (!password) return false;
+    let role: Role | null = null;
+    if (safeEqual(password, config.dashboardPassword)) role = 'admin';
+    else if (config.amPassword && safeEqual(password, config.amPassword)) role = 'am';
+    if (!role) return false;
     const expires = Date.now() + SESSION_DAYS * 86400000;
-    const payload = `ok.${expires}`;
+    const payload = `ok.${role}.${expires}`;
     res.cookie(COOKIE, `${payload}.${sign(payload)}`, {
       httpOnly: true,
       sameSite: 'lax',
@@ -57,13 +67,17 @@ export class SharedPasswordAuth implements AuthProvider {
     res.clearCookie(COOKIE, { path: '/' });
   }
 
-  isAuthenticated(req: Request): boolean {
+  roleOf(req: Request): Role | null {
     const raw = parseCookies(req.headers.cookie)[COOKIE];
-    if (!raw) return false;
-    const [ok, expires, sig] = raw.split('.');
-    if (ok !== 'ok' || !expires || !sig) return false;
-    if (Number(expires) < Date.now()) return false;
-    return safeEqual(sig, sign(`${ok}.${expires}`));
+    if (!raw) return null;
+    const [ok, role, expires, sig] = raw.split('.');
+    if (ok !== 'ok' || (role !== 'admin' && role !== 'am') || !expires || !sig) return null;
+    if (Number(expires) < Date.now()) return null;
+    return safeEqual(sig, sign(`${ok}.${role}.${expires}`)) ? role : null;
+  }
+
+  isAuthenticated(req: Request): boolean {
+    return this.roleOf(req) !== null;
   }
 }
 
@@ -71,5 +85,14 @@ export function requireAuth(auth: AuthProvider) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (auth.isAuthenticated(req)) return next();
     res.status(401).json({ error: 'Not logged in' });
+  };
+}
+
+/** Anything that changes state is admin only. Account managers get read access. */
+export function requireAdminForWrites(auth: SharedPasswordAuth) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
+    if (auth.roleOf(req) === 'admin') return next();
+    res.status(403).json({ error: 'Admin only. Account managers have view access; ask an admin to make this change.' });
   };
 }

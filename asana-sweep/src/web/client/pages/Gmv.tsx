@@ -181,8 +181,8 @@ export default function GmvPage() {
           <button className="small" onClick={() => setMonth(shiftMonth(month, -1))}>‹</button>
           <b>{monthLabel(month)}</b>
           <button className="small" onClick={() => setMonth(shiftMonth(month, 1))} disabled={month >= currentMonth()}>›</button>
-          <button onClick={sync} disabled={busy === 'sync' || !data?.cruva_configured} title={data?.cruva_configured ? '' : 'Set CRUVA_API_KEY in .env'}>{busy === 'sync' ? 'Syncing…' : 'Sync from Cruva'}</button>
-          <button onClick={() => setShowImport((s) => !s)}>Import</button>
+          <button className="admin-only" onClick={sync} disabled={busy === 'sync' || !data?.cruva_configured} title={data?.cruva_configured ? '' : 'Set CRUVA_API_KEY in .env'}>{busy === 'sync' ? 'Syncing…' : 'Sync from Cruva'}</button>
+          <button className="admin-only" onClick={() => setShowImport((s) => !s)}>Import</button>
         </div>
       </div>
       {error && <div className="banner crit">{error}</div>}
@@ -251,7 +251,7 @@ export default function GmvPage() {
                   <button className="small" onClick={() => setEditing(false)}>Cancel</button>
                 </>
               ) : (
-                <button className="small" onClick={() => setEditing(true)}>Override targets</button>
+                <button className="small admin-only" onClick={() => setEditing(true)}>Override targets</button>
               )}
             </div>
           </div>
@@ -322,7 +322,7 @@ export default function GmvPage() {
                   <button className="small" onClick={() => { setDealEdit(false); absorbDeals(data); }}>Cancel</button>
                 </>
               ) : (
-                <button className="small" onClick={() => setDealEdit(true)}>Edit deals</button>
+                <button className="small admin-only" onClick={() => setDealEdit(true)}>Edit deals</button>
               )}
             </div>
           </div>

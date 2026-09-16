@@ -121,7 +121,7 @@ export default function RulesList() {
             One rule per checklist board, created automatically when an account is linked. Scheduled runs respect dry run and the minimum age. "Run now" deletes straight away.
           </p>
         </div>
-        <div className="actions">
+        <div className="actions admin-only">
           <button className="primary" onClick={runAll} disabled={runningAll || !rules?.length}>{runningAll ? 'Sweeping…' : 'Sweep all boards now'}</button>
           <Link to="/rules/new" className="btn">+ New rule</Link>
         </div>
@@ -157,13 +157,13 @@ export default function RulesList() {
                   <div className="sub mono">{r.cron}</div>
                 </td>
                 <td>
-                  <label className="toggle">
+                  <label className="toggle admin-only">
                     <input type="checkbox" checked={r.enabled} disabled={busy === r.id} onChange={() => toggle(r, 'enabled')} />
                     {r.enabled ? 'On' : 'Off'}
                   </label>
                 </td>
                 <td>
-                  <label className="toggle">
+                  <label className="toggle admin-only">
                     <input type="checkbox" checked={!r.dry_run} disabled={busy === r.id} onChange={() => toggle(r, 'dry_run')} />
                     {r.dry_run ? <span className="badge warn">Dry run</span> : <span className="badge crit">Live</span>}
                   </label>
@@ -196,7 +196,7 @@ export default function RulesList() {
                   )}
                 </td>
                 <td>
-                  <div className="actions">
+                  <div className="actions admin-only">
                     <button className="small" disabled={busy === r.id || r.is_running || runningAll} onClick={() => runNow(r)}>
                       {busy === r.id ? 'Sweeping…' : 'Run now'}
                     </button>

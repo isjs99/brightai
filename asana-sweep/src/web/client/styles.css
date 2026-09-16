@@ -68,7 +68,26 @@ code, .mono { font-family: var(--mono); font-size: 12.5px; }
 .topbar nav a:hover { color: var(--ink); }
 .topbar nav a.active { color: var(--ink); font-weight: 600; }
 .theme-toggle { color: var(--muted); }
-.page { max-width: 1160px; margin: 0 auto; padding: 32px 20px 72px; }
+
+/* Shell: sticky top bar, left sidebar, scrolling page. */
+.shell { min-height: 100vh; display: flex; flex-direction: column; }
+.body { display: flex; flex: 1; min-height: 0; }
+.sidebar { width: 220px; flex: 0 0 220px; border-right: 1px solid var(--border); padding: 20px 14px; position: sticky; top: 57px; align-self: flex-start; height: calc(100vh - 57px); overflow-y: auto; background: var(--bg); }
+.nav-group { margin-bottom: 18px; }
+.nav-section { font-size: 10.5px; text-transform: uppercase; letter-spacing: .14em; color: var(--faint); padding: 0 10px; margin-bottom: 6px; font-family: var(--display); }
+.sidebar a { display: block; padding: 7px 10px; border-radius: 8px; color: var(--muted); text-decoration: none; font-size: 13.5px; }
+.sidebar a:hover { color: var(--ink); background: var(--surface-2); }
+.sidebar a.active { color: var(--ink); background: var(--surface-2); font-weight: 600; }
+.menu-btn { display: none; margin-right: 4px; }
+.page { flex: 1; min-width: 0; max-width: 1240px; margin: 0 auto; padding: 32px 28px 72px; }
+@media (max-width: 900px) {
+  .menu-btn { display: inline-block; }
+  .sidebar { display: none; position: fixed; top: 57px; left: 0; bottom: 0; z-index: 30; width: 240px; height: auto; box-shadow: var(--shadow); }
+  .sidebar.open { display: block; }
+  .page { padding: 20px 14px 48px; }
+}
+/* Account managers see everything but cannot change anything. */
+body[data-role="am"] .admin-only { display: none !important; }
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }
 h1 { font-family: var(--display); font-weight: 400; font-size: 30px; line-height: 1.05; margin: 0; text-transform: uppercase; letter-spacing: .01em; }
 h2 { font-family: var(--display); font-weight: 400; font-size: 13px; letter-spacing: .12em; text-transform: uppercase; margin: 28px 0 10px; color: var(--ink); }
@@ -150,7 +169,7 @@ input:focus, select:focus, textarea:focus { outline: none; border-color: var(--i
 .expand table { background: var(--surface); }
 details summary { cursor: pointer; color: var(--muted); }
 .empty { color: var(--muted); padding: 28px; text-align: center; background: var(--surface); border: 1px dashed var(--border-strong); border-radius: 10px; }
-@media (max-width: 720px) { .hide-sm { display: none; } .page { padding: 20px 12px 48px; } h1 { font-size: 24px; } .topbar { padding: 12px 14px; } .topbar nav { gap: 12px; flex-wrap: wrap; } }
+@media (max-width: 720px) { .hide-sm { display: none; } h1 { font-size: 24px; } .topbar { padding: 12px 14px; } .topbar nav { gap: 10px; } }
 
 .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin-bottom: 18px; }
 .kpi { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }

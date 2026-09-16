@@ -86,7 +86,7 @@ function SettingsPanel({ settings, onSaved }: { settings: CheckSettings; onSaved
     }
   };
   return (
-    <form className="card inline-form" onSubmit={save} style={{ marginBottom: 16 }}>
+    <form className="card inline-form admin-only" onSubmit={save} style={{ marginBottom: 16 }}>
       <label className="field"><span className="lbl">Check time (cron)</span><input type="text" className="mono" value={form.check_cron} onChange={(e) => setForm({ ...form, check_cron: e.target.value })} /><span className="help">{settings.schedule_text}</span></label>
       <label className="field"><span className="lbl">Timezone</span><select value={form.check_timezone} onChange={(e) => setForm({ ...form, check_timezone: e.target.value })}>{tzs.map((tz) => <option key={tz}>{tz}</option>)}</select></label>
       <label className="field" style={{ flex: 1, minWidth: 260 }}><span className="lbl">Slack webhook for the daily digest</span><input type="url" value={form.check_slack_webhook} onChange={(e) => setForm({ ...form, check_slack_webhook: e.target.value })} placeholder="https://hooks.slack.com/services/…" /></label>
@@ -166,8 +166,8 @@ export default function Checklists() {
           </p>
         </div>
         <div className="actions">
-          <button onClick={refreshLive} disabled={running}>{running ? 'Refreshing…' : 'Refresh from Asana'}</button>
-          <button className="primary" onClick={runAll} disabled={running}>{running ? 'Checking all accounts…' : 'Check all now'}</button>
+          <button className="admin-only" onClick={refreshLive} disabled={running}>{running ? 'Refreshing…' : 'Refresh from Asana'}</button>
+          <button className="primary admin-only" onClick={runAll} disabled={running}>{running ? 'Checking all accounts…' : 'Check all now'}</button>
         </div>
       </div>
       {error && <div className="banner crit">{error}</div>}
@@ -225,7 +225,7 @@ function RowGroup({ a, c, snapshot, version, open, onToggle, onCheck, busy }: { 
         <td className="num">{c && c.status !== 'unlinked' ? <Frac done={c.aa_done} total={c.aa_total} complete={c.aa_complete} /> : ''}</td>
         <td className="hide-sm">{flags ? <span className="badge crit">{flags} warning{flags > 1 ? 's' : ''}</span> : c?.error_message ? <span className="sub">{c.error_message}</span> : ''}</td>
         <td className="hide-sm sub" title={c ? fmtDate(c.checked_at) : ''}>{c ? fmtRelative(c.checked_at) : ''}</td>
-        <td onClick={(e) => e.stopPropagation()}>{onCheck && a.asana_project_gid && <button className="small" disabled={busy} onClick={onCheck}>{busy ? '…' : 'Check now'}</button>}</td>
+        <td onClick={(e) => e.stopPropagation()}>{onCheck && a.asana_project_gid && <button className="small admin-only" disabled={busy} onClick={onCheck}>{busy ? '…' : 'Check now'}</button>}</td>
       </tr>
       {open && c && (
         <tr className="expand"><td colSpan={8}><CheckDetail checkId={c.id} accountId={a.id} version={version} /></td></tr>

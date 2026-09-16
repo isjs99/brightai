@@ -263,7 +263,7 @@ export default function RuleEditor() {
           </label>
         </div>
 
-        <div className="form-foot">
+        <div className="form-foot admin-only">
           <button type="submit" className="primary" disabled={saving}>{saving ? 'Saving…' : isNew ? 'Create rule' : 'Save changes'}</button>
           <button type="button" onClick={runPreview} disabled={previewing || !form.asana_project_gid}>
             {previewing ? 'Checking Asana…' : 'Preview what would be deleted'}

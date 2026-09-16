@@ -140,7 +140,7 @@ export default function Accounts() {
           <h1>Accounts</h1>
           <p className="hint" style={{ margin: 0 }}>{rows ? `${rows.length} accounts, ${linked} linked to an Asana checklist project.` : ''} Link a project to include an account in the 16:00 check.</p>
         </div>
-        <button onClick={() => setEditing('new')}>+ New account</button>
+        <button className="admin-only" onClick={() => setEditing("new")}>+ New account</button>
       </div>
       {error && <div className="banner crit">{error}</div>}
       {editing && <AccountForm initial={editing === 'new' ? EMPTY : toInput(editing)} onSave={save} onCancel={() => setEditing(null)} />}
@@ -160,8 +160,8 @@ export default function Accounts() {
                 <td className="hide-sm">
                   {!a.asana_project_gid ? <span className="sub">–</span> : has_sweep_rule ? <Link to="/">yes</Link> : <button className="small" disabled={busy === a.id} onClick={() => addRule(a)}>Add</button>}
                 </td>
-                <td><label className="toggle"><input type="checkbox" checked={a.enabled} disabled={busy === a.id} onChange={() => toggle(a)} />{a.enabled ? 'Yes' : 'No'}</label></td>
-                <td><div className="actions"><button className="small" onClick={() => setEditing(a)}>Edit</button><button className="small danger" disabled={busy === a.id} onClick={() => remove(a)}>Remove</button></div></td>
+                <td><label className="toggle admin-only"><input type="checkbox" checked={a.enabled} disabled={busy === a.id} onChange={() => toggle(a)} />{a.enabled ? 'Yes' : 'No'}</label></td>
+                <td><div className="actions admin-only"><button className="small" onClick={() => setEditing(a)}>Edit</button><button className="small danger" disabled={busy === a.id} onClick={() => remove(a)}>Remove</button></div></td>
               </tr>
             ))}
           </tbody>

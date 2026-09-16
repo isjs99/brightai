@@ -15,7 +15,7 @@ import { syncGmv } from '../gmv/sync.js';
 import { currencyForShop } from '../gmv/currency.js';
 import type { PersonInput, ReminderSettings } from '../sweep/types.js';
 import type { AuthProvider } from './auth.js';
-import { requireAuth } from './auth.js';
+import { requireAdminForWrites, requireAuth, SharedPasswordAuth } from './auth.js';
 import { config } from '../config.js';
 
 class HttpError extends Error {
@@ -158,10 +158,14 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     res.json({ ok: true });
   });
 
-  r.get('/me', (req, res) => res.json({ authenticated: auth.isAuthenticated(req) }));
+  r.get('/me', (req, res) => {
+    const role = auth instanceof SharedPasswordAuth ? auth.roleOf(req) : auth.isAuthenticated(req) ? 'admin' : null;
+    res.json({ authenticated: role !== null, role, am_login_enabled: Boolean(config.amPassword) });
+  });
 
   // ---- Everything below needs a session ----
   r.use(requireAuth(auth));
+  if (auth instanceof SharedPasswordAuth) r.use(requireAdminForWrites(auth));
 
   r.get('/status', async (_req, res) => {
     let asanaUser: { gid: string; name: string } | null = null;

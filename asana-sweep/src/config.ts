@@ -34,6 +34,8 @@ function required(name: string): string {
 export const config = {
   asanaPat: process.env.ASANA_PAT?.trim() ?? '',
   dashboardPassword: required('DASHBOARD_PASSWORD'),
+  /** Optional second password that signs in with the read-only "account manager" role. */
+  amPassword: process.env.AM_PASSWORD?.trim() ?? '',
   port: Number(process.env.PORT ?? 3000),
   databasePath: process.env.DATABASE_PATH?.trim() || './data/sweep.db',
   publicUrl: (process.env.PUBLIC_URL?.trim() || 'http://localhost:3000').replace(/\/+$/, ''),

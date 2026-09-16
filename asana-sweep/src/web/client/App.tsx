@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link, NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { api, type Status } from './api';
+import { SessionContext, type Role } from './session';
 import RulesList from './pages/RulesList';
 import RuleEditor from './pages/RuleEditor';
 import RunHistory from './pages/RunHistory';
@@ -10,6 +11,9 @@ import AnalyticsPage from './pages/Analytics';
 import CalendarPage from './pages/Calendar';
 import GmvPage from './pages/Gmv';
 import PeoplePage from './pages/People';
+import PromotionsPage from './pages/Promotions';
+import GmvMaxPage from './pages/GmvMax';
+import LeadsPage from './pages/Leads';
 
 type Theme = 'system' | 'light' | 'dark';
 
@@ -51,7 +55,7 @@ function ThemeToggle() {
   );
 }
 
-function Login({ onDone }: { onDone: () => void }) {
+function Login({ onDone }: { onDone: (role: Role) => void }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -61,7 +65,8 @@ function Login({ onDone }: { onDone: () => void }) {
     setError(null);
     try {
       await api.login(password);
-      onDone();
+      const me = await api.me();
+      onDone(me.role ?? 'admin');
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -88,71 +93,133 @@ function Login({ onDone }: { onDone: () => void }) {
   );
 }
 
+const NAV: { section: string; items: { to: string; label: string; end?: boolean }[] }[] = [
+  {
+    section: 'Operations',
+    items: [
+      { to: '/checklists', label: 'Checklists' },
+      { to: '/calendar', label: 'Calendar' },
+      { to: '/', label: 'Sweep rules', end: true },
+    ],
+  },
+  {
+    section: 'Performance',
+    items: [
+      { to: '/gmv', label: 'GMV & bonus' },
+      { to: '/analytics', label: 'Analytics & grades' },
+    ],
+  },
+  {
+    section: 'Growth',
+    items: [{ to: '/leads', label: 'Leads' }],
+  },
+  {
+    section: 'Account management',
+    items: [
+      { to: '/promotions', label: 'Promotions' },
+      { to: '/gmv-max', label: 'GMV Max' },
+    ],
+  },
+  {
+    section: 'Setup',
+    items: [
+      { to: '/accounts', label: 'Accounts' },
+      { to: '/people', label: 'Team' },
+    ],
+  },
+];
+
 export default function App() {
-  const [authed, setAuthed] = useState<boolean | null>(null);
+  const [role, setRole] = useState<Role | null | undefined>(undefined); // undefined = loading, null = signed out
   const [status, setStatus] = useState<Status | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
-    api.me().then((r) => setAuthed(r.authenticated)).catch(() => setAuthed(false));
-    const onUnauth = () => setAuthed(false);
+    api.me().then((r) => setRole(r.authenticated ? (r.role ?? 'admin') : null)).catch(() => setRole(null));
+    const onUnauth = () => setRole(null);
     window.addEventListener('sweep:unauthenticated', onUnauth);
     return () => window.removeEventListener('sweep:unauthenticated', onUnauth);
   }, []);
 
   useEffect(() => {
-    if (authed) api.status().then(setStatus).catch(() => setStatus(null));
-  }, [authed]);
+    if (role) api.status().then(setStatus).catch(() => setStatus(null));
+  }, [role]);
 
-  if (authed === null) return <div className="page">Loading…</div>;
-  if (!authed) return <Login onDone={() => setAuthed(true)} />;
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [location.pathname]);
+
+  useEffect(() => {
+    document.body.dataset.role = role ?? '';
+  }, [role]);
+
+  if (role === undefined) return <div className="page">Loading…</div>;
+  if (role === null) return <Login onDone={setRole} />;
 
   const logout = async () => {
     await api.logout();
-    setAuthed(false);
+    setRole(null);
     navigate('/');
   };
 
   return (
-    <>
-      <header className="topbar">
-        <div className="brand">
-          <Link to="/checklists">Brightform.</Link>
-          <span>AM Ops</span>
-        </div>
-        <nav>
-          {status?.asana_user && <span className="sub">Asana: {status.asana_user.name}</span>}
-          <NavLink to="/checklists" className={({ isActive }) => (isActive ? 'active' : '')}>Checklists</NavLink>
-          <NavLink to="/calendar" className={({ isActive }) => (isActive ? 'active' : '')}>Calendar</NavLink>
-          <NavLink to="/gmv" className={({ isActive }) => (isActive ? 'active' : '')}>GMV</NavLink>
-          <NavLink to="/analytics" className={({ isActive }) => (isActive ? 'active' : '')}>Analytics</NavLink>
-          <NavLink to="/accounts" className={({ isActive }) => (isActive ? 'active' : '')}>Accounts</NavLink>
-          <NavLink to="/people" className={({ isActive }) => (isActive ? 'active' : '')}>Team</NavLink>
-          <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}>Sweep rules</NavLink>
-          <ThemeToggle />
-          <button className="small" onClick={logout}>Sign out</button>
-        </nav>
-      </header>
-      <main className="page">
-        {status?.asana_error && (
-          <div className="banner crit">
-            <b>Asana is not reachable.</b> {status.asana_error} Runs and previews will fail until this is fixed.
+    <SessionContext.Provider value={{ role }}>
+      <div className="shell">
+        <header className="topbar">
+          <div className="brand">
+            <button className="small menu-btn" onClick={() => setMenuOpen((o) => !o)} aria-label="Menu">☰</button>
+            <Link to="/checklists">Brightform.</Link>
+            <span>AM Ops</span>
           </div>
-        )}
-        <Routes>
-          <Route path="/" element={<RulesList />} />
-          <Route path="/rules/new" element={<RuleEditor />} />
-          <Route path="/rules/:id" element={<RuleEditor />} />
-          <Route path="/rules/:id/runs" element={<RunHistory />} />
-          <Route path="/accounts" element={<Accounts />} />
-          <Route path="/checklists" element={<Checklists />} />
-          <Route path="/analytics" element={<AnalyticsPage />} />
-          <Route path="/calendar" element={<CalendarPage />} />
-          <Route path="/gmv" element={<GmvPage />} />
-          <Route path="/people" element={<PeoplePage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </main>
-    </>
+          <nav>
+            {status?.asana_user && <span className="sub hide-sm">Asana: {status.asana_user.name}</span>}
+            <span className={`badge ${role === 'admin' ? 'accent' : 'muted'}`} title={role === 'admin' ? 'Admin: can change settings' : 'Account manager: view only'}>
+              {role === 'admin' ? 'Admin' : 'View only'}
+            </span>
+            <ThemeToggle />
+            <button className="small" onClick={logout}>Sign out</button>
+          </nav>
+        </header>
+        <div className="body">
+          <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
+            {NAV.map((group) => (
+              <div className="nav-group" key={group.section}>
+                <div className="nav-section">{group.section}</div>
+                {group.items.map((item) => (
+                  <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => (isActive ? 'active' : '')}>
+                    {item.label}
+                  </NavLink>
+                ))}
+              </div>
+            ))}
+          </aside>
+          <main className="page">
+            {status?.asana_error && (
+              <div className="banner crit">
+                <b>Asana is not reachable.</b> {status.asana_error} Runs and previews will fail until this is fixed.
+              </div>
+            )}
+            <Routes>
+              <Route path="/" element={<RulesList />} />
+              <Route path="/rules/new" element={<RuleEditor />} />
+              <Route path="/rules/:id" element={<RuleEditor />} />
+              <Route path="/rules/:id/runs" element={<RunHistory />} />
+              <Route path="/accounts" element={<Accounts />} />
+              <Route path="/checklists" element={<Checklists />} />
+              <Route path="/analytics" element={<AnalyticsPage />} />
+              <Route path="/calendar" element={<CalendarPage />} />
+              <Route path="/gmv" element={<GmvPage />} />
+              <Route path="/people" element={<PeoplePage />} />
+              <Route path="/promotions" element={<PromotionsPage />} />
+              <Route path="/gmv-max" element={<GmvMaxPage />} />
+              <Route path="/leads" element={<LeadsPage />} />
+              <Route path="*" element={<Navigate to="/checklists" replace />} />
+            </Routes>
+          </main>
+        </div>
+      </div>
+    </SessionContext.Provider>
   );
 }

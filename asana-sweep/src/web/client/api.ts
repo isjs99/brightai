@@ -133,7 +133,7 @@ export interface Status {
 }
 
 export const api = {
-  me: () => call<{ authenticated: boolean }>('GET', '/me'),
+  me: () => call<{ authenticated: boolean; role: 'admin' | 'am' | null; am_login_enabled: boolean }>('GET', '/me'),
   login: (password: string) => call<{ ok: true }>('POST', '/login', { password }),
   logout: () => call<{ ok: true }>('POST', '/logout'),
   status: () => call<Status>('GET', '/status'),
