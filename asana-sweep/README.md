@@ -1,4 +1,4 @@
-# Asana Sweep
+# Brightform AM Ops (Asana sweep + checklists)
 
 A small service that tidies up completed recurring tasks in Asana every morning, with a dashboard where the rules live. First use: the GreatVita AM Daily Checklist pilot.
 

@@ -14,7 +14,7 @@ function Spark({ points }: { points: { date: string; gmv: number }[] }) {
   const d = points.map((p, i) => `${(i / (points.length - 1)) * w},${h - (p.gmv / max) * (h - 2) - 1}`).join(' ');
   return (
     <svg width={w} height={h} className="spark" aria-hidden="true">
-      <polyline points={d} fill="none" stroke="var(--accent)" strokeWidth="1.5" />
+      <polyline points={d} fill="none" stroke="var(--ink)" strokeWidth="1.5" />
     </svg>
   );
 }

@@ -30,8 +30,8 @@ function Login({ onDone }: { onDone: () => void }) {
   };
   return (
     <div className="login card">
-      <h1>Asana Sweep</h1>
-      <p className="hint">Enter the dashboard password.</p>
+      <h1>Brightform.</h1>
+      <p className="hint">AM Ops dashboard. Enter the team password.</p>
       <form onSubmit={submit}>
         <label className="field">
           <span className="lbl">Password</span>
@@ -77,8 +77,8 @@ export default function App() {
     <>
       <header className="topbar">
         <div className="brand">
-          <Link to="/" style={{ color: 'inherit' }}>Asana Sweep</Link>
-          <span>AM checklists</span>
+          <Link to="/checklists">Brightform.</Link>
+          <span>AM Ops</span>
         </div>
         <nav>
           {status?.asana_user && <span className="sub">Asana: {status.asana_user.name}</span>}

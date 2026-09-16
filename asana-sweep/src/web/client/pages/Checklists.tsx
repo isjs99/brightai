@@ -156,7 +156,7 @@ export default function Checklists() {
     <>
       <div className="page-head">
         <div>
-          <h1>Checklist status</h1>
+          <h1>Checklists</h1>
           <p className="hint" style={{ margin: 0 }}>
             {settings?.live_enabled ? (
               <><span className={`badge ${connected ? 'good' : 'muted'}`}>{connected ? '● Live' : '○ Reconnecting'}</span> watching {settings.live_watching} board{settings.live_watching === 1 ? '' : 's'} every {settings.live_interval_seconds}s{lastLive ? `, last change ${fmtRelative(lastLive)}` : ''}. </>
