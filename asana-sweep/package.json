@@ -1,0 +1,40 @@
+{
+  "name": "asana-sweep",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cleans up completed recurring tasks in Asana on a schedule, with a config dashboard.",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "dev": "concurrently -k -n server,client \"tsx watch src/index.ts\" \"vite\"",
+    "build": "npm run build:server && npm run build:client",
+    "build:server": "tsc -p tsconfig.json",
+    "build:client": "vite build",
+    "start": "node dist/server/index.js",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.2.0",
+    "cron-parser": "^5.4.0",
+    "cronstrue": "^3.3.0",
+    "express": "^5.1.0",
+    "node-cron": "^4.2.1",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "react-router-dom": "^7.9.1"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.3",
+    "@types/node": "^22.18.0",
+    "@types/react": "^19.1.12",
+    "@types/react-dom": "^19.1.9",
+    "@vitejs/plugin-react": "^5.0.2",
+    "concurrently": "^9.2.1",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2",
+    "vite": "^7.1.5",
+    "vitest": "^3.2.4"
+  }
+}

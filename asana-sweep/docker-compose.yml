@@ -1,0 +1,17 @@
+services:
+  asana-sweep:
+    build: .
+    container_name: asana-sweep
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      PORT: "3000"
+      DATABASE_PATH: /data/sweep.db
+    volumes:
+      - sweep-data:/data
+
+volumes:
+  sweep-data:
