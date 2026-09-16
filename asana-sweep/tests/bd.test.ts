@@ -161,7 +161,7 @@ describe('BD prospects', () => {
 
   it('contacts dedupe by apollo id', () => {
     const q = setup();
-    const p = q.listProspects()[0];
+    const p = q.createProspect({ shop_name: 'Fresh Shop', market: 'UK' });
     q.addContact(p.id, { name: 'Ann Sm***h', title: 'CEO', source: 'apollo', apollo_id: 'abc' });
     q.addContact(p.id, { name: 'Ann Smith', email: 'ann@x.com', source: 'apollo', apollo_id: 'abc', enriched: true });
     const contacts = q.getProspect(p.id)!.contacts;

@@ -86,7 +86,7 @@ describe('apollo client', () => {
 describe('prospect enrichment', () => {
   it('resolves the company, stores domain and org id, keeps ranked people and reveals the top ones', async () => {
     const q = new Queries(openTestDb());
-    const p = q.listProspects().find((x) => x.shop_name === 'Halara DE')!;
+    const p = q.createProspect({ shop_name: 'Halara DE', brand: 'Halara', market: 'DE', seller_id: 'test-halara' });
     expect(p.contacts.length).toBe(0);
     const calls: { path: string; body: Record<string, unknown> }[] = [];
     const client = fakeApollo(calls, {
