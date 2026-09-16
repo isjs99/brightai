@@ -46,6 +46,20 @@ Dashboard is on http://localhost:3000. The SQLite database lives on the `sweep-d
 
 Set `PUBLIC_URL` in `.env` to wherever the dashboard is reachable so the "View run" link in Slack messages works.
 
+## Hosting it for the team
+
+The app is one Node process plus a SQLite file, so any host that runs a Docker container with a persistent volume works. The easiest is Railway (about $5 a month):
+
+1. Push this repo to GitHub (it already is). In Railway: New project › Deploy from GitHub repo › pick `brightai`.
+2. In the service settings set **Root Directory** to `asana-sweep`. Railway picks up the Dockerfile and `railway.json`.
+3. Add a **Volume** and mount it at `/data`.
+4. Under **Variables** add `ASANA_PAT`, `DASHBOARD_PASSWORD`, `PUBLIC_URL` (the Railway URL, e.g. `https://am-ops.up.railway.app`), and optionally `SLACK_BOT_TOKEN`, `CRUVA_API_KEY`. `PORT` and `DATABASE_PATH` are already set by the Dockerfile.
+5. Deploy. Open the URL, sign in with the password, and the live watcher starts on its own.
+
+Fly.io works the same way with the included `fly.toml` (see the comments at the top of that file). A plain VPS works with `docker compose up -d` behind nginx or Caddy for https.
+
+Use a long password. Set `PUBLIC_URL` to the https address so the login cookie is marked secure. Failed logins are rate limited (10 tries, then 15 minutes). If you later want per-person logins, the auth layer in `src/web/auth.ts` is designed to be swapped.
+
 ## Using the dashboard
 
 Sign in with the dashboard password. Every account that is linked to an Asana checklist board has its own sweep rule, scheduled weekdays 06:30 Madrid time and live. Linking a new board on the Accounts page creates its rule automatically.

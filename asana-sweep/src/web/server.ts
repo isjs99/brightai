@@ -11,7 +11,15 @@ import { buildRouter } from './routes.js';
 export function createApp(q: Queries, scheduler: Scheduler, live: LiveWatcher) {
   const app = express();
   app.disable('x-powered-by');
+  // Hosted behind a reverse proxy (Railway, Fly, nginx): trust it for client IPs and https detection.
+  app.set('trust proxy', 1);
   app.use(express.json({ limit: '256kb' }));
+  app.use((_req, res, next) => {
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'same-origin');
+    next();
+  });
 
   const auth = new SharedPasswordAuth();
   app.use('/api', buildRouter(q, scheduler, auth, live));

@@ -8,6 +8,13 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Archivo+Black&family=JetBrains+Mono:wght@400;500&display=swap" />
   </head>
   <body>
+    <script>
+      // Apply the saved theme before first paint so there is no flash. "system" leaves it to the OS.
+      try {
+        var t = localStorage.getItem('theme');
+        if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
+      } catch (e) {}
+    </script>
     <div id="root"></div>
     <script type="module" src="/main.tsx"></script>
   </body>

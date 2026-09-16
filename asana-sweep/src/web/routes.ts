@@ -122,8 +122,21 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   // ---- Public ----
   r.get('/health', (_req, res) => res.json({ ok: true }));
 
+  // Brute-force guard for the shared password: 10 failed attempts per IP, then a 15 minute lockout.
+  const attempts = new Map<string, { count: number; until: number }>();
   r.post('/login', (req, res) => {
-    if (auth.login(req, res)) return res.json({ ok: true });
+    const ip = req.ip ?? 'unknown';
+    const now = Date.now();
+    const a = attempts.get(ip);
+    if (a && a.count >= 10 && a.until > now) {
+      return res.status(429).json({ error: `Too many attempts. Try again in ${Math.ceil((a.until - now) / 60000)} min.` });
+    }
+    if (auth.login(req, res)) {
+      attempts.delete(ip);
+      return res.json({ ok: true });
+    }
+    const next = a && a.until > now ? { count: a.count + 1, until: now + 15 * 60000 } : { count: 1, until: now + 15 * 60000 };
+    attempts.set(ip, next);
     res.status(401).json({ error: 'Wrong password' });
   });
 

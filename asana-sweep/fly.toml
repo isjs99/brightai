@@ -1,0 +1,28 @@
+# Fly.io alternative to Railway. `fly launch --copy-config --no-deploy`, then `fly volumes create sweep_data --size 1`,
+# set secrets with `fly secrets set ASANA_PAT=... DASHBOARD_PASSWORD=... PUBLIC_URL=https://<app>.fly.dev`, then `fly deploy`.
+app = "brightform-am-ops"
+primary_region = "ams"
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "3000"
+  DATABASE_PATH = "/data/sweep.db"
+
+[mounts]
+  source = "sweep_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "5s"
+  method = "GET"
+  path = "/api/health"

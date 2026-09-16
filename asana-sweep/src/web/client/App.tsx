@@ -11,6 +11,46 @@ import CalendarPage from './pages/Calendar';
 import GmvPage from './pages/Gmv';
 import PeoplePage from './pages/People';
 
+type Theme = 'system' | 'light' | 'dark';
+
+function readTheme(): Theme {
+  try {
+    const t = localStorage.getItem('theme');
+    return t === 'light' || t === 'dark' ? t : 'system';
+  } catch {
+    return 'system';
+  }
+}
+
+function applyTheme(t: Theme) {
+  if (t === 'system') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', t);
+  try {
+    if (t === 'system') localStorage.removeItem('theme');
+    else localStorage.setItem('theme', t);
+  } catch {
+    /* private mode or blocked storage: the choice just does not persist */
+  }
+}
+
+/** System → Light → Dark cycle. Stored per browser. */
+function ThemeToggle() {
+  const [theme, setTheme] = useState<Theme>(readTheme);
+  const next: Record<Theme, Theme> = { system: 'light', light: 'dark', dark: 'system' };
+  const label: Record<Theme, string> = { system: 'Auto', light: 'Light', dark: 'Dark' };
+  const icon: Record<Theme, string> = { system: '◐', light: '○', dark: '●' };
+  const change = () => {
+    const t = next[theme];
+    setTheme(t);
+    applyTheme(t);
+  };
+  return (
+    <button className="small theme-toggle" onClick={change} title={`Theme: ${label[theme]}. Click to change.`} aria-label={`Theme: ${label[theme]}`}>
+      <span aria-hidden="true">{icon[theme]}</span> {label[theme]}
+    </button>
+  );
+}
+
 function Login({ onDone }: { onDone: () => void }) {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -89,6 +129,7 @@ export default function App() {
           <NavLink to="/accounts" className={({ isActive }) => (isActive ? 'active' : '')}>Accounts</NavLink>
           <NavLink to="/people" className={({ isActive }) => (isActive ? 'active' : '')}>Team</NavLink>
           <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}>Sweep rules</NavLink>
+          <ThemeToggle />
           <button className="small" onClick={logout}>Sign out</button>
         </nav>
       </header>
