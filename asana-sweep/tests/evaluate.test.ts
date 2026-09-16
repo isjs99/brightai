@@ -148,6 +148,44 @@ describe('evaluateChecklist', () => {
     expect(r.aa_done).toBe(2);
   });
 
+  it('handles subtasks that repeat themselves under a parent that already recurred', () => {
+    // The Cruva case: the completed parent copy was swept (remembered with unticked subtasks); the
+    // live parent copy is due tomorrow and carries the AA's subtasks, each with a copy completed
+    // today and a fresh copy due tomorrow.
+    const tasks = [
+      t({ gid: 'old', name: 'Cruva - AM daily checks', completed: true, completed_at: '2026-09-16T09:00:00Z', num_subtasks: 2 }),
+      t({ gid: 'cur', name: 'Cruva - AM daily checks', due_on: '2026-09-17', num_subtasks: 4 }),
+    ];
+    const sub = (gid: string, parent: string, name: string, due: string | null, done: boolean) =>
+      t({ gid, name, parent_gid: parent, assignee_name: 'dm@brightform.agency', due_on: due, completed: done, completed_at: done ? '2026-09-16T11:00:00Z' : null });
+    const subs = new Map<string, ChecklistTask[]>([
+      ['old', [sub('o1', 'old', 'Monitor Cruva outreach', '2026-09-16', false), sub('o2', 'old', 'Target collab flows', '2026-09-16', false)]],
+      [
+        'cur',
+        [
+          sub('c1', 'cur', 'Monitor Cruva outreach', '2026-09-16', true),
+          sub('c2', 'cur', 'Monitor Cruva outreach', '2026-09-17', false),
+          sub('c3', 'cur', 'Target collab flows', '2026-09-16', true),
+          sub('c4', 'cur', 'Target collab flows', '2026-09-17', false),
+        ],
+      ],
+    ]);
+    const r = evaluateChecklist(tasks, subs, opts);
+    expect(r.items[0].state).toBe('done');
+    expect(r.items[0].subtasks).toHaveLength(2);
+    expect(r.items[0].subtasks.every((s) => s.done)).toBe(true);
+    expect(r.aa_total).toBe(2);
+    expect(r.aa_done).toBe(2);
+    expect(r.combined_complete).toBe(true);
+
+    // If the AA has not done one yet, its today copy is pending and tomorrow's copy is ignored.
+    subs.get('cur')![2] = sub('c3', 'cur', 'Target collab flows', '2026-09-16', false);
+    const r2 = evaluateChecklist(tasks, subs, opts);
+    expect(r2.items[0].subtasks.find((s) => s.name === 'Target collab flows')!.done).toBe(false);
+    expect(r2.aa_done).toBe(1);
+    expect(r2.aa_complete).toBe(false);
+  });
+
   it('returns empty for a project with no tasks', () => {
     const r = evaluateChecklist([], new Map(), opts);
     expect(r.status).toBe('empty');
