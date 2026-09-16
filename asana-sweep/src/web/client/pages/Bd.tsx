@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
-import type { BdContact, BdData, BdProspect, BdProspectPatch, BdStatus } from '../../../sweep/types';
+import type { BdContact, BdData, BdOutreachEvent, BdProspect, BdProspectPatch, BdStatus } from '../../../sweep/types';
 import { api, fmtMoney, fmtPct, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
 
@@ -19,6 +19,12 @@ const CHANNELS: { k: 'outreach_tts_am' | 'outreach_gmail' | 'outreach_linkedin';
 ];
 const MARKET_NAMES: Record<string, string> = { DE: 'Germany', UK: 'United Kingdom', FR: 'France', IT: 'Italy', ES: 'Spain', IE: 'Ireland', NL: 'Netherlands', BE: 'Belgium', PL: 'Poland', AT: 'Austria', SE: 'Sweden' };
 
+const launchBadge = (p: BdProspect) => {
+  if (p.new_shop_30d) return <span className="badge good" title={`Shop created ${p.launched_at}`}>New shop</span>;
+  if (p.gmv_started_30d) return <span className="badge accent" title={p.gmv_started_at ? `First sales ${p.gmv_started_at}` : `Estimated from the 7-day share: about ${p.age_estimate_days ?? '?'} days of selling`}>{p.gmv_started_at ? 'Started selling' : 'Took off (est.)'}</span>;
+  return null;
+};
+
 const band = (s: number | null) => (s === null ? { label: 'No data', cls: 'muted' } : s >= 0.15 ? { label: 'Surging', cls: 'good' } : s >= 0.05 ? { label: 'Rising', cls: 'accent' } : { label: 'Steady', cls: 'muted' });
 
 export default function BdPage() {
@@ -27,7 +33,7 @@ export default function BdPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [open, setOpen] = useState<number | null>(null);
-  const [f, setF] = useState({ market: '', status: '', category: '', owner: '', rise: '', type: '', q: '', sort: 'rise' as 'rise' | 'gmv' | 'name' | 'updated', hideDone: false });
+  const [f, setF] = useState({ market: '', status: '', category: '', owner: '', rise: '', type: '', launch: '', q: '', sort: 'rise' as 'rise' | 'gmv' | 'name' | 'updated' | 'launched', hideDone: false, hideClients: true });
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [add, setAdd] = useState({ shop_name: '', market: 'DE', brand: '', category: '', website: '', tiktok_handle: '', notes: '' });
@@ -49,6 +55,17 @@ export default function BdPage() {
   };
 
   const patch = (p: BdProspect, body: BdProspectPatch) => run(`p${p.id}`, () => api.patchProspect(p.id, body));
+  const tick = (p: BdProspect, key: 'outreach_tts_am' | 'outreach_gmail' | 'outreach_linkedin', value: boolean) => {
+    const label = CHANNELS.find((c) => c.k === key)!.label;
+    const note = value ? window.prompt(`${label} → ${p.shop_name}. Who did you contact and about what? (optional, saved to the history)`, '') : null;
+    if (value && note === null) return; // cancelled
+    patch(p, { [key]: value, outreach_note: note || null });
+  };
+  const addNote = (p: BdProspect) => {
+    const note = window.prompt(`Note for ${p.shop_name} (e.g. "Replied on LinkedIn, call booked Thursday")`, '');
+    if (!note) return;
+    run(`n${p.id}`, () => api.logOutreach(p.id, { note }), 'Note saved to the outreach history.');
+  };
 
   const createProspect = () => run('add', async () => {
     const d = await api.createProspect({ shop_name: add.shop_name, market: add.market, brand: add.brand || null, category: add.category || null, website: add.website || null, tiktok_handle: add.tiktok_handle || null, notes: add.notes || null, source: 'manual' });
@@ -75,15 +92,12 @@ export default function BdPage() {
     if (domain === undefined) return;
     run(`find${p.id}`, async () => {
       const d = await api.findContacts(p.id, { domain: domain || undefined });
-      setNotice(d.found ? `${d.found} people found at ${p.brand ?? p.shop_name}. Reveal a contact to get their email and LinkedIn (one Apollo credit each).` : `Apollo found nobody for ${p.brand ?? p.shop_name}. Try a website domain.`);
+      setNotice(d.found ? `${d.found} people found at ${p.brand ?? p.shop_name}, ${d.revealed} revealed with email / LinkedIn.` : `Apollo found nobody for ${p.brand ?? p.shop_name}. Try a website domain.`);
       return d;
     });
   };
 
-  const reveal = (c: BdContact) => {
-    if (!window.confirm(`Reveal ${c.name} on Apollo? This uses 1 Apollo credit if a match is found.`)) return;
-    run(`c${c.id}`, () => api.revealContact(c.id), `${c.name} revealed.`);
-  };
+  const reveal = (c: BdContact) => run(`c${c.id}`, () => api.revealContact(c.id), `${c.name} revealed.`);
 
   if (!data) return <p>{error ?? 'Loading…'}</p>;
 
@@ -96,12 +110,15 @@ export default function BdPage() {
       (!f.owner || String(p.owner_id ?? '') === f.owner) &&
       (!f.rise || band(p.rise_score).label.toLowerCase() === f.rise) &&
       (!f.type || (p.shop_type ?? '') === f.type) &&
+      (!f.launch || (f.launch === 'new_shop' ? p.new_shop_30d : f.launch === 'gmv_started' ? p.gmv_started_30d : p.new_shop_30d || p.gmv_started_30d)) &&
+      (!f.hideClients || !p.is_client) &&
       (!f.hideDone || (!p.outreach_complete && p.status !== 'won' && p.status !== 'lost')) &&
       (!q || [p.shop_name, p.brand, p.category, p.notes, p.tiktok_handle, ...p.contacts.map((c) => c.name)].some((v) => (v ?? '').toLowerCase().includes(q))))
     .sort((a, b) =>
       f.sort === 'gmv' ? (b.gmv_7d ?? 0) - (a.gmv_7d ?? 0)
         : f.sort === 'name' ? a.shop_name.localeCompare(b.shop_name)
           : f.sort === 'updated' ? b.updated_at.localeCompare(a.updated_at)
+          : f.sort === 'launched' ? (b.launched_at ?? '').localeCompare(a.launched_at ?? '')
             : (b.rise_score ?? -1) - (a.rise_score ?? -1) || (b.gmv_7d ?? 0) - (a.gmv_7d ?? 0));
 
   const statusBadge = (s: BdStatus) => { const st = STATUSES.find((x) => x.v === s)!; return <span className={`badge ${st.cls}`}>{st.label}</span>; };
@@ -115,7 +132,7 @@ export default function BdPage() {
       <td className="sub">{c.phone ?? ''}</td>
       <td>
         <div className="actions">
-          {isAdmin && !c.enriched && data.apollo_configured && <button className="small" onClick={() => reveal(c)} disabled={busy === `c${c.id}`}>Reveal (1 credit)</button>}
+          {isAdmin && !c.enriched && data.apollo_configured && <button className="small" onClick={() => reveal(c)} disabled={busy === `c${c.id}`}>Reveal</button>}
           {isAdmin && <button className="small danger" onClick={() => window.confirm(`Remove ${c.name}?`) && run(`c${c.id}`, () => api.deleteContact(c.id))}>×</button>}
         </div>
       </td>
@@ -134,12 +151,21 @@ export default function BdPage() {
             <div className="stat"><span className="v">{p.rating ?? '–'}</span><span className="k">shop rating</span></div>
             <div className="stat"><span className="v">{p.products ?? '–'}</span><span className="k">active products</span></div>
             <div className="stat"><span className="v">{p.shop_type === 'cross_border' ? 'Cross-border' : p.shop_type === 'local' ? 'Local' : '–'}</span><span className="k">shop type</span></div>
+            <div className="stat"><span className="v">{p.launched_at ?? '–'}</span><span className="k">shop created</span></div>
+            <div className="stat"><span className="v">{p.gmv_started_at ?? (p.age_estimate_days !== null ? `~${p.age_estimate_days}d` : '–')}</span><span className="k">{p.gmv_started_at ? 'first sales' : 'selling age (est.)'}</span></div>
           </div>
+          {isAdmin && (
+            <div className="inline-form" style={{ marginBottom: 12 }}>
+              <label className="field"><span className="lbl">Shop created</span><input type="date" defaultValue={p.launched_at ?? ''} onChange={(e) => patch(p, { launched_at: e.target.value || null })} /></label>
+              <label className="field"><span className="lbl">First sales</span><input type="date" defaultValue={p.gmv_started_at ?? ''} onChange={(e) => patch(p, { gmv_started_at: e.target.value || null })} /></label>
+              <span className="sub" style={{ alignSelf: 'flex-end' }}>Dates come from FastMoss when known; set them by hand otherwise.</span>
+            </div>
+          )}
           <div className="inline-form" style={{ marginBottom: 12 }}>
             <label className="field" style={{ minWidth: 260 }}><span className="lbl">Website</span><input type="text" defaultValue={p.website ?? p.domain ?? ''} placeholder="brand.com" disabled={!isAdmin} onBlur={(e) => e.target.value !== (p.website ?? p.domain ?? '') && patch(p, { website: e.target.value || null })} /></label>
             <label className="field" style={{ flex: 1, minWidth: 260 }}><span className="lbl">Notes</span><input type="text" defaultValue={p.notes ?? ''} placeholder="What they sell, why they fit, who said what" disabled={!isAdmin} onBlur={(e) => e.target.value !== (p.notes ?? '') && patch(p, { notes: e.target.value || null })} /></label>
             {p.tiktok_handle && <a className="button" href={`https://www.tiktok.com/@${p.tiktok_handle}`} target="_blank" rel="noreferrer">TikTok @{p.tiktok_handle}</a>}
-            {p.seller_id && <a className="button" href={`https://www.fastmoss.com/e-commerce/shop-detail/${p.seller_id}`} target="_blank" rel="noreferrer">FastMoss</a>}
+            {p.fastmoss_url && <a className="button" href={p.fastmoss_url} target="_blank" rel="noreferrer">FastMoss shop page</a>}
           </div>
 
           <h3 style={{ margin: '6px 0' }}>Decision makers</h3>
@@ -156,6 +182,21 @@ export default function BdPage() {
             </div>
           )}
           {!data.apollo_configured && isAdmin && <p className="sub" style={{ marginTop: 8 }}>Apollo is not connected: add APOLLO_API_KEY to .env to search and reveal decision makers from here. Contacts can still be added by hand.</p>}
+
+          <h3 style={{ margin: '14px 0 6px' }}>Outreach history</h3>
+          {p.outreach_log.length === 0 ? <p className="sub">Nothing logged yet. Ticking a channel above records it here; add notes for replies and calls.</p> : (
+            <ul className="history">
+              {p.outreach_log.map((e: BdOutreachEvent) => (
+                <li key={e.id}>
+                  <span className={`badge ${e.action === 'contacted' ? 'good' : e.action === 'uncontacted' ? 'crit' : e.action === 'replied' ? 'accent' : 'muted'}`}>{e.channel ? CHANNELS.find((c) => c.k === `outreach_${e.channel}`)?.label ?? e.channel : e.action === 'note' ? 'note' : 'status'}</span>{' '}
+                  <span>{e.action === 'contacted' ? 'Reached out' : e.action === 'uncontacted' ? 'Unticked' : ''}{e.contact_name ? ` to ${e.contact_name}` : ''}{e.note ? `${e.action === 'contacted' || e.action === 'uncontacted' ? ': ' : ''}${e.note}` : ''}</span>
+                  <span className="sub"> · {fmtRelative(e.created_at)}{e.actor ? ` · ${e.actor}` : ''}</span>
+                  {isAdmin && <button className="small danger" style={{ marginLeft: 6 }} onClick={() => run(`e${e.id}`, () => api.deleteOutreachEvent(e.id))}>×</button>}
+                </li>
+              ))}
+            </ul>
+          )}
+          {isAdmin && <div className="actions" style={{ marginTop: 6 }}><button className="small" onClick={() => addNote(p)}>+ Note</button></div>}
         </div>
       </td>
     </tr>
@@ -205,6 +246,8 @@ export default function BdPage() {
         <div className="kpi"><div className="v">{data.totals.prospects}</div><div className="k">Prospects in pipeline</div></div>
         <div className="kpi"><div className="v">{data.totals.with_contacts}</div><div className="k">With decision makers</div></div>
         <div className="kpi"><div className="v">{data.totals.complete}</div><div className="k">Outreach complete</div><div className="d">all three channels</div></div>
+        <div className="kpi"><div className="v">{data.totals.new_30d}</div><div className="k">Launched last 30 days</div><div className="d">shop created date</div></div>
+        <div className="kpi"><div className="v">{data.totals.gmv_started_30d}</div><div className="k">Started selling last 30 days</div><div className="d">first sales, or took off</div></div>
         <div className="kpi"><div className="v">{data.totals.won}</div><div className="k">Won</div></div>
       </div>
 
@@ -230,11 +273,13 @@ export default function BdPage() {
         <select value={f.market} onChange={(e) => setF({ ...f, market: e.target.value })}><option value="">All countries</option>{data.markets.map((m) => <option key={m} value={m}>{MARKET_NAMES[m] ?? m}</option>)}</select>
         <select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}><option value="">All statuses</option>{STATUSES.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}</select>
         <select value={f.rise} onChange={(e) => setF({ ...f, rise: e.target.value })}><option value="">All momentum</option><option value="surging">Surging</option><option value="rising">Rising</option><option value="steady">Steady</option></select>
+        <select value={f.launch} onChange={(e) => setF({ ...f, launch: e.target.value })}><option value="">Any age</option><option value="new_shop">Launched in last 30 days</option><option value="gmv_started">GMV started in last 30 days</option><option value="either">Either</option></select>
         <select value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}><option value="">Local + cross-border</option><option value="local">Local shops</option><option value="cross_border">Cross-border</option></select>
         <select value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}><option value="">All categories</option>{data.categories.map((c) => <option key={c}>{c}</option>)}</select>
         <select value={f.owner} onChange={(e) => setF({ ...f, owner: e.target.value })}><option value="">Any owner</option>{data.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-        <select value={f.sort} onChange={(e) => setF({ ...f, sort: e.target.value as typeof f.sort })}><option value="rise">Fastest rising</option><option value="gmv">Biggest 7d GMV</option><option value="updated">Recently updated</option><option value="name">Name</option></select>
+        <select value={f.sort} onChange={(e) => setF({ ...f, sort: e.target.value as typeof f.sort })}><option value="rise">Fastest rising</option><option value="gmv">Biggest 7d GMV</option><option value="updated">Recently updated</option><option value="launched">Newest shops</option><option value="name">Name</option></select>
         <label className="field check"><input type="checkbox" checked={f.hideDone} onChange={(e) => setF({ ...f, hideDone: e.target.checked })} /> Hide complete / closed</label>
+        <label className="field check"><input type="checkbox" checked={f.hideClients} onChange={(e) => setF({ ...f, hideClients: e.target.checked })} /> Hide existing clients</label>
         <span className="sub">{rows.length} of {data.prospects.length}</span>
       </div>
 
@@ -247,18 +292,23 @@ export default function BdPage() {
               const main = (
                 <tr key={p.id} className={open === p.id ? 'open' : ''}>
                   <td><button className="small" onClick={() => setOpen(open === p.id ? null : p.id)} aria-label="Details">{open === p.id ? '−' : '+'}</button></td>
-                  <td><b>{p.shop_name}</b>{p.brand && p.brand !== p.shop_name && <span className="sub"> · {p.brand}</span>}<div className="sub">{p.contacts.length ? `${p.contacts.length} contact${p.contacts.length === 1 ? '' : 's'}` : 'no contacts'}{p.contacts.some((c) => c.email) ? ' · email' : ''}</div></td>
+                  <td>
+                    <b>{p.shop_name}</b>{p.brand && p.brand !== p.shop_name && <span className="sub"> · {p.brand}</span>}
+                    {p.fastmoss_url && <> <a href={p.fastmoss_url} target="_blank" rel="noreferrer" className="sub" title="Open on FastMoss">FastMoss ↗</a></>}
+                    {p.is_client && <> <span className="badge muted">client</span></>}
+                    <div className="sub">{p.contacts.length ? `${p.contacts.length} contact${p.contacts.length === 1 ? '' : 's'}` : 'no contacts'}{p.contacts.some((c) => c.email) ? ' · email' : ''}{p.outreach_log.length ? ` · ${p.outreach_log.length} in history` : ''}</div>
+                  </td>
                   <td>{p.market}</td>
                   <td className="hide-sm sub">{p.category ?? ''}</td>
                   <td className="num">{fmtMoney(p.gmv_7d, p.currency)}<div className="sub">{p.rise_score === null ? '' : `${fmtPct(p.rise_score * 100)} of lifetime`}</div></td>
-                  <td><span className={`badge ${b.cls}`}>{b.label}</span></td>
+                  <td><span className={`badge ${b.cls}`}>{b.label}</span> {launchBadge(p)}</td>
                   <td>{isAdmin ? <select value={p.status} onChange={(e) => patch(p, { status: e.target.value as BdStatus })} style={{ width: 'auto' }}>{STATUSES.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}</select> : statusBadge(p.status)}</td>
                   <td>{isAdmin ? <select value={p.owner_id ?? ''} onChange={(e) => patch(p, { owner_id: e.target.value ? Number(e.target.value) : null })} style={{ width: 'auto' }}><option value="">–</option>{data.people.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select> : p.owner_name ?? <span className="sub">–</span>}</td>
                   <td>
                     <div className="checks">
                       {CHANNELS.map((ch) => (
                         <label key={ch.k} className={`chk ${p[ch.k] ? 'on' : ''}`} title={p[ch.at] ? `Ticked ${fmtRelative(p[ch.at])}` : 'Not yet'}>
-                          <input type="checkbox" checked={p[ch.k]} disabled={!isAdmin} onChange={(e) => patch(p, { [ch.k]: e.target.checked })} /> {ch.label}
+                          <input type="checkbox" checked={p[ch.k]} disabled={!isAdmin} onChange={(e) => tick(p, ch.k, e.target.checked)} /> {ch.label}
                         </label>
                       ))}
                       {p.outreach_complete && <span className="badge good">Complete</span>}

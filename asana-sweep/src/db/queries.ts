@@ -4,6 +4,7 @@ import type {
   AccountInput,
   AccountShop,
   BdContact,
+  BdOutreachEvent,
   BdProspect,
   BdProspectInput,
   BdProspectPatch,
@@ -36,7 +37,7 @@ import type {
   RunStatus,
 } from '../sweep/types.js';
 import { isSignedStage, leadKey, matchPerson, type SheetLead } from '../leads/sheet.js';
-import { outreachComplete, riseScore } from '../bd/score.js';
+import { fastmossShopUrl, launchFlags, matchesAccountName, outreachComplete, riseScore } from '../bd/score.js';
 
 type Row = Record<string, unknown>;
 
@@ -888,6 +889,7 @@ export class Queries {
       est_value: (r.est_value as number | null) ?? null,
       priority: (r.priority as string | null) ?? null,
       row_no: (r.row_no as number | null) ?? null,
+      added_on: (r.added_on as string | null) ?? null,
       sourced_by_id: (r.sourced_by_id as number | null) ?? null,
       sourced_by_name: (r.sourced_by_name as string | null) ?? null,
       onboarding_id: (r.onboarding_id as number | null) ?? null,
@@ -923,10 +925,10 @@ export class Queries {
     const people = this.listPeople();
     const existing = new Map<string, Row>();
     for (const r of this.db.prepare('SELECT * FROM leads').all() as Row[]) existing.set(r.key as string, r);
-    const insert = this.db.prepare(`INSERT INTO leads (key, name, poc, stage, country, last_contact, notes, est_value, priority, row_no, sourced_by_id, onboarding_id, signed, signed_at, first_seen_at, last_seen_at, updated_at)
-      VALUES (@key, @name, @poc, @stage, @country, @last_contact, @notes, @est_value, @priority, @row_no, @sourced_by_id, @onboarding_id, @signed, @signed_at, @now, @now, @now)`);
+    const insert = this.db.prepare(`INSERT INTO leads (key, name, poc, stage, country, last_contact, notes, est_value, priority, row_no, added_on, sourced_by_id, onboarding_id, signed, signed_at, first_seen_at, last_seen_at, updated_at)
+      VALUES (@key, @name, @poc, @stage, @country, @last_contact, @notes, @est_value, @priority, @row_no, @added_on, @sourced_by_id, @onboarding_id, @signed, @signed_at, @now, @now, @now)`);
     const update = this.db.prepare(`UPDATE leads SET name = @name, poc = @poc, stage = @stage, country = @country, last_contact = @last_contact, notes = @notes, est_value = @est_value, priority = @priority, row_no = @row_no,
-      sourced_by_id = @sourced_by_id, onboarding_id = @onboarding_id, signed = @signed, signed_at = @signed_at, last_seen_at = @now, removed_at = NULL, updated_at = CASE WHEN @changed THEN @now ELSE updated_at END WHERE id = @id`);
+      sourced_by_id = @sourced_by_id, onboarding_id = @onboarding_id, signed = @signed, signed_at = @signed_at, added_on = COALESCE(@sheet_added_on, added_on), last_seen_at = @now, removed_at = NULL, updated_at = CASE WHEN @changed THEN @now ELSE updated_at END WHERE id = @id`);
     const result = { added: 0, updated: 0, removed: 0, newly_signed: [] as string[] };
     this.db.transaction(() => {
       const seen = new Set<string>();
@@ -938,7 +940,7 @@ export class Queries {
         const sourced = matchPerson(row.sourced_by, people)?.id ?? (prev?.sourced_by_id as number | null) ?? null;
         const onboarding = matchPerson(row.onboarding, people)?.id ?? (prev?.onboarding_id as number | null) ?? null;
         if (!prev) {
-          insert.run({ key, ...row, sourced_by_id: sourced, onboarding_id: onboarding, signed, signed_at: signed ? now : null, now });
+          insert.run({ key, ...row, added_on: row.added_on ?? now.slice(0, 10), sourced_by_id: sourced, onboarding_id: onboarding, signed, signed_at: signed ? now : null, now });
           result.added += 1;
           if (signed) result.newly_signed.push(row.name);
           continue;
@@ -946,8 +948,8 @@ export class Queries {
         const wasSigned = Boolean(prev.signed);
         const signedAt = signed ? ((prev.signed_at as string | null) ?? now) : null;
         const fields: (keyof SheetLead)[] = ['name', 'poc', 'stage', 'country', 'last_contact', 'notes', 'est_value', 'priority'];
-        const changed = fields.some((f) => (prev[f] ?? null) !== (row[f] ?? null)) || prev.sourced_by_id !== sourced || prev.onboarding_id !== onboarding || wasSigned !== Boolean(signed) || prev.removed_at !== null;
-        update.run({ id: prev.id, ...row, sourced_by_id: sourced, onboarding_id: onboarding, signed, signed_at: signedAt, now, changed: changed ? 1 : 0 });
+        const changed = fields.some((f) => (prev[f] ?? null) !== (row[f] ?? null)) || (row.added_on !== null && row.added_on !== prev.added_on) || prev.sourced_by_id !== sourced || prev.onboarding_id !== onboarding || wasSigned !== Boolean(signed) || prev.removed_at !== null;
+        update.run({ id: prev.id, ...row, sheet_added_on: row.added_on ?? null, sourced_by_id: sourced, onboarding_id: onboarding, signed, signed_at: signedAt, now, changed: changed ? 1 : 0 });
         if (changed) result.updated += 1;
         if (signed && !wasSigned) result.newly_signed.push(row.name);
       }
@@ -957,10 +959,11 @@ export class Queries {
     return result;
   }
 
-  patchLead(id: number, patch: { sourced_by_id?: number | null; onboarding_id?: number | null }): Lead | null {
+  patchLead(id: number, patch: { sourced_by_id?: number | null; onboarding_id?: number | null; added_on?: string | null }): Lead | null {
     const sets: string[] = [];
     if (patch.sourced_by_id !== undefined) sets.push('sourced_by_id = @sourced_by_id');
     if (patch.onboarding_id !== undefined) sets.push('onboarding_id = @onboarding_id');
+    if (patch.added_on !== undefined) sets.push('added_on = @added_on');
     if (sets.length) this.db.prepare(`UPDATE leads SET ${sets.join(', ')}, updated_at = @now WHERE id = @id`).run({ ...patch, id, now: new Date().toISOString() });
     return this.getLead(id);
   }
@@ -984,7 +987,11 @@ export class Queries {
     };
   }
 
-  private rowToProspect(r: Row, contacts: BdContact[]): BdProspect {
+  private rowToOutreach(r: Row): BdOutreachEvent {
+    return { id: r.id as number, prospect_id: r.prospect_id as number, channel: (r.channel as BdOutreachEvent['channel']) ?? null, action: r.action as BdOutreachEvent['action'], note: (r.note as string | null) ?? null, contact_name: (r.contact_name as string | null) ?? null, actor: (r.actor as string | null) ?? null, created_at: r.created_at as string };
+  }
+
+  private rowToProspect(r: Row, contacts: BdContact[], outreachLog: BdOutreachEvent[] = []): BdProspect {
     const o = { outreach_tts_am: Boolean(r.outreach_tts_am), outreach_gmail: Boolean(r.outreach_gmail), outreach_linkedin: Boolean(r.outreach_linkedin) };
     return {
       id: r.id as number,
@@ -1003,6 +1010,11 @@ export class Queries {
       rating: (r.rating as number | null) ?? null,
       products: (r.products as number | null) ?? null,
       rise_score: riseScore(r.gmv_7d as number | null, r.gmv_total as number | null),
+      launched_at: (r.launched_at as string | null) ?? null,
+      gmv_started_at: (r.gmv_started_at as string | null) ?? null,
+      ...launchFlags({ launched_at: (r.launched_at as string | null) ?? null, gmv_started_at: (r.gmv_started_at as string | null) ?? null, gmv_7d: (r.gmv_7d as number | null) ?? null, gmv_total: (r.gmv_total as number | null) ?? null }),
+      fastmoss_url: fastmossShopUrl(r.seller_id as string | null),
+      is_client: Boolean(r.is_client),
       domain: (r.domain as string | null) ?? null,
       website: (r.website as string | null) ?? null,
       status: (r.status as BdProspect['status']) ?? 'new',
@@ -1020,10 +1032,11 @@ export class Queries {
       created_at: r.created_at as string,
       updated_at: r.updated_at as string,
       contacts,
+      outreach_log: outreachLog,
     };
   }
 
-  private static PROSPECT_SELECT = `SELECT p.*, o.name AS owner_name FROM bd_prospects p LEFT JOIN people o ON o.id = p.owner_id`;
+  private static PROSPECT_SELECT = `SELECT p.*, o.name AS owner_name, (p.notes LIKE 'Existing client%') AS is_client FROM bd_prospects p LEFT JOIN people o ON o.id = p.owner_id`;
 
   listProspects(includeArchived = false): BdProspect[] {
     const contacts = new Map<number, BdContact[]>();
@@ -1031,24 +1044,30 @@ export class Queries {
       const c = this.rowToContact(r);
       contacts.set(c.prospect_id, [...(contacts.get(c.prospect_id) ?? []), c]);
     }
+    const logs = new Map<number, BdOutreachEvent[]>();
+    for (const r of this.db.prepare('SELECT * FROM bd_outreach_log ORDER BY created_at DESC, id DESC').all() as Row[]) {
+      const e = this.rowToOutreach(r);
+      logs.set(e.prospect_id, [...(logs.get(e.prospect_id) ?? []), e]);
+    }
     const where = includeArchived ? '' : 'WHERE p.archived = 0';
-    return (this.db.prepare(`${Queries.PROSPECT_SELECT} ${where} ORDER BY p.market, p.gmv_7d DESC, p.shop_name COLLATE NOCASE`).all() as Row[]).map((r) => this.rowToProspect(r, contacts.get(r.id as number) ?? []));
+    return (this.db.prepare(`${Queries.PROSPECT_SELECT} ${where} ORDER BY p.market, p.gmv_7d DESC, p.shop_name COLLATE NOCASE`).all() as Row[]).map((r) => this.rowToProspect(r, contacts.get(r.id as number) ?? [], logs.get(r.id as number) ?? []));
   }
 
   getProspect(id: number): BdProspect | null {
     const r = this.db.prepare(`${Queries.PROSPECT_SELECT} WHERE p.id = ?`).get(id) as Row | undefined;
     if (!r) return null;
     const contacts = (this.db.prepare('SELECT * FROM bd_contacts WHERE prospect_id = ? ORDER BY enriched DESC, id').all(id) as Row[]).map((c) => this.rowToContact(c));
-    return this.rowToProspect(r, contacts);
+    const log = (this.db.prepare('SELECT * FROM bd_outreach_log WHERE prospect_id = ? ORDER BY created_at DESC, id DESC LIMIT 100').all(id) as Row[]).map((e) => this.rowToOutreach(e));
+    return this.rowToProspect(r, contacts, log);
   }
 
   /** Insert new shops or refresh the numbers of ones we already track (by seller id). Never touches status, owner or outreach. */
   upsertProspects(rows: BdProspectInput[]): { added: number; updated: number } {
-    const insert = this.db.prepare(`INSERT INTO bd_prospects (seller_id, shop_name, brand, market, category, gmv_7d, gmv_total, units_7d, units_total, currency, shop_type, tiktok_handle, rating, products, domain, website, notes, source, pulled_at)
-      VALUES (@seller_id, @shop_name, @brand, @market, @category, @gmv_7d, @gmv_total, @units_7d, @units_total, @currency, @shop_type, @tiktok_handle, @rating, @products, @domain, @website, @notes, @source, @pulled_at)`);
+    const insert = this.db.prepare(`INSERT INTO bd_prospects (seller_id, shop_name, brand, market, category, gmv_7d, gmv_total, units_7d, units_total, currency, shop_type, tiktok_handle, rating, products, domain, website, notes, source, pulled_at, launched_at, gmv_started_at)
+      VALUES (@seller_id, @shop_name, @brand, @market, @category, @gmv_7d, @gmv_total, @units_7d, @units_total, @currency, @shop_type, @tiktok_handle, @rating, @products, @domain, @website, @notes, @source, @pulled_at, @launched_at, @gmv_started_at)`);
     const update = this.db.prepare(`UPDATE bd_prospects SET shop_name = @shop_name, brand = COALESCE(@brand, brand), category = COALESCE(@category, category), gmv_7d = @gmv_7d, gmv_total = @gmv_total, units_7d = @units_7d, units_total = @units_total,
       currency = @currency, shop_type = COALESCE(@shop_type, shop_type), tiktok_handle = COALESCE(@tiktok_handle, tiktok_handle), rating = COALESCE(@rating, rating), products = COALESCE(@products, products), domain = COALESCE(domain, @domain), website = COALESCE(website, @website),
-      pulled_at = @pulled_at, archived = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE seller_id = @seller_id`);
+      pulled_at = @pulled_at, launched_at = COALESCE(@launched_at, launched_at), gmv_started_at = COALESCE(@gmv_started_at, gmv_started_at), archived = 0, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE seller_id = @seller_id`);
     const result = { added: 0, updated: 0 };
     this.db.transaction(() => {
       for (const r of rows) {
@@ -1072,6 +1091,8 @@ export class Queries {
           notes: r.notes ?? null,
           source: r.source ?? 'manual',
           pulled_at: r.pulled_at ?? null,
+          launched_at: r.launched_at ?? null,
+          gmv_started_at: r.gmv_started_at ?? null,
         };
         if (row.seller_id && update.run(row).changes) result.updated += 1;
         else {
@@ -1080,7 +1101,21 @@ export class Queries {
         }
       }
     })();
+    this.markExistingClients();
     return result;
+  }
+
+  /** Shops that are already roster accounts are not prospects: mark them won with a note, once. */
+  markExistingClients(): number {
+    const accounts = this.listAccounts().map((a) => a.name);
+    const rows = this.db.prepare(`SELECT id, shop_name, brand FROM bd_prospects WHERE status = 'new' AND (notes IS NULL OR notes NOT LIKE 'Existing client%')`).all() as { id: number; shop_name: string; brand: string | null }[];
+    const upd = this.db.prepare(`UPDATE bd_prospects SET status = 'won', notes = ?, updated_at = ? WHERE id = ?`);
+    let n = 0;
+    for (const r of rows) {
+      const hit = accounts.find((a) => matchesAccountName(r.shop_name, a) || (r.brand ? matchesAccountName(r.brand, a) : false));
+      if (hit) n += upd.run(`Existing client (${hit} on the roster)`, new Date().toISOString(), r.id).changes;
+    }
+    return n;
   }
 
   createProspect(input: BdProspectInput): BdProspect {
@@ -1089,10 +1124,10 @@ export class Queries {
     return this.getProspect(id)!;
   }
 
-  patchProspect(id: number, patch: BdProspectPatch): BdProspect | null {
+  patchProspect(id: number, patch: BdProspectPatch, actor?: string | null): BdProspect | null {
     const sets: string[] = [];
     const params: Record<string, unknown> = { id, now: new Date().toISOString() };
-    const simple: (keyof BdProspectPatch)[] = ['status', 'owner_id', 'notes', 'domain', 'website'];
+    const simple: (keyof BdProspectPatch)[] = ['status', 'owner_id', 'notes', 'domain', 'website', 'launched_at', 'gmv_started_at'];
     for (const k of simple) {
       if (patch[k] !== undefined) {
         sets.push(`${k} = @${k}`);
@@ -1103,14 +1138,30 @@ export class Queries {
       sets.push('archived = @archived');
       params.archived = patch.archived ? 1 : 0;
     }
+    const before = this.getProspect(id);
+    if (!before) return null;
+    const events: { channel: BdOutreachEvent['channel']; action: BdOutreachEvent['action']; note: string | null }[] = [];
     for (const ch of ['tts_am', 'gmail', 'linkedin'] as const) {
       const v = patch[`outreach_${ch}`];
       if (v === undefined) continue;
       sets.push(`outreach_${ch} = @o_${ch}`, `outreach_${ch}_at = CASE WHEN @o_${ch} = 1 THEN COALESCE(outreach_${ch}_at, @now) ELSE NULL END`);
       params[`o_${ch}`] = v ? 1 : 0;
+      if (Boolean(v) !== before[`outreach_${ch}`]) events.push({ channel: ch, action: v ? 'contacted' : 'uncontacted', note: patch.outreach_note ?? null });
     }
+    if (patch.status !== undefined && patch.status !== before.status) events.push({ channel: null, action: patch.status === 'replied' || patch.status === 'meeting' ? 'replied' : 'status', note: `Status: ${before.status} → ${patch.status}${patch.outreach_note ? ` (${patch.outreach_note})` : ''}` });
     if (sets.length) this.db.prepare(`UPDATE bd_prospects SET ${sets.join(', ')}, updated_at = @now WHERE id = @id`).run(params);
+    for (const e of events) this.logOutreach(id, { ...e, contact_name: patch.outreach_contact ?? null, actor: actor ?? null });
+    if (!events.length && patch.outreach_note) this.logOutreach(id, { channel: null, action: 'note', note: patch.outreach_note, contact_name: patch.outreach_contact ?? null, actor: actor ?? null });
     return this.getProspect(id);
+  }
+
+  logOutreach(prospectId: number, e: { channel: BdOutreachEvent['channel']; action: BdOutreachEvent['action']; note: string | null; contact_name?: string | null; actor?: string | null }): BdOutreachEvent {
+    const info = this.db.prepare(`INSERT INTO bd_outreach_log (prospect_id, channel, action, note, contact_name, actor) VALUES (?, ?, ?, ?, ?, ?)`).run(prospectId, e.channel, e.action, e.note, e.contact_name ?? null, e.actor ?? null);
+    return this.rowToOutreach(this.db.prepare('SELECT * FROM bd_outreach_log WHERE id = ?').get(Number(info.lastInsertRowid)) as Row);
+  }
+
+  deleteOutreachEvent(id: number): boolean {
+    return this.db.prepare('DELETE FROM bd_outreach_log WHERE id = ?').run(id).changes > 0;
   }
 
   deleteProspect(id: number): boolean {

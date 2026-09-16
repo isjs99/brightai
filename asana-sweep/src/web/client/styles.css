@@ -260,3 +260,6 @@ a.button { display: inline-block; padding: 7px 12px; border: 1px solid var(--bor
 .msg.system .bubble { background: transparent; color: var(--muted); font-size: 12.5px; }
 .context ul { margin: 6px 0 0 18px; }
 tr.dim td, .card.dim { opacity: .55; }
+
+.history { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.history li { padding: 6px 10px; background: var(--surface-2); border-radius: 8px; font-size: 13.5px; }

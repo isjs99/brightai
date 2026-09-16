@@ -7,6 +7,7 @@ import { runAllChecks } from '../checklist/checker.js';
 import { syncGmv } from '../gmv/sync.js';
 import { LeadsWatcher } from '../leads/sync.js';
 import { InboxWatcher } from '../inbox/sync.js';
+import { importPullFiles } from '../bd/import.js';
 import type { Rule } from '../sweep/types.js';
 import { nextRun } from './describe.js';
 
@@ -17,6 +18,7 @@ import { nextRun } from './describe.js';
 export class Scheduler {
   private tasks = new Map<number, ScheduledTask>();
   private pruneTask: ScheduledTask | null = null;
+  private pullsTask: ScheduledTask | null = null;
   private checkTask: ScheduledTask | null = null;
   private reminderTask: ScheduledTask | null = null;
   private gmvTask: ScheduledTask | null = null;
@@ -42,6 +44,10 @@ export class Scheduler {
     this.reloadCheckSchedule();
     this.leads.start();
     this.inbox.start();
+    // New FastMoss pulls dropped into data/bd-pulls: import at start and every morning.
+    importPullFiles(this.q);
+    this.q.markExistingClients();
+    this.pullsTask = cron.schedule('0 6 * * *', () => importPullFiles(this.q), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     log.info(`Scheduler started with ${this.tasks.size} active rule(s)`);
   }
 
@@ -113,6 +119,8 @@ export class Scheduler {
   stop(): void {
     this.leads.stop();
     this.inbox.stop();
+    this.pullsTask?.destroy();
+    this.pullsTask = null;
     for (const [id, task] of this.tasks) {
       task.destroy();
       this.tasks.delete(id);

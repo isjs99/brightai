@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import { SEED_PULLED_AT, SEED_SHOPS } from '../bd/seed.js';
+import { SEED_CONTACTS, SEED_DOMAINS, SEED_PULLED_AT, SEED_SHOPS } from '../bd/seed.js';
 
 interface Migration {
   version: number;
@@ -587,18 +587,12 @@ const migrations: Migration[] = [
       `);
       const ins = db.prepare(`INSERT OR IGNORE INTO bd_prospects (seller_id, shop_name, brand, market, category, gmv_7d, gmv_total, units_7d, units_total, currency, shop_type, tiktok_handle, rating, products, source, pulled_at)
         VALUES (@seller_id, @shop_name, @brand, @market, @category, @gmv_7d, @gmv_total, @units_7d, @units_total, @currency, @shop_type, @tiktok_handle, @rating, @products, 'fastmoss', @pulled_at)`);
-      for (const s of SEED_SHOPS) ins.run({ ...s, pulled_at: SEED_PULLED_AT });
-      // Decision makers found through Apollo search at seed time. Last names stay masked until enriched.
-      const contact = db.prepare(`INSERT INTO bd_contacts (prospect_id, name, title, source, apollo_id, notes) SELECT id, ?, ?, 'apollo', ?, ? FROM bd_prospects WHERE seller_id = ?`);
-      const seeded: [string, string, string, string][] = [
-        ['7495337003120626279', 'Rishi Sh***h', 'Co-Founder', '5f59a95f12140c000148ad1f'],
-        ['7495337003120626279', 'Dayo Ka***n', 'Co-Founder', '5d6f376bf3e5bb0e2879a64e'],
-        ['7495337003120626279', 'Jai Sh***h', 'Co-Founder', '66f25dc2ed5e23000159a8cf'],
-        ['7495185995129325568', 'Victor Co***n', 'Commercial Director', '54a548b9746869344275a88b'],
-        ['7495613047709207418', 'Preta Ku***r', 'Head of Operations & Finance Support', '673c7a3e8ebde00001f645f7'],
-        ['7495613047709207418', 'Leena Sa***t', 'Finance Executive', '54ebc5a6746869444cae8e21'],
-      ];
-      for (const [seller, name, title, apolloId] of seeded) contact.run(name, title, apolloId, 'Found via Apollo search; reveal to get the full name, email and LinkedIn.', seller);
+      for (const { launched_at: _l, gmv_started_at: _g, ...s } of SEED_SHOPS) ins.run({ ...s, pulled_at: SEED_PULLED_AT });
+      // Decision makers found and revealed through Apollo at seed time (name, title, email, LinkedIn, Apollo id, note).
+      const contact = db.prepare(`INSERT INTO bd_contacts (prospect_id, name, title, email, linkedin_url, source, apollo_id, enriched, notes) SELECT id, ?, ?, ?, ?, 'apollo', ?, ?, ? FROM bd_prospects WHERE seller_id = ?`);
+      for (const c of SEED_CONTACTS) contact.run(c.name, c.title, c.email, c.linkedin_url, c.apollo_id, c.email || c.linkedin_url ? 1 : 0, c.note, c.seller_id);
+      const dom = db.prepare(`UPDATE bd_prospects SET domain = ?, website = ? WHERE seller_id = ? AND domain IS NULL`);
+      for (const [seller, domain] of Object.entries(SEED_DOMAINS)) dom.run(domain, domain, seller);
     },
   },
   {
@@ -693,6 +687,45 @@ const migrations: Migration[] = [
       lib.run('fr', 'both', 'Français', 'Tutoiement chaleureux comme sur TikTok. Signature : "À bientôt, l\'équipe [brand]".');
       lib.run('it', 'both', 'Italiano', 'Tono amichevole, dai del tu. Firma: "A presto, il team [brand]".');
       lib.run('es', 'both', 'Español', 'Tono cercano, tutea. Firma: "Un saludo, el equipo de [brand]".');
+    },
+  },
+  {
+    version: 13,
+    name: 'bd shop launch dates and outreach history, lead added-on date',
+    up(db) {
+      db.exec(`
+        ALTER TABLE bd_prospects ADD COLUMN launched_at TEXT;
+        ALTER TABLE bd_prospects ADD COLUMN gmv_started_at TEXT;
+        ALTER TABLE leads ADD COLUMN added_on TEXT;
+
+        CREATE TABLE bd_outreach_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          prospect_id INTEGER NOT NULL REFERENCES bd_prospects(id) ON DELETE CASCADE,
+          channel TEXT,
+          action TEXT NOT NULL,
+          note TEXT,
+          contact_name TEXT,
+          actor TEXT,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+        CREATE INDEX bd_outreach_log_prospect ON bd_outreach_log(prospect_id, created_at DESC);
+      `);
+      db.exec(`UPDATE leads SET added_on = substr(first_seen_at, 1, 10) WHERE added_on IS NULL`);
+      // Backfill shop creation / first-sale dates pulled from FastMoss for the seeded shops.
+      const upd = db.prepare(`UPDATE bd_prospects SET launched_at = COALESCE(launched_at, ?), gmv_started_at = COALESCE(gmv_started_at, ?) WHERE seller_id = ?`);
+      for (const s of SEED_SHOPS) if (s.launched_at || s.gmv_started_at) upd.run(s.launched_at, s.gmv_started_at, s.seller_id);
+      // Revealed Apollo contacts: update rows seeded with masked names, add the rest.
+      const existing = db.prepare(`SELECT c.id FROM bd_contacts c JOIN bd_prospects p ON p.id = c.prospect_id WHERE p.seller_id = ? AND c.apollo_id = ?`);
+      const updC = db.prepare(`UPDATE bd_contacts SET name = ?, title = ?, email = COALESCE(email, ?), linkedin_url = COALESCE(linkedin_url, ?), enriched = ?, notes = ? WHERE id = ?`);
+      const insC = db.prepare(`INSERT INTO bd_contacts (prospect_id, name, title, email, linkedin_url, source, apollo_id, enriched, notes) SELECT id, ?, ?, ?, ?, 'apollo', ?, ?, ? FROM bd_prospects WHERE seller_id = ?`);
+      for (const c of SEED_CONTACTS) {
+        const row = existing.get(c.seller_id, c.apollo_id) as { id: number } | undefined;
+        const enriched = c.email || c.linkedin_url ? 1 : 0;
+        if (row) updC.run(c.name, c.title, c.email, c.linkedin_url, enriched, c.note, row.id);
+        else insC.run(c.name, c.title, c.email, c.linkedin_url, c.apollo_id, enriched, c.note, c.seller_id);
+      }
+      const dom = db.prepare(`UPDATE bd_prospects SET domain = COALESCE(domain, ?), website = COALESCE(website, ?) WHERE seller_id = ?`);
+      for (const [seller, domain] of Object.entries(SEED_DOMAINS)) dom.run(domain, domain, seller);
     },
   },
 ];

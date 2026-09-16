@@ -1,8 +1,12 @@
 node_modules
 dist
-data
 .env
 *.db
 *.db-journal
 *.db-wal
 *.db-shm
+
+# Daily FastMoss pulls are committed so the server can import them
+!data/
+data/*
+!data/bd-pulls/

@@ -544,6 +544,7 @@ export interface Lead {
   est_value: number | null;
   priority: string | null;
   row_no: number | null;
+  added_on: string | null; // date it was added to the lead list (YYYY-MM-DD)
   sourced_by_id: number | null;
   sourced_by_name: string | null;
   onboarding_id: number | null;
@@ -620,6 +621,17 @@ export interface BdContact {
   created_at: string;
 }
 
+export interface BdOutreachEvent {
+  id: number;
+  prospect_id: number;
+  channel: BdChannel | null;
+  action: 'contacted' | 'uncontacted' | 'note' | 'status' | 'replied';
+  note: string | null;
+  contact_name: string | null;
+  actor: string | null;
+  created_at: string;
+}
+
 export interface BdProspect {
   id: number;
   seller_id: string | null;
@@ -637,6 +649,13 @@ export interface BdProspect {
   rating: number | null;
   products: number | null;
   rise_score: number | null; // share of lifetime GMV made in the last 7 days
+  launched_at: string | null; // shop created date (YYYY-MM-DD) when known
+  gmv_started_at: string | null; // first day with sales (YYYY-MM-DD) when known
+  new_shop_30d: boolean; // launched in the last 30 days
+  gmv_started_30d: boolean; // first sales in the last 30 days (known date, or estimated from the 7d share)
+  age_estimate_days: number | null; // lifetime / 7d run-rate, when no dates are known
+  fastmoss_url: string | null;
+  is_client: boolean; // matches an account on the roster
   domain: string | null;
   website: string | null;
   status: BdStatus;
@@ -656,6 +675,7 @@ export interface BdProspect {
   created_at: string;
   updated_at: string;
   contacts: BdContact[];
+  outreach_log: BdOutreachEvent[];
 }
 
 export interface BdCountryRow {
@@ -680,7 +700,7 @@ export interface BdData {
   apollo_configured: boolean;
   ingest_configured: boolean;
   last_pull_at: string | null;
-  totals: { prospects: number; complete: number; won: number; with_contacts: number };
+  totals: { prospects: number; complete: number; won: number; with_contacts: number; new_30d: number; gmv_started_30d: number };
 }
 
 export interface BdProspectInput {
@@ -703,6 +723,8 @@ export interface BdProspectInput {
   notes?: string | null;
   source?: string;
   pulled_at?: string | null;
+  launched_at?: string | null;
+  gmv_started_at?: string | null;
 }
 
 export interface BdProspectPatch {
@@ -715,6 +737,11 @@ export interface BdProspectPatch {
   outreach_gmail?: boolean;
   outreach_linkedin?: boolean;
   archived?: boolean;
+  launched_at?: string | null;
+  gmv_started_at?: string | null;
+  /** Optional note stored with an outreach tick, e.g. who was contacted and about what. */
+  outreach_note?: string | null;
+  outreach_contact?: string | null;
 }
 
 // ---- CS & affiliate inbox, context library, auto-reply ----

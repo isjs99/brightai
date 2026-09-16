@@ -11,6 +11,7 @@ export interface SheetLead {
   priority: string | null;
   sourced_by: string | null; // free text from an optional "Sourced By" column
   onboarding: string | null; // free text from an optional "Onboarding AM" column
+  added_on: string | null; // from an optional "Date Added" column, normalised to YYYY-MM-DD
   row_no: number;
 }
 
@@ -64,6 +65,7 @@ const HEADERS: Record<keyof Omit<SheetLead, 'row_no'>, string[]> = {
   priority: ['priorities', 'priority'],
   sourced_by: ['sourced by', 'source am', 'sourced', 'sourcer', 'originator'],
   onboarding: ['onboarding am', 'onboarding', 'am', 'account manager', 'owner'],
+  added_on: ['date added', 'added on', 'added', 'created', 'date created', 'first contact'],
 };
 
 /** Find the header row (first row containing a "client name"-like cell) and map columns. */
@@ -123,6 +125,7 @@ export function leadsFromCsv(csv: string): { leads: SheetLead[]; columns: string
       priority: at('priority'),
       sourced_by: at('sourced_by'),
       onboarding: at('onboarding'),
+      added_on: parseSheetDate(at('added_on')),
       row_no: i - headerIndex,
     });
   }
@@ -153,4 +156,26 @@ export function matchPerson<T extends { id: number; name: string }>(value: strin
   if (first) return first;
   const prefix = people.find((p) => norm(p.name).startsWith(v.slice(0, 3)) && v.length >= 3);
   return prefix ?? null;
+}
+
+/** Sheet dates come as 2026-09-16, 16/09/2026 (EU) or 09/16/2026; return YYYY-MM-DD or null. */
+export function parseSheetDate(s: string | null | undefined): string | null {
+  if (!s) return null;
+  const t = s.trim();
+  let m = t.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return `${m[1]}-${m[2].padStart(2, '0')}-${m[3].padStart(2, '0')}`;
+  m = t.match(/^(\d{1,2})[/.](\d{1,2})[/.](\d{2,4})$/);
+  if (m) {
+    let a = Number(m[1]);
+    let b = Number(m[2]);
+    const y = m[3].length === 2 ? 2000 + Number(m[3]) : Number(m[3]);
+    if (a > 12 && b <= 12) [a, b] = [b, a]; // clearly DD/MM
+    // Default to day-first (the sheet is EU); a > 12 handled above, a <= 12 && b > 12 means MM/DD.
+    const day = b > 12 ? b : a;
+    const month = b > 12 ? a : b;
+    if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+    return `${y}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+  }
+  const d = new Date(t);
+  return Number.isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10);
 }

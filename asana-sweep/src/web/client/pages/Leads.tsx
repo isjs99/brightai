@@ -14,6 +14,7 @@ export default function LeadsPage() {
   const [filterCountry, setFilterCountry] = useState('');
   const [filterAm, setFilterAm] = useState('');
   const [search, setSearch] = useState('');
+  const [added, setAdded] = useState<{ preset: '' | '7' | '30' | '90' | 'custom'; from: string; to: string }>({ preset: '', from: '', to: '' });
   const [showSettings, setShowSettings] = useState(false);
   const [csv, setCsv] = useState('');
   const [form, setForm] = useState({ sheet_id: '', sheet_tab: '', sync_enabled: true, sync_seconds: '180', points_signed: '1', points_sourced: '1', currency: 'GBP' });
@@ -75,6 +76,12 @@ export default function LeadsPage() {
     } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   };
 
+  const setAddedOn = async (lead: Lead, value: string) => {
+    try {
+      absorb(await api.patchLead(lead.id, { added_on: value || null }));
+    } catch (e) { setError((e as Error).message); }
+  };
+
   const assign = async (lead: Lead, field: 'sourced_by_id' | 'onboarding_id', value: string) => {
     try {
       absorb(await api.patchLead(lead.id, { [field]: value ? Number(value) : null }));
@@ -84,7 +91,12 @@ export default function LeadsPage() {
   if (!data) return <p>{error ?? 'Loading…'}</p>;
   const cur = data.settings.currency;
   const q = search.trim().toLowerCase();
+  const dayIso = (daysAgo: number) => new Date(Date.now() - daysAgo * 86400000).toISOString().slice(0, 10);
+  const addedFrom = added.preset === 'custom' ? added.from : added.preset ? dayIso(Number(added.preset)) : '';
+  const addedTo = added.preset === 'custom' ? added.to : '';
   const visible = data.leads.filter((l) =>
+    (!addedFrom || ((l.added_on ?? '') >= addedFrom)) &&
+    (!addedTo || ((l.added_on ?? '9999') <= addedTo)) &&
     (!filterStage || (filterStage === '(none)' ? !l.stage : l.stage === filterStage)) &&
     (!filterCountry || l.country === filterCountry) &&
     (!filterAm || String(l.onboarding_id ?? '') === filterAm || String(l.sourced_by_id ?? '') === filterAm) &&
@@ -136,7 +148,7 @@ export default function LeadsPage() {
             <label className="field check"><input type="checkbox" checked={form.sync_enabled} onChange={(e) => setForm({ ...form, sync_enabled: e.target.checked })} /> Auto sync</label>
           </div>
           <p className="sub" style={{ marginTop: 8 }}>
-            {data.settings.csv_url_from_env ? 'Source is fixed by LEADS_CSV_URL in .env.' : 'Reads the public CSV export of the tab, so the sheet needs link sharing (view). Columns picked up: Client Name, POC, Stage, Country, Last Contact, Notes, Est. Value P/M, Priorities. Add "Sourced By" and "Onboarding AM" columns to the sheet and they fill in here automatically.'}
+            {data.settings.csv_url_from_env ? 'Source is fixed by LEADS_CSV_URL in .env.' : 'Reads the public CSV export of the tab, so the sheet needs link sharing (view). Columns picked up: Client Name, POC, Stage, Country, Last Contact, Notes, Est. Value P/M, Priorities. Add "Sourced By", "Onboarding AM" and "Date Added" columns to the sheet and they fill in here automatically; otherwise the added date is the day the lead first appeared on the sheet and can be edited.'}
             {data.sync.columns.length > 0 && <> Last sync saw: {data.sync.columns.join(', ')}.</>}
           </p>
           <h2>Points</h2>
@@ -186,13 +198,17 @@ export default function LeadsPage() {
         <select value={filterStage} onChange={(e) => setFilterStage(e.target.value)}><option value="">All stages</option>{data.stages.map((s) => <option key={s}>{s}</option>)}<option value="(none)">No stage</option></select>
         <select value={filterCountry} onChange={(e) => setFilterCountry(e.target.value)}><option value="">All countries</option>{data.countries.map((c) => <option key={c}>{c}</option>)}</select>
         <select value={filterAm} onChange={(e) => setFilterAm(e.target.value)}><option value="">All AMs</option>{data.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+        <select value={added.preset} onChange={(e) => setAdded({ ...added, preset: e.target.value as typeof added.preset })}>
+          <option value="">Added any time</option><option value="7">Added last 7 days</option><option value="30">Added last 30 days</option><option value="90">Added last 90 days</option><option value="custom">Added between…</option>
+        </select>
+        {added.preset === 'custom' && <><input type="date" value={added.from} onChange={(e) => setAdded({ ...added, from: e.target.value })} /><span className="sub">to</span><input type="date" value={added.to} onChange={(e) => setAdded({ ...added, to: e.target.value })} /></>}
         <span className="sub">{visible.length} of {data.leads.length}</span>
       </div>
       {data.leads.length === 0 ? (
         <div className="empty">Nothing synced yet. {isAdmin ? 'Press "Sync now" or paste the CSV under Settings.' : ''}</div>
       ) : (
         <table>
-          <thead><tr><th>Client</th><th>Stage</th><th className="hide-sm">Country</th><th className="num">Est. / month</th><th>Onboarding AM</th><th>Sourced by</th><th className="hide-sm">Notes</th><th className="hide-sm">Signed</th></tr></thead>
+          <thead><tr><th>Client</th><th>Stage</th><th className="hide-sm">Country</th><th className="num">Est. / month</th><th>Added</th><th>Onboarding AM</th><th>Sourced by</th><th className="hide-sm">Notes</th><th className="hide-sm">Signed</th></tr></thead>
           <tbody>
             {visible.map((l) => (
               <tr key={l.id}>
@@ -200,6 +216,7 @@ export default function LeadsPage() {
                 <td><span className={`badge ${stageClass(l)}`}>{l.stage ?? 'No stage'}</span></td>
                 <td className="hide-sm">{l.country ?? <span className="sub">–</span>}</td>
                 <td className="num">{l.est_value === null ? <span className="sub">–</span> : fmtMoney(l.est_value, cur)}</td>
+                <td>{isAdmin ? <input type="date" value={l.added_on ?? ''} onChange={(e) => setAddedOn(l, e.target.value)} style={{ width: 150 }} title="Date this lead was added to the sheet" /> : (l.added_on ?? <span className="sub">–</span>)}</td>
                 <td>{personSelect(l, 'onboarding_id')}</td>
                 <td>{personSelect(l, 'sourced_by_id')}</td>
                 <td className="hide-sm sub" title={l.notes ?? ''}>{(l.notes ?? '').slice(0, 60)}{(l.notes ?? '').length > 60 ? '…' : ''}</td>

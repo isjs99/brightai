@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { isSignedStage, leadsFromCsv, matchPerson, parseCsv, parseMoney } from '../src/leads/sheet';
+import { isSignedStage, leadsFromCsv, matchPerson, parseCsv, parseMoney, parseSheetDate } from '../src/leads/sheet';
 import { amSummary } from '../src/leads/points';
-import { openDb } from '../src/db/index';
+import { openTestDb } from '../src/db/index';
 import { Queries } from '../src/db/queries';
 import type { Lead, Person } from '../src/sweep/types';
 
@@ -45,6 +45,24 @@ describe('lead sheet parsing', () => {
     expect(isSignedStage(null)).toBe(false);
   });
 
+  it('parses sheet dates as ISO, EU day-first, or US when unambiguous', () => {
+    expect(parseSheetDate('2026-09-16')).toBe('2026-09-16');
+    expect(parseSheetDate('2026-9-6')).toBe('2026-09-06');
+    expect(parseSheetDate('16/09/2026')).toBe('2026-09-16');
+    expect(parseSheetDate('09/16/2026')).toBe('2026-09-16');
+    expect(parseSheetDate('3/4/26')).toBe('2026-04-03');
+    expect(parseSheetDate('16.09.2026')).toBe('2026-09-16');
+    expect(parseSheetDate('32/13/2026')).toBeNull();
+    expect(parseSheetDate('')).toBeNull();
+    expect(parseSheetDate('nonsense')).toBeNull();
+  });
+
+  it('reads a date-added column', () => {
+    const { leads } = leadsFromCsv('Client Name,Stage,Date Added\nAcme,Proposal Sent,01/09/2026\nBeta,In Contact,\n');
+    expect(leads[0].added_on).toBe('2026-09-01');
+    expect(leads[1].added_on).toBeNull();
+  });
+
   it('matches sheet names to people loosely', () => {
     const people = [{ id: 1, name: 'Federica' }, { id: 2, name: 'Elena' }];
     expect(matchPerson('Feds', people)?.id).toBe(1);
@@ -55,7 +73,7 @@ describe('lead sheet parsing', () => {
 
 describe('lead upserts', () => {
   const setup = () => {
-    const q = new Queries(openDb(':memory:'));
+    const q = new Queries(openTestDb());
     const people = q.listPeople();
     return { q, people };
   };
@@ -81,10 +99,27 @@ describe('lead upserts', () => {
     q.upsertLeads(leadsFromCsv('Client Name,Stage\nAcme,Contract Signed\n').leads, '2026-09-03T00:00:00.000Z');
     expect(q.listLeads()[0].signed_at).toBe('2026-09-02T00:00:00.000Z');
   });
+
+  it('stamps added_on from the sheet when present, else first seen, and lets admins override it', () => {
+    const { q } = setup();
+    q.upsertLeads(leadsFromCsv('Client Name,Stage,Date Added\nAcme,Proposal Sent,20/08/2026\nBeta,In Contact,\n').leads, '2026-09-01T00:00:00.000Z');
+    const byName = () => Object.fromEntries(q.listLeads().map((l) => [l.name, l]));
+    expect(byName().Acme.added_on).toBe('2026-08-20');
+    expect(byName().Beta.added_on).toBe('2026-09-01');
+    // a later sync without the column keeps the dates
+    q.upsertLeads(leadsFromCsv('Client Name,Stage\nAcme,Proposal Sent\nBeta,In Contact\n').leads, '2026-09-05T00:00:00.000Z');
+    expect(byName().Acme.added_on).toBe('2026-08-20');
+    expect(byName().Beta.added_on).toBe('2026-09-01');
+    const beta = q.patchLead(byName().Beta.id, { added_on: '2026-07-15' })!;
+    expect(beta.added_on).toBe('2026-07-15');
+    // the sheet wins again next sync when it carries a date
+    q.upsertLeads(leadsFromCsv('Client Name,Stage,Date Added\nAcme,Proposal Sent,20/08/2026\nBeta,In Contact,2026-07-01\n').leads, '2026-09-06T00:00:00.000Z');
+    expect(byName().Beta.added_on).toBe('2026-07-01');
+  });
 });
 
 describe('AM points', () => {
-  const lead = (o: Partial<Lead>): Lead => ({ id: 1, name: 'x', poc: null, stage: null, country: null, last_contact: null, notes: null, est_value: null, priority: null, row_no: 1, sourced_by_id: null, sourced_by_name: null, onboarding_id: null, onboarding_name: null, signed: false, signed_at: null, first_seen_at: '', last_seen_at: '', removed_at: null, updated_at: '', ...o });
+  const lead = (o: Partial<Lead>): Lead => ({ id: 1, name: 'x', poc: null, stage: null, country: null, last_contact: null, notes: null, est_value: null, priority: null, row_no: 1, sourced_by_id: null, sourced_by_name: null, onboarding_id: null, onboarding_name: null, signed: false, signed_at: null, first_seen_at: '', last_seen_at: '', removed_at: null, updated_at: '', added_on: null, ...o });
   const people: Person[] = [{ id: 1, name: 'Elena', role: 'am', email: null, slack_user_id: null, notify: true }, { id: 2, name: 'Federica', role: 'am', email: null, slack_user_id: null, notify: true }];
 
   it('scores signed deals for onboarding and sourcing AMs, ignoring removed leads', () => {

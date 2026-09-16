@@ -171,13 +171,17 @@ Growth > Leads mirrors the "Core Lead List" tab of the lead sheet every few minu
 
 Per lead you log the **onboarding AM** and **sourced by** (an AM, or not AM-sourced). Both survive syncs. If the sheet grows "Sourced By" / "Onboarding AM" columns they fill in automatically when the name matches a team member. A signed deal gives points to the onboarding AM and to the sourcing AM; the weights are in settings and the By AM table shows totals, signed value and open pipeline per person.
 
+Each lead carries an **added on** date: the sheet's "Date Added" column when there is one (ISO or day-first dates), otherwise the day the row first appeared on the sheet. Admins can correct it with the date picker in the Added column, and the list filters by added in the last 7 / 30 / 90 days or a custom range.
+
 ## BD pipeline
 
 Growth > BD pipeline holds fast-rising TikTok Shops per EU market, the decision makers behind them and where we have reached out.
 
-- **Prospects** come from FastMoss: the seed is the top 7-day GMV shops for DE, UK, FR, IT and ES, scored by the share of lifetime GMV made this week ("surging" at 15%+, "rising" at 5%+). Refresh by pasting a FastMoss `shop_search` result into Import pull, or have a scheduled job POST the same JSON to `/api/bd/import` with `Authorization: Bearer <INGEST_TOKEN>`. Re-imports refresh the numbers and never touch status, owner, contacts or outreach.
-- **Decision makers**: with `APOLLO_API_KEY` set, "Find decision makers" searches Apollo for founders, e-commerce and marketing leads (free) and "Reveal" enriches one person for their work email and LinkedIn (one Apollo credit, confirmed first). Contacts can also be added by hand.
-- **Outreach checklist**: TTS AM, Gmail and LinkedIn per prospect. Outreach is complete only when all three are ticked; the CRM overview per country counts prospects, any outreach, complete, won and lost.
+- **Prospects** come from FastMoss: the seed is the top 7-day GMV shops for DE, UK, FR, IT and ES, scored by the share of lifetime GMV made this week ("surging" at 15%+, "rising" at 5%+). Every row links to the shop's FastMoss page. Re-imports refresh the numbers and never touch status, owner, contacts or outreach history. Shops that are already on the roster are marked won with an "Existing client" note and hidden by default.
+- **Daily pulls**: a scheduled Claude routine pulls the fast risers from FastMoss each morning and either POSTs them to `/api/bd/import` (`Authorization: Bearer <INGEST_TOKEN>`, set `BD_IMPORT_URL` for the routine) or commits `data/bd-pulls/YYYY-MM-DD.json`; the server imports new files at startup and at 06:00 (or on Import pull). Raw `shop_search` / `shop_base_info` rows work as-is; pasting a result into Import pull does the same by hand.
+- **Launch signals**: "Launched in last 30 days" uses the shop creation date (from FastMoss `shop_base_info`, or set by hand in the detail). "GMV started in last 30 days" uses the first-sales date when known, otherwise the implied selling age (lifetime GMV ÷ daily run-rate ≤ 30 days shows as "Took off (est.)"). Both are filters, KPIs and a "Newest shops" sort.
+- **Decision makers**: with `APOLLO_API_KEY` set, "Find decision makers" searches Apollo for founders, e-commerce and marketing leads and reveals the top three straight away for their work email and LinkedIn (one Apollo credit each, no confirmation); "Reveal" does the rest one by one. Contacts can also be added by hand.
+- **Outreach checklist and history**: TTS AM, Gmail and LinkedIn per prospect. Ticking a channel asks for an optional note (who you contacted, about what) and writes a history event with the channel, note, contact and who ticked it; status changes and "+ Note" entries land in the same history, which lives in the prospect detail. Outreach is complete only when all three are ticked; the CRM overview per country counts prospects, any outreach, complete, won and lost.
 
 ## CS & affiliate inbox
 
@@ -245,4 +249,5 @@ Auth is a single shared password behind a signed cookie, in `src/web/auth.ts` be
 | `LEADS_CSV_URL` | Optional CSV URL to mirror as the lead list instead of the Google Sheet export |
 | `APOLLO_API_KEY` | Optional Apollo.io key for decision-maker search and reveal |
 | `INGEST_TOKEN` | Optional bearer token for `POST /api/bd/import` |
+| `BD_PULLS_DIR` | Optional folder watched for daily FastMoss pull files (default `data/bd-pulls`) |
 | `ANTHROPIC_API_KEY`, `REPLY_MODEL` | Anthropic API key and model for drafting and auto-replies |

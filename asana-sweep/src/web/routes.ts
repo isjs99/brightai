@@ -27,6 +27,7 @@ import { draftWithClaude } from '../inbox/llm.js';
 import { LANGUAGE_NAMES } from '../inbox/language.js';
 import type { ConversationDetail, ContextEntry, InboxData } from '../sweep/types.js';
 import { normaliseDomain } from '../bd/score.js';
+import { importPullFiles, isoDate, parseProspectInput } from '../bd/import.js';
 import type { BdCountryRow, BdData, BdProspectInput, BdProspectPatch, BdStatus } from '../sweep/types.js';
 import type { AuthProvider } from './auth.js';
 import { requireAdminForWrites, requireAuth, SharedPasswordAuth } from './auth.js';
@@ -178,33 +179,6 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   });
 
   // ---- BD import: a scheduled job (or an admin session) posts fresh FastMoss pulls here ----
-  const parseProspectInput = (b: Record<string, unknown>): BdProspectInput => {
-    const shop_name = String(b.shop_name ?? b.name ?? '').trim();
-    const market = String(b.market ?? b.region ?? '').trim().toUpperCase().replace(/^GB$/, 'UK');
-    if (!shop_name || !market) throw new HttpError(400, 'Each prospect needs shop_name and market.');
-    const num = (v: unknown): number | null => (v === undefined || v === null || v === '' ? null : Number.isFinite(Number(v)) ? Number(v) : null);
-    return {
-      shop_name,
-      market,
-      brand: optText(b.brand ?? b.brand_name),
-      category: optText(b.category ?? (b.main_category as { name?: string } | undefined)?.name),
-      seller_id: optText(b.seller_id),
-      domain: normaliseDomain(optText(b.domain ?? b.website)),
-      website: optText(b.website),
-      tiktok_handle: optText(b.tiktok_handle ?? (b.linked_creator as { unique_id?: string } | undefined)?.unique_id),
-      gmv_7d: num(b.gmv_7d ?? b.gmv_last_7d),
-      gmv_total: num(b.gmv_total ?? b.total_gmv),
-      units_7d: num(b.units_7d ?? b.units_sold_last_7d),
-      units_total: num(b.units_total ?? b.total_units_sold),
-      currency: String(b.currency ?? b.currency_code ?? '').toUpperCase() || (market === 'UK' ? 'GBP' : 'EUR'),
-      shop_type: optText(b.shop_type ?? b.shop_type_code)?.replace('_shop', '') ?? null,
-      rating: num(b.rating ?? b.shop_rating),
-      products: num(b.products ?? b.active_product_count),
-      notes: optText(b.notes),
-      source: optText(b.source) ?? 'import',
-      pulled_at: optText(b.pulled_at) ?? new Date().toISOString(),
-    };
-  };
   r.post('/bd/import', (req, res) => {
     const bearer = String(req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
     const viaToken = Boolean(config.ingestToken) && bearer === config.ingestToken;
@@ -214,7 +188,12 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const rows = Array.isArray(body.prospects) ? body.prospects : Array.isArray(body.shops) ? body.shops : [];
     if (!rows.length) throw new HttpError(400, 'Send { prospects: [...] } (FastMoss shop_search rows work as-is).');
     const pulledAt = optText(body.pulled_at) ?? new Date().toISOString();
-    const result = q.upsertProspects(rows.map((row) => parseProspectInput({ pulled_at: pulledAt, source: 'fastmoss', ...row })));
+    let result: { added: number; updated: number };
+    try {
+      result = q.upsertProspects(rows.map((row) => parseProspectInput({ pulled_at: pulledAt, source: 'fastmoss', ...row })));
+    } catch (err) {
+      throw new HttpError(400, (err as Error).message);
+    }
     liveEvents.emitUpdate({ kind: 'bd' });
     res.json({ result });
   });
@@ -1048,7 +1027,9 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
       if (!Number.isInteger(id) || !q.getPerson(id)) throw new HttpError(400, 'Unknown team member');
       return id;
     };
-    const lead = q.patchLead(idParam(req), { sourced_by_id: person(body.sourced_by_id), onboarding_id: person(body.onboarding_id) });
+    const addedOn = body.added_on === undefined ? undefined : body.added_on === null || body.added_on === '' ? null : isoDate(body.added_on);
+    if (body.added_on !== undefined && body.added_on !== null && body.added_on !== '' && !addedOn) throw new HttpError(400, 'Date must be YYYY-MM-DD');
+    const lead = q.patchLead(idParam(req), { sourced_by_id: person(body.sourced_by_id), onboarding_id: person(body.onboarding_id), added_on: addedOn });
     if (!lead) throw new HttpError(404, 'Lead not found');
     liveEvents.emitUpdate({ kind: 'leads' });
     res.json({ lead, ...leadsData() });
@@ -1124,11 +1105,15 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
         complete: prospects.filter((p) => p.outreach_complete).length,
         won: prospects.filter((p) => p.status === 'won').length,
         with_contacts: prospects.filter((p) => p.contacts.length > 0).length,
+        new_30d: prospects.filter((p) => p.new_shop_30d).length,
+        gmv_started_30d: prospects.filter((p) => p.gmv_started_30d).length,
       },
     };
   };
 
   r.get('/bd', (_req, res) => res.json(bdData()));
+
+  r.post('/bd/pulls/import', (_req, res) => res.json(importPullFiles(q)));
 
   r.post('/bd/prospects', (req, res) => {
     const input = parseProspectInput({ source: 'manual', ...((req.body ?? {}) as Record<string, unknown>) });
@@ -1157,10 +1142,35 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (b.domain !== undefined) patch.domain = normaliseDomain(optText(b.domain));
     for (const ch of ['tts_am', 'gmail', 'linkedin'] as const) if (b[`outreach_${ch}`] !== undefined) patch[`outreach_${ch}`] = Boolean(b[`outreach_${ch}`]);
     if (b.archived !== undefined) patch.archived = Boolean(b.archived);
-    const prospect = q.patchProspect(idParam(req), patch);
+    for (const k of ['launched_at', 'gmv_started_at'] as const) {
+      if (b[k] === undefined) continue;
+      const d = isoDate(b[k]);
+      if (optText(b[k]) && !d) throw new HttpError(400, `${k === 'launched_at' ? 'Shop created' : 'First sales'} must be a date (YYYY-MM-DD).`);
+      patch[k] = d;
+    }
+    if (b.outreach_note !== undefined) patch.outreach_note = optText(b.outreach_note);
+    if (b.outreach_contact !== undefined) patch.outreach_contact = optText(b.outreach_contact);
+    const prospect = q.patchProspect(idParam(req), patch, auth instanceof SharedPasswordAuth ? auth.roleOf(req) : 'admin');
     if (!prospect) throw new HttpError(404, 'Prospect not found');
     liveEvents.emitUpdate({ kind: 'bd' });
     res.json({ prospect, ...bdData() });
+  });
+
+  r.post('/bd/prospects/:id/log', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    if (!q.getProspect(idParam(req))) throw new HttpError(404, 'Prospect not found');
+    const note = optText(b.note);
+    if (!note) throw new HttpError(400, 'Write a note first.');
+    const channel = ['tts_am', 'gmail', 'linkedin'].includes(String(b.channel)) ? (String(b.channel) as 'tts_am') : null;
+    q.logOutreach(idParam(req), { channel, action: channel ? 'contacted' : 'note', note, contact_name: optText(b.contact_name), actor: auth instanceof SharedPasswordAuth ? auth.roleOf(req) : 'admin' });
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.status(201).json({ prospect: q.getProspect(idParam(req)), ...bdData() });
+  });
+
+  r.delete('/bd/outreach-log/:id', (req, res) => {
+    if (!q.deleteOutreachEvent(idParam(req))) throw new HttpError(404, 'Event not found');
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json(bdData());
   });
 
   r.delete('/bd/prospects/:id', (req, res) => {
@@ -1194,10 +1204,23 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const company = optText(body.company) ?? prospect.brand ?? prospect.shop_name.replace(/\b(uk|de|fr|it|es|eu|shop|store|official|deutschland|france|italia|españa|espana)\b/gi, '').trim();
     try {
       const people = await apollo.searchPeople({ domain, company, limit: 10 });
-      for (const p of people) q.addContact(prospect.id, { name: p.name, title: p.title, email: p.email, linkedin_url: p.linkedin_url, phone: p.phone, source: 'apollo', apollo_id: p.id, enriched: Boolean(p.email), notes: p.organization ? `At ${p.organization}` : null });
+      let revealed = 0;
+      for (const [i, p] of people.entries()) {
+        // Reveal the top matches straight away (one Apollo credit each); the rest stay masked until asked.
+        let full = p;
+        if (i < 3 && !p.email) {
+          try {
+            full = (await apollo.matchPerson({ id: p.id })) ?? p;
+            if (full.email || full.linkedin_url) revealed += 1;
+          } catch {
+            full = p;
+          }
+        }
+        q.addContact(prospect.id, { name: full.name, title: full.title, email: full.email, linkedin_url: full.linkedin_url, phone: full.phone, source: 'apollo', apollo_id: full.id, enriched: Boolean(full.email || full.linkedin_url), notes: full.organization ? `At ${full.organization}${full.email_status ? ` · email ${full.email_status}` : ''}` : null });
+      }
       if (domain && !prospect.domain) q.patchProspect(prospect.id, { domain });
       liveEvents.emitUpdate({ kind: 'bd' });
-      res.json({ found: people.length, prospect: q.getProspect(prospect.id), ...bdData() });
+      res.json({ found: people.length, revealed, prospect: q.getProspect(prospect.id), ...bdData() });
     } catch (err) {
       throw new HttpError(502, (err as Error).message);
     }

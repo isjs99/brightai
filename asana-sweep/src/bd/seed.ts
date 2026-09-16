@@ -1,5 +1,5 @@
 // FastMoss pull of the top 7-day GMV shops per EU market, 2026-09-16. Refresh via the BD import API (see README).
-export interface SeedShop { seller_id: string; shop_name: string; brand: string | null; market: string; category: string; gmv_7d: number; gmv_total: number; units_7d: number; units_total: number; shop_type: string; tiktok_handle: string | null; rating: number; products: number; currency: string }
+export interface SeedShop { seller_id: string; shop_name: string; brand: string | null; market: string; category: string; gmv_7d: number; gmv_total: number; units_7d: number; units_total: number; shop_type: string; tiktok_handle: string | null; rating: number; products: number; currency: string; launched_at: string | null; gmv_started_at: string | null }
 export const SEED_PULLED_AT = '2026-09-16';
 export const SEED_SHOPS: SeedShop[] = [
  {
@@ -16,7 +16,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "ninja.deutschland",
   "rating": 4.2,
   "products": 40,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494542612017022903",
@@ -32,7 +34,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "halara_deutschland",
   "rating": 4.4,
   "products": 39,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496139100232453100",
@@ -48,7 +52,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "user2814233539400",
   "rating": 4.1,
   "products": 44,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496259108651502542",
@@ -64,7 +70,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "smarttribe_shop",
   "rating": 4.0,
   "products": 78,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": "2025-08-06",
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494473298127193363",
@@ -80,7 +88,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "shark.deutschland",
   "rating": 3.9,
   "products": 34,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496123122517969900",
@@ -96,7 +106,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "lubluelu_de",
   "rating": 4.5,
   "products": 34,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494385350230247126",
@@ -112,7 +124,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "medicube.deutschland",
   "rating": 4.7,
   "products": 72,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496180685249219475",
@@ -128,7 +142,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "dreame_deutschland",
   "rating": 4.1,
   "products": 129,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494147516683748793",
@@ -144,7 +160,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "crocsshopde",
   "rating": 4.3,
   "products": 127,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496257912646961254",
@@ -160,7 +178,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "vevor.de",
   "rating": 3.9,
   "products": 2293,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496303129653316227",
@@ -176,7 +196,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "philipsgermany",
   "rating": 4.2,
   "products": 48,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494451878056199437",
@@ -192,7 +214,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "dr.melaxin.germany",
   "rating": 4.0,
   "products": 62,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496088615210420906",
@@ -208,7 +232,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "svenja.walberg",
   "rating": 3.9,
   "products": 95,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496208851430837021",
@@ -224,7 +250,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "drachenheld.de",
   "rating": 4.8,
   "products": 487,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496114069725546531",
@@ -240,7 +268,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "bb_drogerie",
   "rating": 4.0,
   "products": 362,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494485177186813748",
@@ -256,7 +286,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "pammys_official",
   "rating": 3.7,
   "products": 29,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8647269099932454561",
@@ -272,7 +304,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "wavytalk_de",
   "rating": 4.4,
   "products": 17,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496137625597610444",
@@ -288,7 +322,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "cfab.com",
   "rating": 3.7,
   "products": 222,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496100113295575378",
@@ -304,7 +340,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "citysports_official",
   "rating": 4.0,
   "products": 209,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496101518497646856",
@@ -320,7 +358,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "seamlessfashion",
   "rating": 4.9,
   "products": 1531,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8647418550144571494",
@@ -336,7 +376,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "iseehair_de",
   "rating": 4.7,
   "products": 92,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496102357349468459",
@@ -352,7 +394,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "aosomgermany",
   "rating": 3.1,
   "products": 1854,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8647042003707399200",
@@ -368,7 +412,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "user7316183317500",
   "rating": 4.3,
   "products": 112,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496099178429450462",
@@ -384,7 +430,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "breakarenaa",
   "rating": 4.9,
   "products": 613,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494573679031322194",
@@ -400,7 +448,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "puffit_de_official",
   "rating": 4.6,
   "products": 58,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": "2026-05-03",
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496252968566164090",
@@ -416,7 +466,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "hzuanerihomede",
   "rating": 4.7,
   "products": 412,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496099180035082903",
@@ -432,7 +484,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "woltuhomede",
   "rating": 4.6,
   "products": 318,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496106803448809552",
@@ -448,7 +502,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "evercross_de",
   "rating": 2.8,
   "products": 55,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496130424041212056",
@@ -464,7 +520,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "oildem",
   "rating": 4.5,
   "products": 9,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494582654207559391",
@@ -480,7 +538,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "user7614537678854",
   "rating": 3.9,
   "products": 17,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496304415144774132",
@@ -496,7 +556,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "medicube.uk",
   "rating": 4.8,
   "products": 138,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496047005540322107",
@@ -512,7 +574,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "sharkbeautyuk",
   "rating": 4.7,
   "products": 123,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494683660387060475",
@@ -528,7 +592,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "ninjakitchenuk",
   "rating": 4.7,
   "products": 121,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494608413204122336",
@@ -544,7 +610,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "plmakeupacademy",
   "rating": 4.6,
   "products": 605,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494089321652061362",
@@ -560,7 +628,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "dr.melaxin.uk",
   "rating": 4.3,
   "products": 115,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496099247909472498",
@@ -576,7 +646,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "halara_uk_wardrobe",
   "rating": 4.7,
   "products": 1150,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7495918771470502637",
@@ -592,7 +664,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "halara_uk_shop",
   "rating": 4.9,
   "products": 76,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7495800853072349547",
@@ -608,7 +682,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "bellavitaluxuryuk",
   "rating": 4.8,
   "products": 112,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494477044510853251",
@@ -624,7 +700,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "onlinehomeshopuk",
   "rating": 4.2,
   "products": 725,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496100358311676717",
@@ -640,7 +718,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "puffitukglobal.uk",
   "rating": 4.8,
   "products": 88,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7495337003120626279",
@@ -656,7 +736,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "nutritiongeeksofficial",
   "rating": 4.9,
   "products": 53,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494548121986763046",
@@ -672,7 +754,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "madebymitchell",
   "rating": 4.6,
   "products": 192,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7495613047709207418",
@@ -688,7 +772,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "keplinproducts",
   "rating": 4.7,
   "products": 276,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496115225583061121",
@@ -704,7 +790,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "solelondon",
   "rating": 4.2,
   "products": 313,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494981884491762531",
@@ -720,7 +808,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "straame",
   "rating": 4.3,
   "products": 106,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7495694615892363469",
@@ -736,7 +826,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "egoofficial_",
   "rating": 4.2,
   "products": 4462,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496052564698762045",
@@ -752,7 +844,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "qvcuk",
   "rating": 4.2,
   "products": 1083,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494770673858939501",
@@ -768,7 +862,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "wellgard",
   "rating": 4.8,
   "products": 128,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7495946411494640638",
@@ -784,7 +880,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "theordinarystoreuk",
   "rating": 4.7,
   "products": 103,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496202157693962430",
@@ -800,7 +898,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "bareanatomy.uk",
   "rating": 4.5,
   "products": 43,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494754040961993092",
@@ -816,7 +916,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "freesoul",
   "rating": 4.4,
   "products": 111,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494103605336639375",
@@ -832,7 +934,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "drflashlife_",
   "rating": 4.7,
   "products": 8,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7495753393812769128",
@@ -848,7 +952,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "marketmax6",
   "rating": 4.2,
   "products": 1177,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496147334275566468",
@@ -864,7 +970,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "crocsshopuk",
   "rating": 4.8,
   "products": 151,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496106835003738774",
@@ -880,7 +988,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "katchmelook",
   "rating": 4.7,
   "products": 612,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7495314598416255768",
@@ -896,7 +1006,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "vaxcleanhome",
   "rating": 4.3,
   "products": 50,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7495888481436796939",
@@ -912,7 +1024,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "yassclean",
   "rating": 4.5,
   "products": 45,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494645643613669598",
@@ -928,7 +1042,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "wonderskinuk",
   "rating": 4.5,
   "products": 56,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494684671938037907",
@@ -944,7 +1060,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "remington.uk",
   "rating": 4.4,
   "products": 45,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494634091738727522",
@@ -960,7 +1078,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": null,
   "rating": 4.1,
   "products": 10,
-  "currency": "GBP"
+  "currency": "GBP",
+  "launched_at": "2026-06-12",
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496201090740553830",
@@ -976,7 +1096,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "iseehair_france",
   "rating": 4.7,
   "products": 101,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8648556814322014934",
@@ -992,7 +1114,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "medicube.france",
   "rating": 4.7,
   "products": 72,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8647358994757949944",
@@ -1008,7 +1132,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "umay.fit",
   "rating": 4.4,
   "products": 93,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496109152564185428",
@@ -1024,7 +1150,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": null,
   "rating": 4.9,
   "products": 71,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": "2026-05-16",
+  "gmv_started_at": null
  },
  {
   "seller_id": "8647412015075728275",
@@ -1040,7 +1168,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "dreame.france",
   "rating": 4.1,
   "products": 127,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494262599705134521",
@@ -1056,7 +1186,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "mengkaihumanhairstore",
   "rating": 4.8,
   "products": 256,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8647465436750190694",
@@ -1072,7 +1204,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "vevor.fr",
   "rating": 3.9,
   "products": 1682,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8648947726060723127",
@@ -1088,7 +1222,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "halara.fr",
   "rating": 4.4,
   "products": 34,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": "2026-05-13",
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496124256981191176",
@@ -1104,7 +1240,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "letemewigstore_fr",
   "rating": 3.9,
   "products": 316,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494147230223599190",
@@ -1120,7 +1258,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "nitrocom_",
   "rating": 3.5,
   "products": 2460,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": "2025-11-05",
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496114183742327137",
@@ -1136,7 +1276,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": null,
   "rating": 3.8,
   "products": 863,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": "2026-05-26",
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494527443282724685",
@@ -1152,7 +1294,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "kukirin_eu_de",
   "rating": 3.3,
   "products": 45,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": "2026-05-07",
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496118090733030039",
@@ -1168,7 +1312,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "luviahairshop_fr",
   "rating": 4.2,
   "products": 569,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494334406677202370",
@@ -1184,7 +1330,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "shopbylm",
   "rating": 4.2,
   "products": 232,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496114768666200619",
@@ -1200,7 +1348,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "luxalia.fr",
   "rating": 4.3,
   "products": 144,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8649532303272287166",
@@ -1216,7 +1366,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "dewinner_fr",
   "rating": 4.0,
   "products": 164,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": "2026-06-05",
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494384751218033894",
@@ -1232,7 +1384,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": null,
   "rating": 3.1,
   "products": 21,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": "2026-06-15",
+  "gmv_started_at": null
  },
  {
   "seller_id": "8647333935956073137",
@@ -1248,7 +1402,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "morefacehairbeauty_fr",
   "rating": 4.2,
   "products": 130,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494210785049478465",
@@ -1264,7 +1420,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "ulefonestore.fr",
   "rating": 3.7,
   "products": 75,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": "2025-11-26",
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494303046198986488",
@@ -1280,7 +1438,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "naniaofficiel",
   "rating": 4.7,
   "products": 38,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494225257218475799",
@@ -1296,7 +1456,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": null,
   "rating": 4.0,
   "products": 30,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": "2025-11-17",
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496124825659083734",
@@ -1312,7 +1474,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "laboutiqueanais1",
   "rating": 3.7,
   "products": 423,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494475518662051478",
@@ -1328,7 +1492,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "ninjakitchenfr",
   "rating": 4.3,
   "products": 60,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8649475935525313103",
@@ -1344,7 +1510,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": null,
   "rating": 4.2,
   "products": 17,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": "2026-07-25",
+  "gmv_started_at": "2026-08-07"
  },
  {
   "seller_id": "8647271672645127198",
@@ -1360,7 +1528,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "songmicshomefr",
   "rating": 4.5,
   "products": 234,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8647333877768034781",
@@ -1376,7 +1546,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "topdon.fr",
   "rating": 4.2,
   "products": 13,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496210744328948347",
@@ -1392,7 +1564,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "spztjk.fr.shop",
   "rating": 4.3,
   "products": 78,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8647544890468637306",
@@ -1408,7 +1582,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "hzuanerihomefr",
   "rating": 4.7,
   "products": 520,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494097466412926943",
@@ -1424,7 +1600,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "oqhair_fr",
   "rating": 4.8,
   "products": 45,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496323084337252839",
@@ -1440,7 +1618,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "user2730837156785",
   "rating": 4.0,
   "products": 113,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8648556814322080470",
@@ -1456,7 +1636,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "medicube.italia",
   "rating": 4.7,
   "products": 70,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8647412029765032851",
@@ -1472,7 +1654,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "dreame.italia",
   "rating": 4.1,
   "products": 127,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494587591343048476",
@@ -1488,7 +1672,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": null,
   "rating": 4.2,
   "products": 25,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496099206544329364",
@@ -1504,7 +1690,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "annaira.collection",
   "rating": 4.8,
   "products": 1367,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496086601890040365",
@@ -1520,7 +1708,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "user2497939198195",
   "rating": 3.2,
   "products": 649,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8647358992679606776",
@@ -1536,7 +1726,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "umay_it",
   "rating": 4.4,
   "products": 33,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8647465782790166630",
@@ -1552,7 +1744,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "user3817255086591",
   "rating": 3.9,
   "products": 1550,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496123044374874154",
@@ -1568,7 +1762,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "nelmondodialicesrl",
   "rating": 4.8,
   "products": 1593,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494228496228386336",
@@ -1584,7 +1780,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "avetagroup",
   "rating": 3.6,
   "products": 221,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494263484843395047",
@@ -1600,7 +1798,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "2017watchexpress",
   "rating": 3.6,
   "products": 461,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8647333875949607343",
@@ -1616,7 +1816,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "aldousbio.it",
   "rating": 4.4,
   "products": 58,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8648820787889871394",
@@ -1632,7 +1834,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": null,
   "rating": 4.4,
   "products": 38,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": "2026-06-06",
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496237089688357508",
@@ -1648,7 +1852,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "symbeauty_",
   "rating": 4.8,
   "products": 20,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494277761313114060",
@@ -1664,7 +1870,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "bearswithbenefits_italia",
   "rating": 4.5,
   "products": 54,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496228292717873769",
@@ -1680,7 +1888,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "zamika_store",
   "rating": 3.3,
   "products": 502,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": "2025-07-22",
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496100599137602478",
@@ -1696,7 +1906,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "aviliahome",
   "rating": 3.4,
   "products": 3248,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496189771657742360",
@@ -1712,7 +1924,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "gedishop2019",
   "rating": 3.7,
   "products": 138,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494433150569645671",
@@ -1728,7 +1942,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "beperelettrodomestici",
   "rating": 4.1,
   "products": 209,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496102930279074464",
@@ -1744,7 +1960,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "mediatech.store",
   "rating": 4.6,
   "products": 428,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494118515472303816",
@@ -1760,7 +1978,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "espositocollezioni",
   "rating": 4.8,
   "products": 822,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496131789691521255",
@@ -1776,7 +1996,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "top.clic.italia",
   "rating": 4.1,
   "products": 969,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494671900513043653",
@@ -1792,7 +2014,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "wizardstore_tcg",
   "rating": 4.9,
   "products": 68,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": "2026-05-30",
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496262949893736527",
@@ -1808,7 +2032,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "coffeina_official",
   "rating": 4.7,
   "products": 267,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8648727641100359701",
@@ -1824,7 +2050,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": null,
   "rating": 3.8,
   "products": 53,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8647586772100159975",
@@ -1840,7 +2068,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": null,
   "rating": 4.0,
   "products": 67,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494433872178087423",
@@ -1856,7 +2086,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "luigithestockboys",
   "rating": 4.5,
   "products": 200,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494237293720470728",
@@ -1872,7 +2104,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "bricozone.i",
   "rating": 3.0,
   "products": 1408,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496132935570459570",
@@ -1888,7 +2122,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "elettaboutique1",
   "rating": 4.0,
   "products": 849,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496118140829010866",
@@ -1904,7 +2140,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "1supps",
   "rating": 4.5,
   "products": 24,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496138579921635932",
@@ -1920,7 +2158,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "supertopsupermercati",
   "rating": 4.8,
   "products": 838,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496018874919914163",
@@ -1936,7 +2176,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "mikomika.shop",
   "rating": 4.2,
   "products": 97,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8648556360989317846",
@@ -1952,7 +2194,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "medicube.spain",
   "rating": 4.7,
   "products": 71,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494571503020770593",
@@ -1968,7 +2212,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "ninjakitchenes",
   "rating": 3.7,
   "products": 34,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7495185995129325568",
@@ -1984,7 +2230,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "zanvicbeauty",
   "rating": 4.2,
   "products": 45,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": "2024-12-09",
+  "gmv_started_at": null
  },
  {
   "seller_id": "7495815000108140546",
@@ -2000,7 +2248,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "utopyashop_",
   "rating": 4.4,
   "products": 962,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8647465318367533158",
@@ -2016,7 +2266,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "vevor_es",
   "rating": 3.9,
   "products": 2469,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496228668932983313",
@@ -2032,7 +2284,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": null,
   "rating": 4.6,
   "products": 46,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7495819924678871471",
@@ -2048,7 +2302,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "aldousbio",
   "rating": 4.4,
   "products": 68,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496300198226463659",
@@ -2064,7 +2320,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "user3924295590361",
   "rating": 3.7,
   "products": 301,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8648302554938120672",
@@ -2080,7 +2338,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": null,
   "rating": 3.2,
   "products": 13,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": "2026-03-13",
+  "gmv_started_at": null
  },
  {
   "seller_id": "8647359204594588152",
@@ -2096,7 +2356,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "umayshop_es",
   "rating": 4.4,
   "products": 34,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7495961414169824235",
@@ -2112,7 +2374,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "nutralie",
   "rating": 4.3,
   "products": 63,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7495820057582864916",
@@ -2128,7 +2392,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "armoniasspain",
   "rating": 4.4,
   "products": 2343,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7495866266162399877",
@@ -2144,7 +2410,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "lorealparisesp",
   "rating": 4.0,
   "products": 100,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496024193578076277",
@@ -2160,7 +2428,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "jupplies.es",
   "rating": 4.0,
   "products": 109,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8649779932573702695",
@@ -2176,7 +2446,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": null,
   "rating": 4.5,
   "products": 31,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": "2026-07-01",
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496206455024224691",
@@ -2192,7 +2464,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "luzdeldesierto2",
   "rating": 4.7,
   "products": 391,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": "2025-08-22",
+  "gmv_started_at": null
  },
  {
   "seller_id": "7495881833988786198",
@@ -2208,7 +2482,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "vicca.es",
   "rating": 4.7,
   "products": 62,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494492381540615956",
@@ -2224,7 +2500,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "t_lovendo.es",
   "rating": 3.9,
   "products": 153,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7495835666377836835",
@@ -2240,7 +2518,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "aigostar.es",
   "rating": 4.4,
   "products": 956,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8647334383825886188",
@@ -2256,7 +2536,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": null,
   "rating": 4.1,
   "products": 36,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "8648707908001175707",
@@ -2272,7 +2554,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "user1084819026328",
   "rating": 4.4,
   "products": 23,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": "2026-06-08",
+  "gmv_started_at": null
  },
  {
   "seller_id": "8647329659079334710",
@@ -2288,7 +2572,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "user31862074481",
   "rating": 4.2,
   "products": 173,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7495863410767267902",
@@ -2304,7 +2590,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "1990s.es",
   "rating": 3.7,
   "products": 69,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496275555863857586",
@@ -2320,7 +2608,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "xxx99800",
   "rating": 4.2,
   "products": 103,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7495866134124464548",
@@ -2336,7 +2626,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "homcom_es",
   "rating": 3.8,
   "products": 1196,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496015491476064986",
@@ -2352,7 +2644,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "landotes",
   "rating": 4.8,
   "products": 11,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7495858985413020446",
@@ -2368,7 +2662,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "despegue026",
   "rating": 3.7,
   "products": 257,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7494155957732017386",
@@ -2384,7 +2680,9 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "volupat",
   "rating": 4.4,
   "products": 171,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  },
  {
   "seller_id": "7496180118646983425",
@@ -2400,6 +2698,47 @@ export const SEED_SHOPS: SeedShop[] = [
   "tiktok_handle": "lumiira_official",
   "rating": 4.6,
   "products": 307,
-  "currency": "EUR"
+  "currency": "EUR",
+  "launched_at": null,
+  "gmv_started_at": null
  }
+];
+
+export interface SeedContact { seller_id: string; name: string; title: string; email: string | null; linkedin_url: string | null; apollo_id: string; note: string | null }
+
+/** Company domains confirmed through Apollo. */
+export const SEED_DOMAINS: Record<string, string> = {
+  '7495337003120626279': 'nutritiongeeks.co',
+  '7495185995129325568': 'zanvic.com',
+  '7495613047709207418': 'keplin-group.com',
+  '7494770673858939501': 'wellgard.co.uk',
+  '7494754040961993092': 'freesoul.com',
+  '7495888481436796939': 'yassclean.co.uk',
+  '7494645643613669598': 'wonderskin.com',
+  '7496102357349468459': 'aosom.de',
+  '7496114183742327137': 'aosom.fr',
+  '7494527443282724685': 'kukirin.net',
+  '7495961414169824235': 'nutriexperts.eu',
+};
+
+/** Decision makers revealed through Apollo (verified work emails where present). */
+export const SEED_CONTACTS: SeedContact[] = [
+  { seller_id: '7495337003120626279', name: 'Rishi Shah', title: 'Co-Founder', email: 'rishi@nutritiongeeks.co', linkedin_url: 'http://www.linkedin.com/in/rishi-shah-122a98ba', apollo_id: '5f59a95f12140c000148ad1f', note: 'Verified email. Ex-Invesco; runs distribution.' },
+  { seller_id: '7495337003120626279', name: 'Dayo Kamson', title: 'Co-Founder', email: 'dayo@nutritiongeeks.co', linkedin_url: 'http://www.linkedin.com/in/dayo-kamson-a2425928', apollo_id: '5d6f376bf3e5bb0e2879a64e', note: 'Verified email. Finance background.' },
+  { seller_id: '7495337003120626279', name: 'Jai Shah', title: 'Co-Founder', email: 'jai@nutritiongeeks.co', linkedin_url: 'http://www.linkedin.com/in/jaishah100', apollo_id: '66f25dc2ed5e23000159a8cf', note: 'Verified email. Marketing / growth lead of the three.' },
+  { seller_id: '7495185995129325568', name: 'Victor Corzan', title: 'Commercial Director', email: 'victor@zanvic.com', linkedin_url: 'http://www.linkedin.com/in/victor-corzan-64884925', apollo_id: '54a548b9746869344275a88b', note: 'Verified email. Office +34 674 10 92 33.' },
+  { seller_id: '7495613047709207418', name: 'Preta Kumar', title: 'Head of Operations & Finance Support', email: 'preta@keplin-group.com', linkedin_url: 'http://www.linkedin.com/in/preta-kumar-7561a41a3', apollo_id: '673c7a3e8ebde00001f645f7', note: 'Verified email. Keplin Group sells on TikTok, Amazon and to Morrisons/Aldi.' },
+  { seller_id: '7495613047709207418', name: 'Leena Sawant', title: 'Finance Executive', email: 'leenasawant@keplin-group.com', linkedin_url: 'http://www.linkedin.com/in/leena-sawant-67677b48', apollo_id: '54ebc5a6746869444cae8e21', note: 'Verified email. Finance, not a decision maker; use for routing.' },
+  { seller_id: '7494770673858939501', name: 'Kali Bendell', title: 'Head of Social Commerce', email: 'kali@bayagangroup.com', linkedin_url: 'http://www.linkedin.com/in/kali-bendell-0372b11b5', apollo_id: '6287b9f6cca5a10001b8cd47', note: 'Verified email. Owns TikTok Shop at Wellgard (Bayagan Group).' },
+  { seller_id: '7494770673858939501', name: 'Yousaf Sekander', title: 'Managing Director', email: 'yousaf@bayagangroup.com', linkedin_url: 'http://www.linkedin.com/in/ysekander', apollo_id: '60fee560b0378200016c5aa0', note: 'Verified email. MD of Wellgard / Bayagan Group.' },
+  { seller_id: '7494754040961993092', name: 'Arjun Sofat', title: 'CEO & Co-Founder', email: 'arjun.sofat@herfreesoul.com', linkedin_url: 'http://www.linkedin.com/in/arjunsofat', apollo_id: '66f3d726eb63860001dfce81', note: 'Verified email.' },
+  { seller_id: '7494754040961993092', name: 'Tom Hurst', title: 'Head of Acquisition', email: 'tom@freesoul.com', linkedin_url: 'http://www.linkedin.com/in/tomhurst-s6', apollo_id: '6001ef2366aeda0001bfe892', note: 'Verified email. Growth partnerships and affiliates.' },
+  { seller_id: '7495888481436796939', name: 'Luke Arnel-Cameron', title: 'Owner', email: 'luke@yassclean.co.uk', linkedin_url: 'http://www.linkedin.com/in/luke-arnel-cameron-36176b52', apollo_id: '68c863bcfd88f20001b78372', note: 'Verified email. Ex head of marketing at BiGDUG.' },
+  { seller_id: '7495888481436796939', name: 'Daniel Arnel-Cameron', title: 'Director', email: 'dan@yassclean.co.uk', linkedin_url: 'http://www.linkedin.com/in/daniel-arnel-cameron-b4a8a0235', apollo_id: '6480877b8094ed0001971cff', note: 'Verified email. Operations and e-commerce.' },
+  { seller_id: '7494645643613669598', name: 'Eva Corbett', title: 'Head of Socials', email: 'eva@wonderskin.com', linkedin_url: 'http://www.linkedin.com/in/eva-corbett-302b131b4', apollo_id: '617f0ccfc9e4320001ed0c71', note: 'Verified email. Wonderskin raised a $50M Series A in 2025.' },
+  { seller_id: '7496102357349468459', name: 'Markus Reiners', title: 'VP Sales, Marketing & Product Development', email: 'markus.reiners@aosom.de', linkedin_url: 'http://www.linkedin.com/in/markusreiners', apollo_id: '60a64df93260140001f3475f', note: 'Verified email. Aosom Germany (MH Handel GmbH), Hamburg.' },
+  { seller_id: '7496114183742327137', name: 'Fabio Missoli', title: 'CEO / General Manager Italy', email: 'fabio@aosom.it', linkedin_url: 'http://www.linkedin.com/in/missoli', apollo_id: '66fd7968a5c8530001c47651', note: 'Verified email. Aosom Italy; group-level contact for France.' },
+  { seller_id: '7494527443282724685', name: 'Farid Hemici', title: 'Founder, Kukirin Genève', email: null, linkedin_url: 'http://www.linkedin.com/in/farid-hemici', apollo_id: '69db74ebe7fa0e0001ff19f4', note: 'No email on Apollo. Generic: business@kukirin.net.' },
+  { seller_id: '7494634091738727522', name: 'Yeojin Son', title: 'Global Director, Business (Laka Cosmetics)', email: null, linkedin_url: 'http://www.linkedin.com/in/yeojin-son-53083058', apollo_id: '54a402517468692cf0e3c924', note: 'No email on Apollo. Global BD at the Korean HQ.' },
+  { seller_id: '7495961414169824235', name: 'Eulalia Cerda', title: 'Brand Development Manager, Nutralie', email: null, linkedin_url: 'http://www.linkedin.com/in/eul%c3%a0lia-cerd%c3%a0', apollo_id: '6422d38b7e6d5b00019ca193', note: 'No email on Apollo. Nutralie is owned by Nutriexperts (Barcelona).' },
 ];
