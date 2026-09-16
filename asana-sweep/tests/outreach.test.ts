@@ -8,7 +8,7 @@ import type { BdProspect } from '../src/sweep/types';
 const prospect = (o: Partial<BdProspect> = {}): BdProspect => ({
   id: 1, seller_id: '7', shop_name: 'Displayz', brand: null, market: 'FR', category: 'Collectibles', gmv_7d: 237925, gmv_total: 744843, units_7d: 243, units_total: 2656, currency: 'EUR', shop_type: 'local', tiktok_handle: null, rating: 4.9, products: 71,
   rise_score: 0.32, launched_at: '2026-05-16', gmv_started_at: null, new_shop_30d: false, gmv_started_30d: true, age_estimate_days: 22, fastmoss_url: 'https://www.fastmoss.com/shop-marketing/detail/7', is_client: false,
-  domain: null, website: null, status: 'new', owner_id: null, owner_name: null, notes: null,
+  domain: null, website: null, apollo_org_id: null, status: 'new', owner_id: null, owner_name: null, notes: null,
   outreach_tts_am: false, outreach_gmail: false, outreach_linkedin: true, outreach_tts_am_at: null, outreach_gmail_at: null, outreach_linkedin_at: '2026-09-10T10:00:00.000Z', outreach_complete: false,
   source: 'fastmoss', pulled_at: '2026-09-16', archived: false, created_at: '', updated_at: '', contacts: [], outreach_log: [], ...o,
 });

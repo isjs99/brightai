@@ -1,5 +1,6 @@
 import type Database from 'better-sqlite3';
 import { SEED_CONTACTS, SEED_DOMAINS, SEED_PULLED_AT, SEED_SHOPS } from '../bd/seed.js';
+import { SEED_ENRICHED } from '../bd/seed-enriched.js';
 import { SEED_BOOKING_URL, SEED_EXAMPLES, SEED_PITCH, SEED_SENDER_NAME, SEED_SENDER_TITLE, SEED_SENT_QUERY } from '../bd/voice.js';
 
 interface Migration {
@@ -776,6 +777,32 @@ const migrations: Migration[] = [
       set.run('outreach_booking_url', SEED_BOOKING_URL);
       set.run('outreach_pitch', SEED_PITCH);
       set.run('outreach_sent_query', SEED_SENT_QUERY);
+    },
+  },
+  {
+    version: 15,
+    name: 'bd apollo organisation id',
+    up(db) {
+      db.exec(`ALTER TABLE bd_prospects ADD COLUMN apollo_org_id TEXT;`);
+    },
+  },
+  {
+    version: 16,
+    name: 'bd decision makers from the Apollo enrichment run',
+    up(db) {
+      const shop = db.prepare(`UPDATE bd_prospects SET domain = COALESCE(domain, ?), website = COALESCE(website, ?), apollo_org_id = COALESCE(apollo_org_id, ?) WHERE seller_id = ?`);
+      const existing = db.prepare(`SELECT c.id FROM bd_contacts c JOIN bd_prospects p ON p.id = c.prospect_id WHERE p.seller_id = ? AND c.apollo_id = ?`);
+      const upd = db.prepare(`UPDATE bd_contacts SET name = ?, title = COALESCE(?, title), email = COALESCE(email, ?), linkedin_url = COALESCE(linkedin_url, ?), enriched = ?, notes = COALESCE(?, notes) WHERE id = ?`);
+      const ins = db.prepare(`INSERT INTO bd_contacts (prospect_id, name, title, email, linkedin_url, source, apollo_id, enriched, notes) SELECT id, ?, ?, ?, ?, 'apollo', ?, ?, ? FROM bd_prospects WHERE seller_id = ?`);
+      for (const s of SEED_ENRICHED) {
+        shop.run(s.domain, s.domain, s.apollo_org_id, s.seller_id);
+        for (const c of s.contacts) {
+          const enriched = c.email || c.linkedin_url ? 1 : 0;
+          const row = existing.get(s.seller_id, c.apollo_id) as { id: number } | undefined;
+          if (row) upd.run(c.name, c.title, c.email, c.linkedin_url, enriched, c.note, row.id);
+          else ins.run(c.name, c.title, c.email, c.linkedin_url, c.apollo_id, enriched, c.note, s.seller_id);
+        }
+      }
     },
   },
 ];

@@ -21,6 +21,7 @@ import type { LeadsData, PersonInput, ReminderSettings } from '../sweep/types.js
 import { importLeadsCsv, leadsSettings, leadsSyncStatus, syncLeads } from '../leads/sync.js';
 import { amSummary } from '../leads/points.js';
 import { apollo } from '../bd/apollo.js';
+import { EnrichJob, enrichProspect } from '../bd/enrich.js';
 import { autoReplyBlocker, inboxSettings, sendReply, syncInbox } from '../inbox/sync.js';
 import { buildContext, renderPrompt } from '../inbox/context.js';
 import { draftWithClaude } from '../inbox/llm.js';
@@ -1080,6 +1081,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   const BD_STATUSES: BdStatus[] = ['new', 'researching', 'contacted', 'replied', 'meeting', 'won', 'lost'];
 
   const gmail = new GmailClient(q);
+  const enrichJob = new EnrichJob(q);
 
   const bdData = (): BdData => {
     const prospects = q.listProspects(false);
@@ -1115,6 +1117,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
         new_30d: prospects.filter((p) => p.new_shop_30d).length,
         gmv_started_30d: prospects.filter((p) => p.gmv_started_30d).length,
       },
+      enrich: enrichJob.state,
     };
   };
 
@@ -1203,34 +1206,31 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   });
 
   /** Apollo people search for the prospect's company. Free (no credits). */
+  /** Resolve the company in Apollo, pull its decision makers, keep the best-ranked and reveal the top few (credits, authorised). */
   r.post('/bd/prospects/:id/find-contacts', async (req, res) => {
     const prospect = q.getProspect(idParam(req));
     if (!prospect) throw new HttpError(404, 'Prospect not found');
-    const body = (req.body ?? {}) as { domain?: string; company?: string };
-    const domain = normaliseDomain(body.domain) ?? prospect.domain;
-    const company = optText(body.company) ?? prospect.brand ?? prospect.shop_name.replace(/\b(uk|de|fr|it|es|eu|shop|store|official|deutschland|france|italia|españa|espana)\b/gi, '').trim();
+    const body = (req.body ?? {}) as { domain?: string; reveal?: number };
     try {
-      const people = await apollo.searchPeople({ domain, company, limit: 10 });
-      let revealed = 0;
-      for (const [i, p] of people.entries()) {
-        // Reveal the top matches straight away (one Apollo credit each); the rest stay masked until asked.
-        let full = p;
-        if (i < 3 && !p.email) {
-          try {
-            full = (await apollo.matchPerson({ id: p.id })) ?? p;
-            if (full.email || full.linkedin_url) revealed += 1;
-          } catch {
-            full = p;
-          }
-        }
-        q.addContact(prospect.id, { name: full.name, title: full.title, email: full.email, linkedin_url: full.linkedin_url, phone: full.phone, source: 'apollo', apollo_id: full.id, enriched: Boolean(full.email || full.linkedin_url), notes: full.organization ? `At ${full.organization}${full.email_status ? ` · email ${full.email_status}` : ''}` : null });
-      }
-      if (domain && !prospect.domain) q.patchProspect(prospect.id, { domain });
+      const r = await enrichProspect(q, prospect.id, { domain: optText(body.domain), reveal: Number.isFinite(Number(body.reveal)) ? Number(body.reveal) : undefined });
       liveEvents.emitUpdate({ kind: 'bd' });
-      res.json({ found: people.length, revealed, prospect: q.getProspect(prospect.id), ...bdData() });
+      res.json({ ...r, prospect: q.getProspect(prospect.id), ...bdData() });
     } catch (err) {
       throw new HttpError(502, (err as Error).message);
     }
+  });
+
+  /** Background job: decision makers for every prospect that has none yet. */
+  r.post('/bd/enrich-all', (req, res) => {
+    if (!apollo.configured) throw new HttpError(400, 'Set APOLLO_API_KEY in .env first.');
+    const body = (req.body ?? {}) as { reveal?: number; ids?: number[] };
+    const state = enrichJob.start({ reveal: Number.isFinite(Number(body.reveal)) ? Number(body.reveal) : undefined, ids: Array.isArray(body.ids) ? body.ids.map(Number).filter(Number.isFinite) : undefined });
+    res.status(202).json({ ...bdData(), enrich: state, candidates: enrichJob.candidates().length });
+  });
+
+  r.post('/bd/enrich-all/stop', (_req, res) => {
+    enrichJob.stop();
+    res.json(bdData());
   });
 
   /** Apollo enrichment: full name, work email, LinkedIn. Costs one credit; no confirmation (standing authorisation). */

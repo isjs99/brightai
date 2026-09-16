@@ -1019,6 +1019,7 @@ export class Queries {
       is_client: Boolean(r.is_client),
       domain: (r.domain as string | null) ?? null,
       website: (r.website as string | null) ?? null,
+      apollo_org_id: (r.apollo_org_id as string | null) ?? null,
       status: (r.status as BdProspect['status']) ?? 'new',
       owner_id: (r.owner_id as number | null) ?? null,
       owner_name: (r.owner_name as string | null) ?? null,
@@ -1129,7 +1130,7 @@ export class Queries {
   patchProspect(id: number, patch: BdProspectPatch, actor?: string | null): BdProspect | null {
     const sets: string[] = [];
     const params: Record<string, unknown> = { id, now: new Date().toISOString() };
-    const simple: (keyof BdProspectPatch)[] = ['status', 'owner_id', 'notes', 'domain', 'website', 'launched_at', 'gmv_started_at'];
+    const simple: (keyof BdProspectPatch)[] = ['status', 'owner_id', 'notes', 'domain', 'website', 'launched_at', 'gmv_started_at', 'apollo_org_id'];
     for (const k of simple) {
       if (patch[k] !== undefined) {
         sets.push(`${k} = @${k}`);

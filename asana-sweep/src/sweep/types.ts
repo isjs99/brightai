@@ -658,6 +658,7 @@ export interface BdProspect {
   is_client: boolean; // matches an account on the roster
   domain: string | null;
   website: string | null;
+  apollo_org_id: string | null;
   status: BdStatus;
   owner_id: number | null;
   owner_name: string | null;
@@ -761,6 +762,21 @@ export interface BdData {
   ingest_configured: boolean;
   last_pull_at: string | null;
   totals: { prospects: number; complete: number; won: number; with_contacts: number; new_30d: number; gmv_started_30d: number };
+  enrich: BdEnrichStatus;
+}
+
+/** Progress of the background "find decision makers for every prospect" job. */
+export interface BdEnrichStatus {
+  running: boolean;
+  total: number;
+  done: number;
+  current: string | null;
+  matched: number;
+  contacts: number;
+  revealed: number;
+  errors: string[];
+  started_at: string | null;
+  finished_at: string | null;
 }
 
 export interface BdProspectInput {
@@ -802,6 +818,7 @@ export interface BdProspectPatch {
   /** Optional note stored with an outreach tick, e.g. who was contacted and about what. */
   outreach_note?: string | null;
   outreach_contact?: string | null;
+  apollo_org_id?: string | null;
 }
 
 // ---- CS & affiliate inbox, context library, auto-reply ----

@@ -94,7 +94,7 @@ export default function BdPage() {
     if (domain === undefined) return;
     run(`find${p.id}`, async () => {
       const d = await api.findContacts(p.id, { domain: domain || undefined });
-      setNotice(d.found ? `${d.found} people found at ${p.brand ?? p.shop_name}, ${d.revealed} revealed with email / LinkedIn.` : `Apollo found nobody for ${p.brand ?? p.shop_name}. Try a website domain.`);
+      setNotice(d.found ? `${d.company ?? p.brand ?? p.shop_name}${d.domain ? ` (${d.domain})` : ''}: ${d.found} people found, ${d.kept} kept, ${d.revealed} revealed with email / LinkedIn.` : `Apollo found nobody for ${p.brand ?? p.shop_name}${d.matched ? '' : ' and could not match the company'}. Try a website domain.`);
       return d;
     });
   };
@@ -187,7 +187,7 @@ export default function BdPage() {
           )}
           {isAdmin && (
             <div className="actions" style={{ marginTop: 8 }}>
-              <button onClick={() => findContacts(p)} disabled={!data.apollo_configured || busy === `find${p.id}`} title={data.apollo_configured ? 'Search Apollo for founders, ecommerce and marketing leads (free)' : 'Set APOLLO_API_KEY in .env to search from here'}>
+              <button onClick={() => findContacts(p)} disabled={!data.apollo_configured || busy === `find${p.id}`} title={data.apollo_configured ? 'Resolve the company in Apollo, pull founders, e-commerce, TikTok and marketing leads, reveal the top four (one credit each)' : 'Set APOLLO_API_KEY in .env to search from here'}>
                 {busy === `find${p.id}` ? 'Searching Apollo…' : 'Find decision makers (Apollo)'}
               </button>
               <AddContact onAdd={(c) => run(`add${p.id}`, () => api.addContact(p.id, c), 'Contact added.')} />
@@ -225,6 +225,11 @@ export default function BdPage() {
         <div className="actions">
           <span className="badge muted" title="Most recent FastMoss pull">{data.last_pull_at ? `Pulled ${fmtRelative(data.last_pull_at)}` : 'No pull yet'}</span>
           <span className={`badge ${data.apollo_configured ? 'good' : 'muted'}`}>{data.apollo_configured ? 'Apollo connected' : 'Apollo not connected'}</span>
+          {data.enrich.running && <span className="badge accent" title={data.enrich.current ?? ''}>Enriching {data.enrich.done}/{data.enrich.total}{data.enrich.current ? ` · ${data.enrich.current}` : ''}</span>}
+          {!data.enrich.running && data.enrich.finished_at && <span className="badge muted" title={data.enrich.errors.join('\n')}>Last run: {data.enrich.matched}/{data.enrich.done} matched, {data.enrich.contacts} contacts, {data.enrich.revealed} revealed{data.enrich.errors.length ? `, ${data.enrich.errors.length} errors` : ''}</span>}
+          {isAdmin && data.apollo_configured && (data.enrich.running
+            ? <button onClick={() => run('enrich', api.stopEnrich, 'Stopping after the current prospect.')}>Stop</button>
+            : <button onClick={() => { const n = data.prospects.filter((p) => !p.is_client && p.status !== 'won' && p.status !== 'lost' && p.contacts.length === 0).length; if (n && window.confirm(`Find decision makers for ${n} prospects without contacts? Reveals the top 4 per company (about ${n * 4} Apollo credits at most). Runs in the background.`)) run('enrich', () => api.enrichAll(), `Enrichment started for ${n} prospects.`); }} disabled={busy === 'enrich'} title="Resolve each company in Apollo, pull its decision makers and reveal the top four">Find decision makers for all</button>)}
           {connected && <span className="badge muted">Live</span>}
           {isAdmin && <button onClick={() => { setShowAdd((s) => !s); setShowImport(false); }}>{showAdd ? 'Close' : '+ Prospect'}</button>}
           {isAdmin && <button onClick={() => { setShowImport((s) => !s); setShowAdd(false); }}>{showImport ? 'Close' : 'Import pull'}</button>}
