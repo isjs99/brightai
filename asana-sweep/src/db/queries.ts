@@ -11,6 +11,7 @@ import type {
   GmvMaxPatch,
   GmvMaxRow,
   GmvSync,
+  Lead,
   Promotion,
   PromotionInput,
   PromotionTarget,
@@ -24,6 +25,7 @@ import type {
   RunItemAction,
   RunStatus,
 } from '../sweep/types.js';
+import { isSignedStage, leadKey, matchPerson, type SheetLead } from '../leads/sheet.js';
 
 type Row = Record<string, unknown>;
 
@@ -861,4 +863,95 @@ export class Queries {
   failStaleGmvSyncs(): void {
     this.db.prepare(`UPDATE gmv_syncs SET status = 'error', finished_at = ?, error_message = 'Process restarted during sync.' WHERE status = 'running'`).run(new Date().toISOString());
   }
+  // ---- Leads ----
+
+  private rowToLead(r: Row): Lead {
+    return {
+      id: r.id as number,
+      name: r.name as string,
+      poc: (r.poc as string | null) ?? null,
+      stage: (r.stage as string | null) ?? null,
+      country: (r.country as string | null) ?? null,
+      last_contact: (r.last_contact as string | null) ?? null,
+      notes: (r.notes as string | null) ?? null,
+      est_value: (r.est_value as number | null) ?? null,
+      priority: (r.priority as string | null) ?? null,
+      row_no: (r.row_no as number | null) ?? null,
+      sourced_by_id: (r.sourced_by_id as number | null) ?? null,
+      sourced_by_name: (r.sourced_by_name as string | null) ?? null,
+      onboarding_id: (r.onboarding_id as number | null) ?? null,
+      onboarding_name: (r.onboarding_name as string | null) ?? null,
+      signed: Boolean(r.signed),
+      signed_at: (r.signed_at as string | null) ?? null,
+      first_seen_at: r.first_seen_at as string,
+      last_seen_at: r.last_seen_at as string,
+      removed_at: (r.removed_at as string | null) ?? null,
+      updated_at: r.updated_at as string,
+    };
+  }
+
+  private static LEAD_SELECT = `SELECT l.*, s.name AS sourced_by_name, o.name AS onboarding_name FROM leads l LEFT JOIN people s ON s.id = l.sourced_by_id LEFT JOIN people o ON o.id = l.onboarding_id`;
+
+  listLeads(includeRemoved = false): Lead[] {
+    const where = includeRemoved ? '' : 'WHERE l.removed_at IS NULL';
+    return this.db.prepare(`${Queries.LEAD_SELECT} ${where} ORDER BY l.row_no, l.name COLLATE NOCASE`).all().map((r) => this.rowToLead(r as Row));
+  }
+
+  getLead(id: number): Lead | null {
+    const r = this.db.prepare(`${Queries.LEAD_SELECT} WHERE l.id = ?`).get(id) as Row | undefined;
+    return r ? this.rowToLead(r) : null;
+  }
+
+  /**
+   * Mirror the sheet: update or insert every row, mark rows that vanished as removed, and stamp
+   * signed_at the first time a stage flips to signed. Sourced-by / onboarding set in the dashboard
+   * survive syncs; a "Sourced By" / "Onboarding AM" column in the sheet fills them when it can be
+   * matched to a team member.
+   */
+  upsertLeads(rows: SheetLead[], now = new Date().toISOString()): { added: number; updated: number; removed: number; newly_signed: string[] } {
+    const people = this.listPeople();
+    const existing = new Map<string, Row>();
+    for (const r of this.db.prepare('SELECT * FROM leads').all() as Row[]) existing.set(r.key as string, r);
+    const insert = this.db.prepare(`INSERT INTO leads (key, name, poc, stage, country, last_contact, notes, est_value, priority, row_no, sourced_by_id, onboarding_id, signed, signed_at, first_seen_at, last_seen_at, updated_at)
+      VALUES (@key, @name, @poc, @stage, @country, @last_contact, @notes, @est_value, @priority, @row_no, @sourced_by_id, @onboarding_id, @signed, @signed_at, @now, @now, @now)`);
+    const update = this.db.prepare(`UPDATE leads SET name = @name, poc = @poc, stage = @stage, country = @country, last_contact = @last_contact, notes = @notes, est_value = @est_value, priority = @priority, row_no = @row_no,
+      sourced_by_id = @sourced_by_id, onboarding_id = @onboarding_id, signed = @signed, signed_at = @signed_at, last_seen_at = @now, removed_at = NULL, updated_at = CASE WHEN @changed THEN @now ELSE updated_at END WHERE id = @id`);
+    const result = { added: 0, updated: 0, removed: 0, newly_signed: [] as string[] };
+    this.db.transaction(() => {
+      const seen = new Set<string>();
+      for (const row of rows) {
+        const key = leadKey(row.name);
+        seen.add(key);
+        const signed = isSignedStage(row.stage) ? 1 : 0;
+        const prev = existing.get(key);
+        const sourced = matchPerson(row.sourced_by, people)?.id ?? (prev?.sourced_by_id as number | null) ?? null;
+        const onboarding = matchPerson(row.onboarding, people)?.id ?? (prev?.onboarding_id as number | null) ?? null;
+        if (!prev) {
+          insert.run({ key, ...row, sourced_by_id: sourced, onboarding_id: onboarding, signed, signed_at: signed ? now : null, now });
+          result.added += 1;
+          if (signed) result.newly_signed.push(row.name);
+          continue;
+        }
+        const wasSigned = Boolean(prev.signed);
+        const signedAt = signed ? ((prev.signed_at as string | null) ?? now) : null;
+        const fields: (keyof SheetLead)[] = ['name', 'poc', 'stage', 'country', 'last_contact', 'notes', 'est_value', 'priority'];
+        const changed = fields.some((f) => (prev[f] ?? null) !== (row[f] ?? null)) || prev.sourced_by_id !== sourced || prev.onboarding_id !== onboarding || wasSigned !== Boolean(signed) || prev.removed_at !== null;
+        update.run({ id: prev.id, ...row, sourced_by_id: sourced, onboarding_id: onboarding, signed, signed_at: signedAt, now, changed: changed ? 1 : 0 });
+        if (changed) result.updated += 1;
+        if (signed && !wasSigned) result.newly_signed.push(row.name);
+      }
+      const remove = this.db.prepare('UPDATE leads SET removed_at = ?, updated_at = ? WHERE key = ? AND removed_at IS NULL');
+      for (const [key, r] of existing) if (!seen.has(key) && r.removed_at === null) result.removed += remove.run(now, now, key).changes;
+    })();
+    return result;
+  }
+
+  patchLead(id: number, patch: { sourced_by_id?: number | null; onboarding_id?: number | null }): Lead | null {
+    const sets: string[] = [];
+    if (patch.sourced_by_id !== undefined) sets.push('sourced_by_id = @sourced_by_id');
+    if (patch.onboarding_id !== undefined) sets.push('onboarding_id = @onboarding_id');
+    if (sets.length) this.db.prepare(`UPDATE leads SET ${sets.join(', ')}, updated_at = @now WHERE id = @id`).run({ ...patch, id, now: new Date().toISOString() });
+    return this.getLead(id);
+  }
+
 }

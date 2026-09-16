@@ -5,6 +5,7 @@ import { config } from '../config.js';
 import { runRule } from '../sweep/runner.js';
 import { runAllChecks } from '../checklist/checker.js';
 import { syncGmv } from '../gmv/sync.js';
+import { LeadsWatcher } from '../leads/sync.js';
 import type { Rule } from '../sweep/types.js';
 import { nextRun } from './describe.js';
 
@@ -19,8 +20,11 @@ export class Scheduler {
   private reminderTask: ScheduledTask | null = null;
   private gmvTask: ScheduledTask | null = null;
   private gmvMonthlyTask: ScheduledTask | null = null;
+  readonly leads: LeadsWatcher;
 
-  constructor(private q: Queries) {}
+  constructor(private q: Queries) {
+    this.leads = new LeadsWatcher(q);
+  }
 
   start(): void {
     for (const rule of this.q.listRules()) this.register(rule);
@@ -33,6 +37,7 @@ export class Scheduler {
     this.q.pruneChecks(config.runRetentionDays);
     this.q.pruneCompletions(config.runRetentionDays);
     this.reloadCheckSchedule();
+    this.leads.start();
     log.info(`Scheduler started with ${this.tasks.size} active rule(s)`);
   }
 
@@ -102,6 +107,7 @@ export class Scheduler {
   }
 
   stop(): void {
+    this.leads.stop();
     for (const [id, task] of this.tasks) {
       task.destroy();
       this.tasks.delete(id);

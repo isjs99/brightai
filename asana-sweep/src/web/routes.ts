@@ -17,7 +17,9 @@ import { authorizationUrl, tts } from '../tts/client.js';
 import { deactivatePromotion, pushPromotion, shopCredentials, syncPromotion } from '../tts/promotions.js';
 import { currencyForMarket, marketFromRegion, marketsOf } from '../tts/markets.js';
 import type { GmvMaxPatch, PromotionInput, TtsStatus } from '../sweep/types.js';
-import type { PersonInput, ReminderSettings } from '../sweep/types.js';
+import type { LeadsData, PersonInput, ReminderSettings } from '../sweep/types.js';
+import { importLeadsCsv, leadsSettings, leadsSyncStatus, syncLeads } from '../leads/sync.js';
+import { amSummary } from '../leads/points.js';
 import type { AuthProvider } from './auth.js';
 import { requireAdminForWrites, requireAuth, SharedPasswordAuth } from './auth.js';
 import { config } from '../config.js';
@@ -963,6 +965,87 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (status === 500) console.error(err);
     else if (status === 502) console.warn(`Asana error on ${_req.method} ${_req.path}: ${message}`);
     res.status(status).json({ error: message });
+  });
+
+  // ---- Leads (lead sheet sync, sourced-by / onboarding, AM points) ----
+
+  const leadsData = (): LeadsData => {
+    const settings = leadsSettings(q);
+    const people = q.listPeople();
+    const leads = q.listLeads(false);
+    const signed = leads.filter((l) => l.signed);
+    const staged = leads.filter((l) => l.stage);
+    return {
+      leads,
+      ams: amSummary(leads, people, settings),
+      people,
+      settings,
+      sync: leadsSyncStatus(q),
+      stages: [...new Set(leads.map((l) => l.stage).filter((s): s is string => Boolean(s)))].sort(),
+      countries: [...new Set(leads.map((l) => l.country).filter((s): s is string => Boolean(s)))].sort(),
+      totals: {
+        leads: leads.length,
+        signed: signed.length,
+        open: leads.length - signed.length,
+        pipeline_value: leads.filter((l) => !l.signed).reduce((s, l) => s + (l.est_value ?? 0), 0),
+        signed_value: signed.reduce((s, l) => s + (l.est_value ?? 0), 0),
+        close_rate: staged.length ? signed.length / staged.length : null,
+      },
+    };
+  };
+
+  r.get('/leads', (_req, res) => res.json(leadsData()));
+
+  r.patch('/leads/:id', (req, res) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const person = (v: unknown): number | null | undefined => {
+      if (v === undefined) return undefined;
+      if (v === null || v === '' || v === 0) return null;
+      const id = Number(v);
+      if (!Number.isInteger(id) || !q.getPerson(id)) throw new HttpError(400, 'Unknown team member');
+      return id;
+    };
+    const lead = q.patchLead(idParam(req), { sourced_by_id: person(body.sourced_by_id), onboarding_id: person(body.onboarding_id) });
+    if (!lead) throw new HttpError(404, 'Lead not found');
+    liveEvents.emitUpdate({ kind: 'leads' });
+    res.json({ lead, ...leadsData() });
+  });
+
+  r.post('/leads/sync', async (_req, res) => {
+    const result = await syncLeads(q);
+    if (!result.ok) return res.status(502).json({ error: result.error, ...leadsData() });
+    res.json({ result, ...leadsData() });
+  });
+
+  /** Manual fallback: paste the CSV export of the sheet. */
+  r.post('/leads/import', (req, res) => {
+    const csv = String((req.body ?? {}).csv ?? '');
+    if (!csv.trim()) throw new HttpError(400, 'Paste the CSV first.');
+    try {
+      const result = importLeadsCsv(q, csv, 'import');
+      res.json({ result, ...leadsData() });
+    } catch (err) {
+      throw new HttpError(400, (err as Error).message);
+    }
+  });
+
+  r.put('/leads/settings', (req, res) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    if (body.sheet_id !== undefined) {
+      // Accept a pasted URL or a bare id.
+      const raw = String(body.sheet_id).trim();
+      const m = raw.match(/\/d\/([a-zA-Z0-9_-]{20,})/);
+      q.setSetting('leads_sheet_id', m ? m[1] : raw);
+    }
+    if (body.sheet_tab !== undefined) q.setSetting('leads_sheet_tab', String(body.sheet_tab).trim() || 'Core Lead List');
+    if (body.sync_enabled !== undefined) q.setSetting('leads_sync_enabled', body.sync_enabled ? '1' : '0');
+    if (body.sync_seconds !== undefined) q.setSetting('leads_sync_seconds', String(Math.max(30, int(body.sync_seconds, 180))));
+    if (body.points_signed !== undefined) q.setSetting('leads_points_signed', String(Math.max(0, Number(body.points_signed) || 0)));
+    if (body.points_sourced !== undefined) q.setSetting('leads_points_sourced', String(Math.max(0, Number(body.points_sourced) || 0)));
+    if (body.currency !== undefined) q.setSetting('leads_currency', String(body.currency).trim().toUpperCase() || 'GBP');
+    scheduler.leads.start();
+    liveEvents.emitUpdate({ kind: 'settings' });
+    res.json(leadsData());
   });
 
   return r;

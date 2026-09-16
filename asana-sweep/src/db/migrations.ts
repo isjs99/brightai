@@ -488,6 +488,45 @@ const migrations: Migration[] = [
       db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('tts_service_id', '')`).run();
     },
   },
+  {
+    version: 10,
+    name: 'leads synced from the lead sheet',
+    up(db) {
+      db.exec(`
+        CREATE TABLE leads (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          key TEXT NOT NULL UNIQUE,
+          name TEXT NOT NULL,
+          poc TEXT,
+          stage TEXT,
+          country TEXT,
+          last_contact TEXT,
+          notes TEXT,
+          est_value REAL,
+          priority TEXT,
+          row_no INTEGER,
+          sourced_by_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+          onboarding_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+          signed INTEGER NOT NULL DEFAULT 0,
+          signed_at TEXT,
+          first_seen_at TEXT NOT NULL,
+          last_seen_at TEXT NOT NULL,
+          removed_at TEXT,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX leads_onboarding ON leads(onboarding_id);
+        CREATE INDEX leads_sourced ON leads(sourced_by_id);
+      `);
+      const set = db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`);
+      set.run('leads_sheet_id', '1iQ4bgteIU07h8j3rll6bM7wJkq1x52BZeqTVRD97FRA');
+      set.run('leads_sheet_tab', 'Core Lead List');
+      set.run('leads_sync_enabled', '1');
+      set.run('leads_sync_seconds', '180');
+      set.run('leads_points_signed', '1');
+      set.run('leads_points_sourced', '1');
+      set.run('leads_currency', 'GBP');
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

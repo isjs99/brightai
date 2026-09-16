@@ -530,3 +530,72 @@ export interface GradesData {
   ams: GradeRow[];
   accounts: GradeRow[];
 }
+
+// ---- Leads (synced from the lead sheet) ----
+
+export interface Lead {
+  id: number;
+  name: string;
+  poc: string | null;
+  stage: string | null;
+  country: string | null;
+  last_contact: string | null;
+  notes: string | null;
+  est_value: number | null;
+  priority: string | null;
+  row_no: number | null;
+  sourced_by_id: number | null;
+  sourced_by_name: string | null;
+  onboarding_id: number | null;
+  onboarding_name: string | null;
+  signed: boolean;
+  signed_at: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  removed_at: string | null;
+  updated_at: string;
+}
+
+export interface LeadAmRow {
+  person_id: number;
+  name: string;
+  role: 'am' | 'aa';
+  onboarding_total: number;
+  onboarding_signed: number;
+  sourced_total: number;
+  sourced_signed: number;
+  points: number;
+  signed_value: number;
+  pipeline_value: number;
+}
+
+export interface LeadsSettings {
+  sheet_id: string;
+  sheet_tab: string;
+  sync_enabled: boolean;
+  sync_seconds: number;
+  points_signed: number;
+  points_sourced: number;
+  currency: string;
+  csv_url: string; // what the server actually fetches
+  csv_url_from_env: boolean;
+}
+
+export interface LeadsSyncStatus {
+  last_sync_at: string | null;
+  status: 'ok' | 'error' | 'never';
+  error: string | null;
+  rows: number;
+  columns: string[];
+}
+
+export interface LeadsData {
+  leads: Lead[];
+  ams: LeadAmRow[];
+  people: Person[];
+  settings: LeadsSettings;
+  sync: LeadsSyncStatus;
+  stages: string[];
+  countries: string[];
+  totals: { leads: number; signed: number; open: number; pipeline_value: number; signed_value: number; close_rate: number | null };
+}
