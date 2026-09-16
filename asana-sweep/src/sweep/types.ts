@@ -399,6 +399,113 @@ export interface GmvSync {
   error_message: string | null;
 }
 
+// ---- TikTok Shop, promotions, GMV Max ----
+
+export interface TtsShopRow {
+  id: string;
+  name: string;
+  region: string;
+  seller_type: string;
+  cipher: string;
+  account_id: number | null;
+  market: string | null;
+  seller_name: string | null;
+  access_expires_at: number;
+  refresh_expires_at: number;
+  authorized_at: string;
+  token_ok: boolean;
+}
+
+export interface TtsStatus {
+  configured: boolean;
+  service_id: string;
+  authorize_url: string | null;
+  callback_url: string;
+  shops: TtsShopRow[];
+}
+
+export type ActivityType = 'DIRECT_DISCOUNT' | 'FIXED_PRICE' | 'FLASHSALE' | 'SHIPPING_DISCOUNT';
+export type ProductLevel = 'SHOP' | 'PRODUCT' | 'VARIATION';
+export type TargetStatus = 'planned' | 'pushed' | 'live' | 'ended' | 'deactivated' | 'error' | 'unlinked';
+
+export interface PromotionTarget {
+  id: number;
+  promotion_id: number;
+  account_id: number;
+  account_name: string;
+  market: string;
+  tts_shop_id: string | null;
+  tts_shop_name: string | null;
+  status: TargetStatus;
+  tts_activity_id: string | null;
+  tts_status: string | null;
+  error_message: string | null;
+  pushed_at: string | null;
+}
+
+export interface Promotion {
+  id: number;
+  name: string;
+  activity_type: ActivityType;
+  product_level: ProductLevel;
+  discount_type: 'PERCENTAGE_OFF' | 'AMOUNT_OFF' | 'FIXED_PRICE';
+  discount_value: number | null;
+  begin_at: string;
+  end_at: string;
+  participation: 'BUYER_NO_LIMIT' | 'BUYER_LIMIT_ONLY_ONE';
+  /** Product ids per TikTok shop id, for PRODUCT / VARIATION level. */
+  products: Record<string, string[]>;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  targets: PromotionTarget[];
+}
+
+export interface PromotionInput {
+  name: string;
+  activity_type: ActivityType;
+  product_level: ProductLevel;
+  discount_type: Promotion['discount_type'];
+  discount_value: number | null;
+  begin_at: string;
+  end_at: string;
+  participation: Promotion['participation'];
+  products: Record<string, string[]>;
+  notes: string | null;
+  targets: { account_id: number; market: string }[];
+}
+
+export interface GmvMaxRow {
+  id: number;
+  account_id: number;
+  account_name: string;
+  am_name: string | null;
+  market: string;
+  campaign_type: 'PRODUCT' | 'LIVE';
+  campaign_name: string | null;
+  daily_budget: number | null;
+  budget_currency: string;
+  bid_strategy: 'MAX_GMV' | 'TARGET_ROI';
+  target_roi: number | null;
+  status: 'planned' | 'active' | 'paused';
+  product_scope: string;
+  notes: string | null;
+  tts_campaign_id: string | null;
+  last_pushed_at: string | null;
+  updated_at: string;
+}
+
+export interface GmvMaxPatch {
+  campaign_name?: string | null;
+  daily_budget?: number | null;
+  bid_strategy?: 'MAX_GMV' | 'TARGET_ROI';
+  target_roi?: number | null;
+  status?: 'planned' | 'active' | 'paused';
+  product_scope?: string;
+  notes?: string | null;
+}
+
 // ---- Grading ----
 
 export type Grade = 'A' | 'B' | 'C' | 'D' | 'F';

@@ -13,6 +13,10 @@ import type { LiveWatcher } from '../live/index.js';
 import { buildCalendar, buildGmv, buildGrades } from '../reports/index.js';
 import { syncGmv } from '../gmv/sync.js';
 import { currencyForShop } from '../gmv/currency.js';
+import { authorizationUrl, tts } from '../tts/client.js';
+import { deactivatePromotion, pushPromotion, shopCredentials, syncPromotion } from '../tts/promotions.js';
+import { currencyForMarket, marketFromRegion, marketsOf } from '../tts/markets.js';
+import type { GmvMaxPatch, PromotionInput, TtsStatus } from '../sweep/types.js';
 import type { PersonInput, ReminderSettings } from '../sweep/types.js';
 import type { AuthProvider } from './auth.js';
 import { requireAdminForWrites, requireAuth, SharedPasswordAuth } from './auth.js';
@@ -681,6 +685,189 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   r.delete('/gmv/shops/:id', (req, res) => {
     if (!q.removeShop(idParam(req))) throw new HttpError(404, 'Shop not found');
     res.json({ ok: true });
+  });
+
+  // ---- TikTok Shop connection ----
+  const ttsStatus = (): TtsStatus => {
+    const serviceId = q.getSetting('tts_service_id', '');
+    return {
+      configured: tts.configured,
+      service_id: serviceId,
+      authorize_url: serviceId ? authorizationUrl(serviceId, 'am-ops') : null,
+      callback_url: `${config.publicUrl}/api/tts/callback`,
+      shops: q.listTtsShops(),
+    };
+  };
+
+  r.get('/tts/status', (_req, res) => res.json(ttsStatus()));
+
+  r.put('/tts/settings', (req, res) => {
+    q.setSetting('tts_service_id', String((req.body ?? {}).service_id ?? '').trim());
+    res.json(ttsStatus());
+  });
+
+  /** Seller lands here after authorising the app. Exchange the code and store every shop it covers. */
+  r.get('/tts/callback', async (req, res) => {
+    const code = String(req.query.code ?? req.query.auth_code ?? '');
+    if (!code) throw new HttpError(400, 'Missing auth code in the callback.');
+    if (!tts.configured) throw new HttpError(400, 'TTS_APP_KEY / TTS_APP_SECRET are not set.');
+    const tokens = await tts.exchangeCode(code);
+    const shops = await tts.authorizedShops(tokens.access_token);
+    for (const s of shops) q.upsertTtsShop({ id: s.id, name: s.name, region: s.region, seller_type: s.seller_type, cipher: s.cipher, seller_name: tokens.seller_name ?? null }, tokens);
+    // Auto-link by name when an account matches (e.g. "Kijimea UK" → Kijimea, UK).
+    for (const s of shops) {
+      const market = marketFromRegion(s.region);
+      const acc = q.listAccounts().find((a) => s.name.toLowerCase().startsWith(a.name.toLowerCase()));
+      if (acc && !q.getTtsShop(s.id)?.account_id) q.linkTtsShop(s.id, acc.id, market);
+    }
+    res.redirect('/promotions?authorised=' + shops.length);
+  });
+
+  r.put('/tts/shops/:id/link', (req, res) => {
+    const shop = q.getTtsShop(String(req.params.id));
+    if (!shop) throw new HttpError(404, 'Shop not found');
+    const body = (req.body ?? {}) as { account_id?: unknown; market?: unknown };
+    const accountId = body.account_id === null || body.account_id === '' ? null : Number(body.account_id);
+    if (accountId !== null && !q.getAccount(accountId)) throw new HttpError(404, 'Account not found');
+    const market = String(body.market ?? '').trim().toUpperCase() || null;
+    q.linkTtsShop(shop.id, accountId, market);
+    res.json(ttsStatus());
+  });
+
+  r.delete('/tts/shops/:id', (req, res) => {
+    if (!q.deleteTtsShop(String(req.params.id))) throw new HttpError(404, 'Shop not found');
+    res.json(ttsStatus());
+  });
+
+  r.get('/tts/shops/:id/products', async (req, res) => {
+    const creds = await shopCredentials(q, String(req.params.id));
+    const out: { id: string; title: string; status: string }[] = [];
+    let token = '';
+    for (let i = 0; i < 5; i++) {
+      const page = await tts.searchProducts(creds, token);
+      out.push(...(page.products ?? []).map((p) => ({ id: p.id, title: p.title, status: p.status })));
+      if (!page.next_page_token) break;
+      token = page.next_page_token;
+    }
+    res.json({ products: out });
+  });
+
+  // ---- Promotions ----
+  const parsePromotion = (body: Record<string, unknown>): PromotionInput => {
+    const name = String(body.name ?? '').trim();
+    if (!name) throw new HttpError(400, 'Promotion name is required.');
+    const activity_type = String(body.activity_type ?? 'DIRECT_DISCOUNT') as PromotionInput['activity_type'];
+    if (!['DIRECT_DISCOUNT', 'FIXED_PRICE', 'FLASHSALE', 'SHIPPING_DISCOUNT'].includes(activity_type)) throw new HttpError(400, 'Unknown activity type.');
+    const product_level = String(body.product_level ?? 'SHOP') as PromotionInput['product_level'];
+    if (!['SHOP', 'PRODUCT', 'VARIATION'].includes(product_level)) throw new HttpError(400, 'Unknown product level.');
+    const discount_type = String(body.discount_type ?? 'PERCENTAGE_OFF') as PromotionInput['discount_type'];
+    const discount_value = body.discount_value === null || body.discount_value === '' || body.discount_value === undefined ? null : Number(body.discount_value);
+    if (discount_value !== null && (!Number.isFinite(discount_value) || discount_value < 0)) throw new HttpError(400, 'Discount must be a positive number.');
+    const begin_at = String(body.begin_at ?? '');
+    const end_at = String(body.end_at ?? '');
+    if (Number.isNaN(Date.parse(begin_at)) || Number.isNaN(Date.parse(end_at))) throw new HttpError(400, 'Start and end must be valid dates.');
+    if (Date.parse(end_at) <= Date.parse(begin_at)) throw new HttpError(400, 'End must be after start.');
+    const targets = Array.isArray(body.targets) ? (body.targets as { account_id: unknown; market: unknown }[]) : [];
+    const cleanTargets = targets
+      .map((t) => ({ account_id: Number(t.account_id), market: String(t.market ?? '').trim().toUpperCase() }))
+      .filter((t) => Number.isInteger(t.account_id) && /^[A-Z]{2}$/.test(t.market));
+    if (!cleanTargets.length) throw new HttpError(400, 'Pick at least one account and market.');
+    const products = (body.products && typeof body.products === 'object' ? body.products : {}) as Record<string, unknown>;
+    const cleanProducts: Record<string, string[]> = {};
+    for (const [shop, ids] of Object.entries(products)) if (Array.isArray(ids)) cleanProducts[shop] = ids.map(String).filter(Boolean);
+    return {
+      name,
+      activity_type,
+      product_level,
+      discount_type,
+      discount_value,
+      begin_at: new Date(begin_at).toISOString(),
+      end_at: new Date(end_at).toISOString(),
+      participation: body.participation === 'BUYER_LIMIT_ONLY_ONE' ? 'BUYER_LIMIT_ONLY_ONE' : 'BUYER_NO_LIMIT',
+      products: cleanProducts,
+      notes: optText(body.notes),
+      targets: cleanTargets,
+    };
+  };
+
+  r.get('/promotions', (_req, res) => res.json({ promotions: q.listPromotions(), tts: ttsStatus() }));
+  r.post('/promotions', (req, res) => res.status(201).json({ promotion: q.createPromotion(parsePromotion(req.body ?? {}), 'admin') }));
+  r.put('/promotions/:id', (req, res) => {
+    const p = q.updatePromotion(idParam(req), parsePromotion(req.body ?? {}));
+    if (!p) throw new HttpError(404, 'Promotion not found');
+    res.json({ promotion: p });
+  });
+  r.delete('/promotions/:id', (req, res) => {
+    if (!q.deletePromotion(idParam(req))) throw new HttpError(404, 'Promotion not found');
+    res.json({ ok: true });
+  });
+  r.post('/promotions/:id/push', async (req, res) => {
+    if (!tts.configured) throw new HttpError(400, 'TikTok Shop app is not configured (TTS_APP_KEY / TTS_APP_SECRET).');
+    res.json({ promotion: await pushPromotion(q, idParam(req)) });
+  });
+  r.post('/promotions/:id/deactivate', async (req, res) => res.json({ promotion: await deactivatePromotion(q, idParam(req)) }));
+  r.post('/promotions/:id/sync', async (req, res) => res.json({ promotion: await syncPromotion(q, idParam(req)) }));
+
+  // ---- GMV Max settings ----
+  r.get('/gmv-max', (_req, res) => res.json({ rows: q.listGmvMax() }));
+
+  /** One row per account × market × campaign type, from the roster's markets. */
+  r.post('/gmv-max/generate', (req, res) => {
+    const types = ((req.body ?? {}).types as string[] | undefined) ?? ['PRODUCT'];
+    let n = 0;
+    for (const a of q.listAccounts().filter((x) => x.enabled)) {
+      for (const m of marketsOf(a.markets)) {
+        for (const t of types) {
+          if (t !== 'PRODUCT' && t !== 'LIVE') continue;
+          q.ensureGmvMaxRow(a.id, m, t, currencyForMarket(m));
+          n += 1;
+        }
+      }
+    }
+    res.json({ rows: q.listGmvMax(), ensured: n });
+  });
+
+  r.post('/gmv-max', (req, res) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const accountId = Number(body.account_id);
+    const market = String(body.market ?? '').trim().toUpperCase();
+    const type = body.campaign_type === 'LIVE' ? 'LIVE' : 'PRODUCT';
+    if (!q.getAccount(accountId)) throw new HttpError(404, 'Account not found');
+    if (!/^[A-Z]{2}$/.test(market)) throw new HttpError(400, 'Market must be a 2-letter code.');
+    q.ensureGmvMaxRow(accountId, market, type, currencyForMarket(market));
+    res.status(201).json({ rows: q.listGmvMax() });
+  });
+
+  r.put('/gmv-max/bulk', (req, res) => {
+    const body = (req.body ?? {}) as { ids?: unknown; patch?: Record<string, unknown> };
+    const ids = Array.isArray(body.ids) ? body.ids.map(Number).filter(Number.isInteger) : [];
+    const p = body.patch ?? {};
+    const patch: GmvMaxPatch = {};
+    if ('campaign_name' in p) patch.campaign_name = optText(p.campaign_name);
+    if ('daily_budget' in p) {
+      const n = p.daily_budget === null || p.daily_budget === '' ? null : Number(p.daily_budget);
+      if (n !== null && (!Number.isFinite(n) || n < 0)) throw new HttpError(400, 'Daily budget must be a positive number.');
+      patch.daily_budget = n;
+    }
+    if ('target_roi' in p) {
+      const n = p.target_roi === null || p.target_roi === '' ? null : Number(p.target_roi);
+      if (n !== null && (!Number.isFinite(n) || n < 0)) throw new HttpError(400, 'Target ROI must be a positive number.');
+      patch.target_roi = n;
+    }
+    if ('bid_strategy' in p) patch.bid_strategy = p.bid_strategy === 'TARGET_ROI' ? 'TARGET_ROI' : 'MAX_GMV';
+    if ('status' in p) {
+      if (!['planned', 'active', 'paused'].includes(String(p.status))) throw new HttpError(400, 'Bad status.');
+      patch.status = String(p.status) as GmvMaxPatch['status'];
+    }
+    if ('product_scope' in p) patch.product_scope = String(p.product_scope ?? 'ALL').trim() || 'ALL';
+    if ('notes' in p) patch.notes = optText(p.notes);
+    const changed = q.patchGmvMax(ids, patch);
+    res.json({ changed, rows: q.listGmvMax() });
+  });
+
+  r.delete('/gmv-max/:id', (req, res) => {
+    if (!q.deleteGmvMax(idParam(req))) throw new HttpError(404, 'Row not found');
+    res.json({ rows: q.listGmvMax() });
   });
 
   // ---- Grades ----

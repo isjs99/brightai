@@ -412,6 +412,82 @@ const migrations: Migration[] = [
       db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('am_share_pct', '10')`).run();
     },
   },
+  {
+    version: 9,
+    name: 'tiktok shop authorisations, promotions, gmv max settings',
+    up(db) {
+      db.exec(`
+        CREATE TABLE tts_shops (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          region TEXT NOT NULL DEFAULT '',
+          seller_type TEXT NOT NULL DEFAULT '',
+          cipher TEXT NOT NULL DEFAULT '',
+          account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+          market TEXT,
+          access_token TEXT NOT NULL,
+          refresh_token TEXT NOT NULL,
+          access_expires_at INTEGER NOT NULL DEFAULT 0,
+          refresh_expires_at INTEGER NOT NULL DEFAULT 0,
+          seller_name TEXT,
+          authorized_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE promotions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          activity_type TEXT NOT NULL DEFAULT 'DIRECT_DISCOUNT',
+          product_level TEXT NOT NULL DEFAULT 'SHOP',
+          discount_type TEXT NOT NULL DEFAULT 'PERCENTAGE_OFF',
+          discount_value REAL,
+          begin_at TEXT NOT NULL,
+          end_at TEXT NOT NULL,
+          participation TEXT NOT NULL DEFAULT 'BUYER_NO_LIMIT',
+          products TEXT NOT NULL DEFAULT '{}',
+          notes TEXT,
+          created_by TEXT,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+
+        CREATE TABLE promotion_targets (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          promotion_id INTEGER NOT NULL REFERENCES promotions(id) ON DELETE CASCADE,
+          account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          market TEXT NOT NULL,
+          tts_shop_id TEXT,
+          status TEXT NOT NULL DEFAULT 'planned',
+          tts_activity_id TEXT,
+          tts_status TEXT,
+          error_message TEXT,
+          pushed_at TEXT,
+          updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          UNIQUE(promotion_id, account_id, market)
+        );
+
+        CREATE TABLE gmv_max_settings (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          market TEXT NOT NULL,
+          campaign_type TEXT NOT NULL DEFAULT 'PRODUCT',
+          campaign_name TEXT,
+          daily_budget REAL,
+          budget_currency TEXT NOT NULL DEFAULT 'EUR',
+          bid_strategy TEXT NOT NULL DEFAULT 'MAX_GMV',
+          target_roi REAL,
+          status TEXT NOT NULL DEFAULT 'planned',
+          product_scope TEXT NOT NULL DEFAULT 'ALL',
+          notes TEXT,
+          tts_campaign_id TEXT,
+          last_pushed_at TEXT,
+          updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          UNIQUE(account_id, market, campaign_type)
+        );
+      `);
+      db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('tts_service_id', '')`).run();
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

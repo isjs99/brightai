@@ -8,7 +8,13 @@ import type {
   CheckStatus,
   CheckWithItems,
   Completion,
+  GmvMaxPatch,
+  GmvMaxRow,
   GmvSync,
+  Promotion,
+  PromotionInput,
+  PromotionTarget,
+  TtsShopRow,
   Person,
   PersonInput,
   Rule,
@@ -423,6 +429,245 @@ export class Queries {
 
   deleteRun(id: number): void {
     this.db.prepare('DELETE FROM runs WHERE id = ?').run(id);
+  }
+
+  // ---- TikTok Shop authorisations ----
+
+  private rowToTtsShop(r: Row): TtsShopRow & { access_token: string; refresh_token: string } {
+    const now = Math.floor(Date.now() / 1000);
+    return {
+      id: r.id as string,
+      name: r.name as string,
+      region: (r.region as string) ?? '',
+      seller_type: (r.seller_type as string) ?? '',
+      cipher: (r.cipher as string) ?? '',
+      account_id: (r.account_id as number | null) ?? null,
+      market: (r.market as string | null) ?? null,
+      seller_name: (r.seller_name as string | null) ?? null,
+      access_expires_at: Number(r.access_expires_at ?? 0),
+      refresh_expires_at: Number(r.refresh_expires_at ?? 0),
+      authorized_at: r.authorized_at as string,
+      token_ok: Number(r.refresh_expires_at ?? 0) === 0 || Number(r.refresh_expires_at) > now,
+      access_token: r.access_token as string,
+      refresh_token: r.refresh_token as string,
+    };
+  }
+
+  listTtsShops(): TtsShopRow[] {
+    return this.db.prepare('SELECT * FROM tts_shops ORDER BY name').all().map((r) => {
+      const { access_token: _a, refresh_token: _b, ...rest } = this.rowToTtsShop(r as Row);
+      return rest;
+    });
+  }
+
+  getTtsShop(id: string): (TtsShopRow & { access_token: string; refresh_token: string }) | null {
+    const r = this.db.prepare('SELECT * FROM tts_shops WHERE id = ?').get(id) as Row | undefined;
+    return r ? this.rowToTtsShop(r) : null;
+  }
+
+  upsertTtsShop(shop: { id: string; name: string; region: string; seller_type: string; cipher: string; seller_name?: string | null }, tokens: { access_token: string; refresh_token: string; access_token_expire_in: number; refresh_token_expire_in: number }): void {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `INSERT INTO tts_shops (id, name, region, seller_type, cipher, seller_name, access_token, refresh_token, access_expires_at, refresh_expires_at, authorized_at, updated_at, market)
+         VALUES (@id, @name, @region, @seller_type, @cipher, @seller_name, @access_token, @refresh_token, @access_expires_at, @refresh_expires_at, @now, @now, @market)
+         ON CONFLICT(id) DO UPDATE SET name=excluded.name, region=excluded.region, seller_type=excluded.seller_type, cipher=excluded.cipher,
+           seller_name=excluded.seller_name, access_token=excluded.access_token, refresh_token=excluded.refresh_token,
+           access_expires_at=excluded.access_expires_at, refresh_expires_at=excluded.refresh_expires_at, authorized_at=excluded.authorized_at, updated_at=excluded.updated_at`,
+      )
+      .run({
+        ...shop,
+        seller_name: shop.seller_name ?? null,
+        access_token: tokens.access_token,
+        refresh_token: tokens.refresh_token,
+        access_expires_at: tokens.access_token_expire_in,
+        refresh_expires_at: tokens.refresh_token_expire_in,
+        now,
+        market: shop.region === 'GB' ? 'UK' : shop.region,
+      });
+  }
+
+  updateTtsTokens(id: string, t: { access_token: string; refresh_token: string; access_token_expire_in: number; refresh_token_expire_in: number }): void {
+    this.db
+      .prepare(`UPDATE tts_shops SET access_token = ?, refresh_token = ?, access_expires_at = ?, refresh_expires_at = ?, updated_at = ? WHERE id = ?`)
+      .run(t.access_token, t.refresh_token, t.access_token_expire_in, t.refresh_token_expire_in, new Date().toISOString(), id);
+  }
+
+  linkTtsShop(id: string, accountId: number | null, market: string | null): void {
+    this.db.prepare('UPDATE tts_shops SET account_id = ?, market = ?, updated_at = ? WHERE id = ?').run(accountId, market, new Date().toISOString(), id);
+  }
+
+  deleteTtsShop(id: string): boolean {
+    return this.db.prepare('DELETE FROM tts_shops WHERE id = ?').run(id).changes > 0;
+  }
+
+  findTtsShopFor(accountId: number, market: string): (TtsShopRow & { access_token: string; refresh_token: string }) | null {
+    const r = this.db.prepare('SELECT * FROM tts_shops WHERE account_id = ? AND market = ? LIMIT 1').get(accountId, market) as Row | undefined;
+    return r ? this.rowToTtsShop(r) : null;
+  }
+
+  // ---- Promotions ----
+
+  private rowToPromotion(r: Row): Omit<Promotion, 'targets'> {
+    return {
+      id: r.id as number,
+      name: r.name as string,
+      activity_type: r.activity_type as Promotion['activity_type'],
+      product_level: r.product_level as Promotion['product_level'],
+      discount_type: r.discount_type as Promotion['discount_type'],
+      discount_value: r.discount_value === null || r.discount_value === undefined ? null : Number(r.discount_value),
+      begin_at: r.begin_at as string,
+      end_at: r.end_at as string,
+      participation: r.participation as Promotion['participation'],
+      products: parseJson<Record<string, string[]>>(r.products, {}),
+      notes: (r.notes as string | null) ?? null,
+      created_by: (r.created_by as string | null) ?? null,
+      created_at: r.created_at as string,
+      updated_at: r.updated_at as string,
+    };
+  }
+
+  private targetsFor(promotionId: number): PromotionTarget[] {
+    return (
+      this.db
+        .prepare(
+          `SELECT t.*, a.name AS account_name, s.name AS tts_shop_name FROM promotion_targets t
+           JOIN accounts a ON a.id = t.account_id LEFT JOIN tts_shops s ON s.id = t.tts_shop_id
+           WHERE t.promotion_id = ? ORDER BY a.name, t.market`,
+        )
+        .all(promotionId) as Row[]
+    ).map((r) => ({
+      id: r.id as number,
+      promotion_id: r.promotion_id as number,
+      account_id: r.account_id as number,
+      account_name: r.account_name as string,
+      market: r.market as string,
+      tts_shop_id: (r.tts_shop_id as string | null) ?? null,
+      tts_shop_name: (r.tts_shop_name as string | null) ?? null,
+      status: r.status as PromotionTarget['status'],
+      tts_activity_id: (r.tts_activity_id as string | null) ?? null,
+      tts_status: (r.tts_status as string | null) ?? null,
+      error_message: (r.error_message as string | null) ?? null,
+      pushed_at: (r.pushed_at as string | null) ?? null,
+    }));
+  }
+
+  listPromotions(): Promotion[] {
+    return (this.db.prepare('SELECT * FROM promotions ORDER BY begin_at DESC, id DESC').all() as Row[]).map((r) => ({ ...this.rowToPromotion(r), targets: this.targetsFor(r.id as number) }));
+  }
+
+  getPromotion(id: number): Promotion | null {
+    const r = this.db.prepare('SELECT * FROM promotions WHERE id = ?').get(id) as Row | undefined;
+    return r ? { ...this.rowToPromotion(r), targets: this.targetsFor(id) } : null;
+  }
+
+  createPromotion(input: PromotionInput, createdBy: string | null): Promotion {
+    const res = this.db
+      .prepare(
+        `INSERT INTO promotions (name, activity_type, product_level, discount_type, discount_value, begin_at, end_at, participation, products, notes, created_by)
+         VALUES (@name, @activity_type, @product_level, @discount_type, @discount_value, @begin_at, @end_at, @participation, @products, @notes, @created_by)`,
+      )
+      .run({ ...input, products: JSON.stringify(input.products), created_by: createdBy });
+    const id = Number(res.lastInsertRowid);
+    this.setTargets(id, input.targets);
+    return this.getPromotion(id)!;
+  }
+
+  updatePromotion(id: number, input: PromotionInput): Promotion | null {
+    const res = this.db
+      .prepare(
+        `UPDATE promotions SET name=@name, activity_type=@activity_type, product_level=@product_level, discount_type=@discount_type, discount_value=@discount_value,
+            begin_at=@begin_at, end_at=@end_at, participation=@participation, products=@products, notes=@notes, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+         WHERE id=@id`,
+      )
+      .run({ ...input, id, products: JSON.stringify(input.products) });
+    if (!res.changes) return null;
+    this.setTargets(id, input.targets);
+    return this.getPromotion(id);
+  }
+
+  /** Add missing targets and drop planned ones that are no longer wanted. Pushed targets are kept. */
+  private setTargets(promotionId: number, targets: { account_id: number; market: string }[]): void {
+    const wanted = new Set(targets.map((t) => `${t.account_id}:${t.market}`));
+    const existing = this.targetsFor(promotionId);
+    const del = this.db.prepare('DELETE FROM promotion_targets WHERE id = ?');
+    for (const t of existing) if (!wanted.has(`${t.account_id}:${t.market}`) && (t.status === 'planned' || t.status === 'unlinked')) del.run(t.id);
+    const ins = this.db.prepare('INSERT OR IGNORE INTO promotion_targets (promotion_id, account_id, market) VALUES (?, ?, ?)');
+    for (const t of targets) ins.run(promotionId, t.account_id, t.market);
+  }
+
+  updateTarget(id: number, patch: Partial<Pick<PromotionTarget, 'status' | 'tts_shop_id' | 'tts_activity_id' | 'tts_status' | 'error_message' | 'pushed_at'>>): void {
+    const sets: string[] = [];
+    const params: Record<string, unknown> = { id };
+    for (const [k, v] of Object.entries(patch)) {
+      sets.push(`${k} = @${k}`);
+      params[k] = v;
+    }
+    if (!sets.length) return;
+    this.db.prepare(`UPDATE promotion_targets SET ${sets.join(', ')}, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = @id`).run(params);
+  }
+
+  deletePromotion(id: number): boolean {
+    return this.db.prepare('DELETE FROM promotions WHERE id = ?').run(id).changes > 0;
+  }
+
+  // ---- GMV Max settings ----
+
+  private rowToGmvMax(r: Row): GmvMaxRow {
+    return {
+      id: r.id as number,
+      account_id: r.account_id as number,
+      account_name: r.account_name as string,
+      am_name: (r.am_name as string | null) ?? null,
+      market: r.market as string,
+      campaign_type: r.campaign_type as GmvMaxRow['campaign_type'],
+      campaign_name: (r.campaign_name as string | null) ?? null,
+      daily_budget: r.daily_budget === null || r.daily_budget === undefined ? null : Number(r.daily_budget),
+      budget_currency: (r.budget_currency as string) ?? 'EUR',
+      bid_strategy: r.bid_strategy as GmvMaxRow['bid_strategy'],
+      target_roi: r.target_roi === null || r.target_roi === undefined ? null : Number(r.target_roi),
+      status: r.status as GmvMaxRow['status'],
+      product_scope: (r.product_scope as string) ?? 'ALL',
+      notes: (r.notes as string | null) ?? null,
+      tts_campaign_id: (r.tts_campaign_id as string | null) ?? null,
+      last_pushed_at: (r.last_pushed_at as string | null) ?? null,
+      updated_at: r.updated_at as string,
+    };
+  }
+
+  listGmvMax(): GmvMaxRow[] {
+    return (
+      this.db
+        .prepare(`SELECT g.*, a.name AS account_name, a.am_name FROM gmv_max_settings g JOIN accounts a ON a.id = g.account_id ORDER BY a.name, g.market, g.campaign_type`)
+        .all() as Row[]
+    ).map((r) => this.rowToGmvMax(r));
+  }
+
+  ensureGmvMaxRow(accountId: number, market: string, campaignType: 'PRODUCT' | 'LIVE', currency: string): void {
+    this.db
+      .prepare(`INSERT OR IGNORE INTO gmv_max_settings (account_id, market, campaign_type, budget_currency) VALUES (?, ?, ?, ?)`)
+      .run(accountId, market, campaignType, currency);
+  }
+
+  patchGmvMax(ids: number[], patch: GmvMaxPatch): number {
+    const sets: string[] = [];
+    const params: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined) continue;
+      sets.push(`${k} = @${k}`);
+      params[k] = v;
+    }
+    if (!sets.length || !ids.length) return 0;
+    const stmt = this.db.prepare(`UPDATE gmv_max_settings SET ${sets.join(', ')}, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = @id`);
+    let n = 0;
+    this.db.transaction(() => {
+      for (const id of ids) n += stmt.run({ ...params, id }).changes;
+    })();
+    return n;
+  }
+
+  deleteGmvMax(id: number): boolean {
+    return this.db.prepare('DELETE FROM gmv_max_settings WHERE id = ?').run(id).changes > 0;
   }
 
   // ---- Completions the sweep deleted (so the checklist check still counts them) ----
