@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
-import { Link, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
+import { Link, NavLink, Navigate, Route, Routes, useNavigate } from 'react-router-dom';
 import { api, type Status } from './api';
 import RulesList from './pages/RulesList';
 import RuleEditor from './pages/RuleEditor';
 import RunHistory from './pages/RunHistory';
+import Accounts from './pages/Accounts';
+import Checklists from './pages/Checklists';
+import AnalyticsPage from './pages/Analytics';
 
 function Login({ onDone }: { onDone: () => void }) {
   const [password, setPassword] = useState('');
@@ -72,11 +75,14 @@ export default function App() {
       <header className="topbar">
         <div className="brand">
           <Link to="/" style={{ color: 'inherit' }}>Asana Sweep</Link>
-          <span>recurring task clean-up</span>
+          <span>AM checklists</span>
         </div>
         <nav>
           {status?.asana_user && <span className="sub">Asana: {status.asana_user.name}</span>}
-          <Link to="/">Rules</Link>
+          <NavLink to="/checklists" className={({ isActive }) => (isActive ? 'active' : '')}>Checklists</NavLink>
+          <NavLink to="/analytics" className={({ isActive }) => (isActive ? 'active' : '')}>Analytics</NavLink>
+          <NavLink to="/accounts" className={({ isActive }) => (isActive ? 'active' : '')}>Accounts</NavLink>
+          <NavLink to="/" end className={({ isActive }) => (isActive ? 'active' : '')}>Sweep rules</NavLink>
           <button className="small" onClick={logout}>Sign out</button>
         </nav>
       </header>
@@ -91,6 +97,9 @@ export default function App() {
           <Route path="/rules/new" element={<RuleEditor />} />
           <Route path="/rules/:id" element={<RuleEditor />} />
           <Route path="/rules/:id/runs" element={<RunHistory />} />
+          <Route path="/accounts" element={<Accounts />} />
+          <Route path="/checklists" element={<Checklists />} />
+          <Route path="/analytics" element={<AnalyticsPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>

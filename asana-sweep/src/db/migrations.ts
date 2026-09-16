@@ -73,6 +73,96 @@ const migrations: Migration[] = [
       );
     },
   },
+  {
+    version: 2,
+    name: 'accounts, checklist checks, settings',
+    up(db) {
+      db.exec(`
+        CREATE TABLE accounts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          markets TEXT,
+          am_name TEXT,
+          aa_name TEXT,
+          asana_project_gid TEXT,
+          asana_project_name TEXT NOT NULL DEFAULT '',
+          enabled INTEGER NOT NULL DEFAULT 1,
+          notes TEXT,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+
+        CREATE TABLE settings (
+          key TEXT PRIMARY KEY,
+          value TEXT
+        );
+
+        CREATE TABLE checks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          check_date TEXT NOT NULL,
+          checked_at TEXT NOT NULL,
+          trigger TEXT NOT NULL DEFAULT 'schedule',
+          status TEXT NOT NULL,
+          am_total INTEGER NOT NULL DEFAULT 0,
+          am_done INTEGER NOT NULL DEFAULT 0,
+          aa_total INTEGER NOT NULL DEFAULT 0,
+          aa_done INTEGER NOT NULL DEFAULT 0,
+          am_complete INTEGER NOT NULL DEFAULT 0,
+          aa_complete INTEGER NOT NULL DEFAULT 0,
+          combined_complete INTEGER NOT NULL DEFAULT 0,
+          warnings TEXT NOT NULL DEFAULT '[]',
+          error_message TEXT,
+          items TEXT NOT NULL DEFAULT '[]',
+          UNIQUE(account_id, check_date)
+        );
+        CREATE INDEX checks_date ON checks(check_date);
+      `);
+
+      const ins = db.prepare(`INSERT INTO settings (key, value) VALUES (?, ?)`);
+      ins.run('check_cron', '0 16 * * 1-5');
+      ins.run('check_timezone', 'Europe/Madrid');
+      ins.run('check_enabled', '1');
+      ins.run('check_slack_webhook', '');
+
+      // Account roster (Sept 2026). Linked to the checklist projects that already exist in Asana.
+      const acc = db.prepare(
+        `INSERT INTO accounts (name, markets, am_name, aa_name, asana_project_gid, asana_project_name, notes)
+         VALUES (?, ?, ?, ?, ?, COALESCE(?, ''), ?)`,
+      );
+      const roster: (string | null)[][] = [
+        ['Super Ninja', 'DE/IT/ES/FR/BE/NL', 'Elena', null, '1217145492095942', 'Super Ninja - AM Daily Checklist', 'OCT PAUSE'],
+        ['Feel Güd', 'DE/IT/FR/ES', 'Giorgia', null, '1217145492095987', 'FeelGüd - AM Daily Checklist', null],
+        ['Waschies', 'DE', 'Federica', null, null, null, null],
+        ['Satin Naturel', 'DE', 'Federica', null, null, null, null],
+        ['Kijimea', 'DE/IT/FR/ES/UK/PL', 'Federica', null, null, null, null],
+        ['GreatVita', 'DE/IT/FR/ES', 'Elena', 'DM', '1216709753301754', 'GreatVita - AM Daily Checklist (Pilot)', null],
+        ['Mothersearth', 'DE/NL/UK', 'Tamara', null, null, null, null],
+        ['Clearly', 'DE', 'Tamara', null, '1218453485943205', 'Clearly - AM Daily Checklist', null],
+        ['Svenja', 'UK', 'Federica', null, null, null, null],
+        ['Muehlenkraft', 'DE', 'Federica', null, null, null, null],
+        ['Belively', 'DE', 'Michael', null, null, null, null],
+        ['Estrid', 'DE/UK/FR/IT/ES/IE/NL/BE/AT/PL', 'Tamara', null, '1217270139323267', 'AM Daily Checklist Estrid', null],
+        ['Evolsin', 'DE/FR', 'Elena', null, '1217145492095927', 'Evolsin - AM Daily Checklist', null],
+        ['Mars', 'UK', 'Federica', null, null, null, null],
+        ['Living Things', 'UK', 'Giorgia', null, '1217145492095957', 'Living Things - AM Daily Checklist', null],
+        ['Chupa Chups', 'DE', 'Elena', null, '1217145492095972', 'Chupa Chups - AM Daily Checklist', null],
+        ['Golden Tree', 'DE', 'Michael', null, null, null, null],
+        ['BioPak', 'DE', null, null, null, null, null],
+        ['BiFi', 'DE', 'Tamara', null, null, null, null],
+        ['VeoBabys', 'IT', 'Giorgia', null, null, null, null],
+        ['Bears With Benefits', 'IT', 'Giorgia', null, '1217239903735088', 'BWB AM Daily Checklist', null],
+        ['Nutrivita (Dr Nutrition)', null, 'Michael', null, null, null, null],
+        ['French Avenue', null, null, null, null, null, null],
+        ['My Protein', 'DE', 'Tamara', null, null, null, null],
+        ['Vaseline', null, 'Elena', null, null, null, null],
+        ['Sacheu', 'DE/IT/FR/ES/N/IE', 'Federica', null, null, null, null],
+        ['Unilever', 'DE/IT/FR/ES/N', 'Elena', null, null, null, null],
+        ['Coca Cola', 'DE', 'Tamara', null, null, null, null]
+      ];
+      for (const r of roster) acc.run(...r);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

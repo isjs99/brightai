@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import type { Rule, RuleInput, Run, RunItem, RunItemAction, RunStatus } from '../sweep/types.js';
+import type { Account, AccountInput, Check, CheckItem, CheckStatus, CheckWithItems, Rule, RuleInput, Run, RunItem, RunItemAction, RunStatus } from '../sweep/types.js';
 
 type Row = Record<string, unknown>;
 
@@ -59,8 +59,179 @@ function rowToItem(r: Row): RunItem {
   };
 }
 
+function rowToAccount(r: Row): Account {
+  return {
+    id: r.id as number,
+    name: r.name as string,
+    markets: (r.markets as string | null) || null,
+    am_name: (r.am_name as string | null) || null,
+    aa_name: (r.aa_name as string | null) || null,
+    asana_project_gid: (r.asana_project_gid as string | null) || null,
+    asana_project_name: (r.asana_project_name as string) ?? '',
+    enabled: Boolean(r.enabled),
+    notes: (r.notes as string | null) || null,
+    created_at: r.created_at as string,
+    updated_at: r.updated_at as string,
+  };
+}
+
+function parseJson<T>(v: unknown, fallback: T): T {
+  try {
+    return JSON.parse((v as string) || '') as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function rowToCheck(r: Row): Check {
+  return {
+    id: r.id as number,
+    account_id: r.account_id as number,
+    check_date: r.check_date as string,
+    checked_at: r.checked_at as string,
+    trigger: r.trigger as Check['trigger'],
+    status: r.status as CheckStatus,
+    am_total: r.am_total as number,
+    am_done: r.am_done as number,
+    aa_total: r.aa_total as number,
+    aa_done: r.aa_done as number,
+    am_complete: Boolean(r.am_complete),
+    aa_complete: Boolean(r.aa_complete),
+    combined_complete: Boolean(r.combined_complete),
+    warnings: parseJson<string[]>(r.warnings, []),
+    error_message: (r.error_message as string | null) ?? null,
+  };
+}
+
 export class Queries {
   constructor(private db: Database.Database) {}
+
+  // ---- Accounts ----
+
+  listAccounts(): Account[] {
+    return this.db.prepare('SELECT * FROM accounts ORDER BY name COLLATE NOCASE').all().map((r) => rowToAccount(r as Row));
+  }
+
+  getAccount(id: number): Account | null {
+    const r = this.db.prepare('SELECT * FROM accounts WHERE id = ?').get(id) as Row | undefined;
+    return r ? rowToAccount(r) : null;
+  }
+
+  createAccount(input: AccountInput): Account {
+    const res = this.db
+      .prepare(
+        `INSERT INTO accounts (name, markets, am_name, aa_name, asana_project_gid, asana_project_name, enabled, notes)
+         VALUES (@name, @markets, @am_name, @aa_name, @asana_project_gid, @asana_project_name, @enabled, @notes)`,
+      )
+      .run({ ...input, enabled: input.enabled ? 1 : 0 });
+    return this.getAccount(Number(res.lastInsertRowid))!;
+  }
+
+  updateAccount(id: number, input: AccountInput): Account | null {
+    const res = this.db
+      .prepare(
+        `UPDATE accounts SET name=@name, markets=@markets, am_name=@am_name, aa_name=@aa_name, asana_project_gid=@asana_project_gid,
+            asana_project_name=@asana_project_name, enabled=@enabled, notes=@notes, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+         WHERE id=@id`,
+      )
+      .run({ ...input, id, enabled: input.enabled ? 1 : 0 });
+    return res.changes ? this.getAccount(id) : null;
+  }
+
+  setAccountProjectName(id: number, name: string): void {
+    this.db.prepare('UPDATE accounts SET asana_project_name = ? WHERE id = ? AND asana_project_name <> ?').run(name, id, name);
+  }
+
+  deleteAccount(id: number): boolean {
+    return this.db.prepare('DELETE FROM accounts WHERE id = ?').run(id).changes > 0;
+  }
+
+  ruleExistsForProject(gid: string): boolean {
+    return Boolean(this.db.prepare('SELECT 1 FROM rules WHERE asana_project_gid = ? LIMIT 1').get(gid));
+  }
+
+  // ---- Settings ----
+
+  getSetting(key: string, fallback = ''): string {
+    const r = this.db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string | null } | undefined;
+    return r?.value ?? fallback;
+  }
+
+  setSetting(key: string, value: string): void {
+    this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
+  }
+
+  // ---- Checks ----
+
+  upsertCheck(
+    accountId: number,
+    checkDate: string,
+    data: Omit<Check, 'id' | 'account_id' | 'check_date' | 'checked_at'> & { items: CheckItem[] },
+  ): CheckWithItems {
+    this.db
+      .prepare(
+        `INSERT INTO checks (account_id, check_date, checked_at, trigger, status, am_total, am_done, aa_total, aa_done,
+                             am_complete, aa_complete, combined_complete, warnings, error_message, items)
+         VALUES (@account_id, @check_date, @checked_at, @trigger, @status, @am_total, @am_done, @aa_total, @aa_done,
+                 @am_complete, @aa_complete, @combined_complete, @warnings, @error_message, @items)
+         ON CONFLICT(account_id, check_date) DO UPDATE SET
+           checked_at=excluded.checked_at, trigger=excluded.trigger, status=excluded.status,
+           am_total=excluded.am_total, am_done=excluded.am_done, aa_total=excluded.aa_total, aa_done=excluded.aa_done,
+           am_complete=excluded.am_complete, aa_complete=excluded.aa_complete, combined_complete=excluded.combined_complete,
+           warnings=excluded.warnings, error_message=excluded.error_message, items=excluded.items`,
+      )
+      .run({
+        account_id: accountId,
+        check_date: checkDate,
+        checked_at: new Date().toISOString(),
+        trigger: data.trigger,
+        status: data.status,
+        am_total: data.am_total,
+        am_done: data.am_done,
+        aa_total: data.aa_total,
+        aa_done: data.aa_done,
+        am_complete: data.am_complete ? 1 : 0,
+        aa_complete: data.aa_complete ? 1 : 0,
+        combined_complete: data.combined_complete ? 1 : 0,
+        warnings: JSON.stringify(data.warnings),
+        error_message: data.error_message,
+        items: JSON.stringify(data.items),
+      });
+    return this.getCheckForDate(accountId, checkDate)!;
+  }
+
+  getCheckForDate(accountId: number, checkDate: string): CheckWithItems | null {
+    const r = this.db.prepare('SELECT * FROM checks WHERE account_id = ? AND check_date = ?').get(accountId, checkDate) as Row | undefined;
+    return r ? { ...rowToCheck(r), items: parseJson<CheckItem[]>(r.items, []) } : null;
+  }
+
+  getCheck(id: number): CheckWithItems | null {
+    const r = this.db.prepare('SELECT * FROM checks WHERE id = ?').get(id) as Row | undefined;
+    return r ? { ...rowToCheck(r), items: parseJson<CheckItem[]>(r.items, []) } : null;
+  }
+
+  listChecksForDate(checkDate: string): Check[] {
+    return this.db.prepare('SELECT * FROM checks WHERE check_date = ?').all(checkDate).map((r) => rowToCheck(r as Row));
+  }
+
+  listChecksBetween(from: string, to: string): Check[] {
+    return this.db
+      .prepare('SELECT * FROM checks WHERE check_date >= ? AND check_date <= ? ORDER BY check_date')
+      .all(from, to)
+      .map((r) => rowToCheck(r as Row));
+  }
+
+  listCheckDates(limit = 60): string[] {
+    return this.db
+      .prepare('SELECT DISTINCT check_date FROM checks ORDER BY check_date DESC LIMIT ?')
+      .all(limit)
+      .map((r) => (r as { check_date: string }).check_date);
+  }
+
+  pruneChecks(olderThanDays: number): number {
+    const cutoff = new Date(Date.now() - olderThanDays * 86400000).toISOString().slice(0, 10);
+    return this.db.prepare('DELETE FROM checks WHERE check_date < ?').run(cutoff).changes;
+  }
 
   // ---- Rules ----
 

@@ -31,11 +31,26 @@ interface RawTask {
   name: string;
   completed: boolean;
   completed_at: string | null;
+  due_on?: string | null;
+  assignee?: { name: string } | null;
   num_subtasks?: number;
   memberships?: { project?: { gid: string } | null; section?: { gid: string; name: string } | null }[];
 }
 
 const TASK_FIELDS = 'gid,name,completed,completed_at,num_subtasks,memberships.project.gid,memberships.section.name';
+const CHECKLIST_FIELDS = 'gid,name,completed,completed_at,due_on,num_subtasks,assignee.name,memberships.project.gid,memberships.section.name';
+
+export interface ChecklistTask {
+  gid: string;
+  name: string;
+  completed: boolean;
+  completed_at: string | null;
+  due_on: string | null;
+  assignee_name: string | null;
+  section_name: string | null;
+  num_subtasks: number;
+  parent_gid: string | null;
+}
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -154,6 +169,32 @@ export class AsanaClient {
         num_subtasks: t.num_subtasks ?? 0,
       };
     });
+  }
+
+  private toChecklistTask(t: RawTask, projectGid: string | null, parentGid: string | null): ChecklistTask {
+    const membership = projectGid ? (t.memberships ?? []).find((m) => m.project?.gid === projectGid) : undefined;
+    return {
+      gid: t.gid,
+      name: t.name ?? '',
+      completed: Boolean(t.completed),
+      completed_at: t.completed_at ?? null,
+      due_on: t.due_on ?? null,
+      assignee_name: t.assignee?.name ?? null,
+      section_name: membership?.section?.name ?? null,
+      num_subtasks: t.num_subtasks ?? 0,
+      parent_gid: parentGid,
+    };
+  }
+
+  /** Top-level tasks of a project with the fields the checklist check needs. */
+  async listChecklistTasks(projectGid: string): Promise<ChecklistTask[]> {
+    const raw = await this.getAll<RawTask>(`/projects/${projectGid}/tasks`, { opt_fields: CHECKLIST_FIELDS });
+    return raw.map((t) => this.toChecklistTask(t, projectGid, null));
+  }
+
+  async listSubtasks(taskGid: string): Promise<ChecklistTask[]> {
+    const raw = await this.getAll<RawTask>(`/tasks/${taskGid}/subtasks`, { opt_fields: CHECKLIST_FIELDS });
+    return raw.map((t) => this.toChecklistTask(t, null, taskGid));
   }
 
   async deleteTask(gid: string): Promise<void> {

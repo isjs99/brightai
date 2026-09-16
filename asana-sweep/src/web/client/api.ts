@@ -1,4 +1,4 @@
-import type { PreviewResult, Rule, RuleInput, RuleSummary, Run, RunItem } from '../../sweep/types';
+import type { Account, AccountInput, AccountStatusRow, Analytics, CheckSettings, CheckWithItems, PreviewResult, Rule, RuleInput, RuleSummary, Run, RunItem } from '../../sweep/types';
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -54,6 +54,20 @@ export const api = {
   runRule: (id: number) => call<{ run: Run; rule: RuleSummary }>('POST', `/rules/${id}/run`),
   listRuns: (id: number) => call<{ runs: Run[] }>('GET', `/rules/${id}/runs`),
   getRun: (id: number) => call<{ run: Run; items: RunItem[] }>('GET', `/runs/${id}`),
+  // Accounts + checklist checks
+  listAccounts: () => call<{ accounts: AccountStatusRow[] }>('GET', '/accounts'),
+  createAccount: (input: AccountInput) => call<{ account: Account }>('POST', '/accounts', input),
+  updateAccount: (id: number, input: AccountInput) => call<{ account: Account }>('PUT', `/accounts/${id}`, input),
+  patchAccount: (id: number, patch: Partial<AccountInput>) => call<{ account: Account }>('PATCH', `/accounts/${id}`, patch),
+  deleteAccount: (id: number) => call<{ ok: true }>('DELETE', `/accounts/${id}`),
+  createSweepRule: (id: number) => call<{ rule: RuleSummary }>('POST', `/accounts/${id}/sweep-rule`),
+  checkAccount: (id: number) => call<{ check: CheckWithItems }>('POST', `/accounts/${id}/check`),
+  listChecks: (date?: string) => call<{ date: string; today: string; rows: AccountStatusRow[]; dates: string[]; is_running: boolean }>('GET', `/checks${date ? `?date=${date}` : ''}`),
+  runChecks: () => call<{ checked: number; rows: AccountStatusRow[] }>('POST', '/checks/run'),
+  getCheck: (id: number) => call<{ check: CheckWithItems }>('GET', `/checks/${id}`),
+  getCheckSettings: () => call<{ settings: CheckSettings }>('GET', '/check-settings'),
+  saveCheckSettings: (s: Pick<CheckSettings, 'check_cron' | 'check_timezone' | 'check_enabled' | 'check_slack_webhook'>) => call<{ settings: CheckSettings }>('PUT', '/check-settings', s),
+  analytics: (days: number) => call<Analytics>('GET', `/analytics?days=${days}`),
   preview: (input: Pick<RuleInput, 'asana_project_gid' | 'min_age_hours' | 'require_section_match' | 'max_deletes_per_run'>) =>
     call<PreviewResult>('POST', '/preview', input),
 };

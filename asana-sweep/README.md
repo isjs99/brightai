@@ -68,6 +68,30 @@ If anything looks wrong, tick Dry run again or switch the rule off. Both take ef
 
 Rules list > **New rule** > type the project name > pick a schedule > Create. It starts in dry run. That is it, no code change. Or use **Duplicate** on an existing rule and just change the project.
 
+## Checklist completion check (16:00 every workday)
+
+Separate from the sweep, the dashboard checks every account's checklist project once a day (weekdays 16:00 Madrid time by default, change it under Checklists > Settings) and records who is done.
+
+- **AM** = tasks assigned to the account manager named on the account.
+- **AA** = everything else: tasks assigned to anyone who is not the AM, and subtasks (the AA's action items).
+- An account is **complete** when both AM and AA are complete. AM and AA are also shown separately.
+- A checklist item counts as done if a copy of it was completed today. Weekly items only count on the day they are due.
+
+Screens:
+
+- **Checklists**: today's status per account with AM / AA / combined, expandable to every item and subtask. "Check all now" runs it immediately. The date picker shows past days.
+- **Analytics**: completion rate per AM and a per-account, per-day grid for the last 7 to 90 days.
+- **Accounts**: the roster (name, markets, AM, AA, linked Asana project). Link a project by searching its name. "Add (dry run)" creates a sweep rule for that project in one click.
+
+If a Slack webhook is set under Checklists > Settings, a digest is posted after each scheduled check.
+
+### Recurrence warnings
+
+The Asana API cannot set or read a task's repeat setting, so the check infers it. Two flags show up per item:
+
+- **no new copy: repeat not set?** The task was completed today but Asana did not spawn a fresh copy. Open the task in Asana and set it to repeat every workday.
+- **no due date**. A task without a due date cannot repeat. Give it one.
+
 ## Slack notifications
 
 Paste an incoming webhook URL into the rule. After each run you get one line:
@@ -90,11 +114,12 @@ Dry runs say "would be deleted" instead. If a run fails (token expired, project 
 ```
 src/asana       Asana REST client: pagination, 429 backoff
 src/sweep       match.ts (pure matching logic), runner.ts (fetch, plan, delete, record, notify)
-src/scheduler   node-cron registration per rule, plain-English schedule text
+src/checklist   evaluate.ts (pure completion logic), checker.ts (daily check, Slack digest)
+src/scheduler   node-cron registration per rule and for the daily check, plain-English schedule text
 src/db          SQLite schema, migrations (seed rule), queries
 src/notify      Slack webhook
 src/web         Express API + auth, and the React dashboard in src/web/client
-tests           matching outcomes, schedule text, runner integration
+tests           matching outcomes, checklist evaluation, schedule text, runner integration
 ```
 
 Auth is a single shared password behind a signed cookie, in `src/web/auth.ts` behind a small interface so it can be swapped when this is mounted inside the agency dashboard.

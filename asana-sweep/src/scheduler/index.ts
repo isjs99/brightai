@@ -3,6 +3,7 @@ import { Queries } from '../db/queries.js';
 import { log } from '../logger.js';
 import { config } from '../config.js';
 import { runRule } from '../sweep/runner.js';
+import { runAllChecks } from '../checklist/checker.js';
 import type { Rule } from '../sweep/types.js';
 import { nextRun } from './describe.js';
 
@@ -13,6 +14,7 @@ import { nextRun } from './describe.js';
 export class Scheduler {
   private tasks = new Map<number, ScheduledTask>();
   private pruneTask: ScheduledTask | null = null;
+  private checkTask: ScheduledTask | null = null;
 
   constructor(private q: Queries) {}
 
@@ -24,7 +26,32 @@ export class Scheduler {
       if (n) log.info(`Pruned ${n} runs older than ${config.runRetentionDays} days`);
     });
     this.q.pruneRuns(config.runRetentionDays);
+    this.q.pruneChecks(config.runRetentionDays);
+    this.reloadCheckSchedule();
     log.info(`Scheduler started with ${this.tasks.size} active rule(s)`);
+  }
+
+  /** (Re)register the daily checklist completion check from settings. */
+  reloadCheckSchedule(): void {
+    this.checkTask?.destroy();
+    this.checkTask = null;
+    if (this.q.getSetting('check_enabled', '1') !== '1') {
+      log.info('Checklist check schedule is disabled');
+      return;
+    }
+    const expr = this.q.getSetting('check_cron', '0 16 * * 1-5');
+    const tz = this.q.getSetting('check_timezone', 'Europe/Madrid');
+    if (!cron.validate(expr)) {
+      log.error(`Checklist check cron "${expr}" is invalid, not scheduled`);
+      return;
+    }
+    this.checkTask = cron.schedule(expr, () => runAllChecks(this.q, { trigger: 'schedule' }), { timezone: tz, name: 'checklist-check' });
+    log.info(`Checklist check scheduled: "${expr}" ${tz}, next ${nextRun(expr, tz)?.toISOString() ?? 'unknown'}`);
+  }
+
+  nextCheckAt(): Date | null {
+    if (this.q.getSetting('check_enabled', '1') !== '1') return null;
+    return nextRun(this.q.getSetting('check_cron', '0 16 * * 1-5'), this.q.getSetting('check_timezone', 'Europe/Madrid'));
   }
 
   stop(): void {
@@ -34,6 +61,8 @@ export class Scheduler {
     }
     this.pruneTask?.destroy();
     this.pruneTask = null;
+    this.checkTask?.destroy();
+    this.checkTask = null;
   }
 
   /** Re-read a rule from the database and (re)register or unregister it. */
