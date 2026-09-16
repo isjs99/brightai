@@ -12,6 +12,7 @@ export interface SweepTask {
   completed_at: string | null;
   section_name: string | null;
   num_subtasks: number;
+  assignee_name?: string | null;
 }
 
 export type PlanAction = 'delete' | 'skipped_no_twin' | 'skipped_too_recent' | 'skipped_section_mismatch';

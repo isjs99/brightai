@@ -318,6 +318,58 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 5,
+    name: 'live watching: final snapshots and live status',
+    up(db) {
+      db.exec(`
+        ALTER TABLE checks ADD COLUMN final INTEGER NOT NULL DEFAULT 0;
+
+        CREATE TABLE live_checks (
+          account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+          check_date TEXT NOT NULL,
+          checked_at TEXT NOT NULL,
+          status TEXT NOT NULL,
+          am_total INTEGER NOT NULL DEFAULT 0,
+          am_done INTEGER NOT NULL DEFAULT 0,
+          aa_total INTEGER NOT NULL DEFAULT 0,
+          aa_done INTEGER NOT NULL DEFAULT 0,
+          am_complete INTEGER NOT NULL DEFAULT 0,
+          aa_complete INTEGER NOT NULL DEFAULT 0,
+          combined_complete INTEGER NOT NULL DEFAULT 0,
+          warnings TEXT NOT NULL DEFAULT '[]',
+          error_message TEXT,
+          items TEXT NOT NULL DEFAULT '[]'
+        );
+      `);
+      const set = db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`);
+      set.run('live_enabled', '1');
+      set.run('live_interval_seconds', '60');
+      set.run('live_sweep_enabled', '1');
+    },
+  },
+  {
+    version: 6,
+    name: 'remember completed tasks the sweep deleted',
+    up(db) {
+      db.exec(`
+        CREATE TABLE completions (
+          task_gid TEXT PRIMARY KEY,
+          project_gid TEXT NOT NULL,
+          parent_gid TEXT,
+          name TEXT NOT NULL,
+          section_name TEXT,
+          assignee_name TEXT,
+          completed INTEGER NOT NULL DEFAULT 1,
+          completed_at TEXT,
+          num_subtasks INTEGER NOT NULL DEFAULT 0,
+          deleted_at TEXT NOT NULL,
+          run_id INTEGER
+        );
+        CREATE INDEX completions_project ON completions(project_gid, deleted_at);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

@@ -7,6 +7,7 @@ import type {
   CheckItem,
   CheckStatus,
   CheckWithItems,
+  Completion,
   GmvSync,
   Person,
   PersonInput,
@@ -117,6 +118,7 @@ function rowToCheck(r: Row): Check {
     combined_complete: Boolean(r.combined_complete),
     warnings: parseJson<string[]>(r.warnings, []),
     error_message: (r.error_message as string | null) ?? null,
+    final: Boolean(r.final),
   };
 }
 
@@ -180,41 +182,78 @@ export class Queries {
 
   // ---- Checks ----
 
+  /**
+   * Record the day's check. A row marked `final` (the deadline snapshot) is never overwritten by a
+   * non-final write, so live updates after the deadline do not change the official record.
+   */
   upsertCheck(
     accountId: number,
     checkDate: string,
-    data: Omit<Check, 'id' | 'account_id' | 'check_date' | 'checked_at'> & { items: CheckItem[] },
+    data: Omit<Check, 'id' | 'account_id' | 'check_date' | 'checked_at' | 'final'> & { items: CheckItem[]; final?: boolean },
   ): CheckWithItems {
+    const existing = this.getCheckForDate(accountId, checkDate);
+    if (existing?.final && !data.final) return existing;
     this.db
       .prepare(
         `INSERT INTO checks (account_id, check_date, checked_at, trigger, status, am_total, am_done, aa_total, aa_done,
-                             am_complete, aa_complete, combined_complete, warnings, error_message, items)
+                             am_complete, aa_complete, combined_complete, warnings, error_message, items, final)
          VALUES (@account_id, @check_date, @checked_at, @trigger, @status, @am_total, @am_done, @aa_total, @aa_done,
-                 @am_complete, @aa_complete, @combined_complete, @warnings, @error_message, @items)
+                 @am_complete, @aa_complete, @combined_complete, @warnings, @error_message, @items, @final)
          ON CONFLICT(account_id, check_date) DO UPDATE SET
            checked_at=excluded.checked_at, trigger=excluded.trigger, status=excluded.status,
            am_total=excluded.am_total, am_done=excluded.am_done, aa_total=excluded.aa_total, aa_done=excluded.aa_done,
            am_complete=excluded.am_complete, aa_complete=excluded.aa_complete, combined_complete=excluded.combined_complete,
+           warnings=excluded.warnings, error_message=excluded.error_message, items=excluded.items, final=excluded.final`,
+      )
+      .run({ ...this.checkParams(data), account_id: accountId, check_date: checkDate, trigger: data.trigger, final: data.final ? 1 : 0 });
+    return this.getCheckForDate(accountId, checkDate)!;
+  }
+
+  private checkParams(data: Omit<Check, 'id' | 'account_id' | 'check_date' | 'checked_at' | 'final' | 'trigger'> & { items: CheckItem[] }) {
+    return {
+      checked_at: new Date().toISOString(),
+      status: data.status,
+      am_total: data.am_total,
+      am_done: data.am_done,
+      aa_total: data.aa_total,
+      aa_done: data.aa_done,
+      am_complete: data.am_complete ? 1 : 0,
+      aa_complete: data.aa_complete ? 1 : 0,
+      combined_complete: data.combined_complete ? 1 : 0,
+      warnings: JSON.stringify(data.warnings),
+      error_message: data.error_message,
+      items: JSON.stringify(data.items),
+    };
+  }
+
+  /** Latest live evaluation for an account (always overwritten). */
+  upsertLive(accountId: number, checkDate: string, data: Omit<Check, 'id' | 'account_id' | 'check_date' | 'checked_at' | 'final' | 'trigger'> & { items: CheckItem[] }): void {
+    this.db
+      .prepare(
+        `INSERT INTO live_checks (account_id, check_date, checked_at, status, am_total, am_done, aa_total, aa_done,
+                                  am_complete, aa_complete, combined_complete, warnings, error_message, items)
+         VALUES (@account_id, @check_date, @checked_at, @status, @am_total, @am_done, @aa_total, @aa_done,
+                 @am_complete, @aa_complete, @combined_complete, @warnings, @error_message, @items)
+         ON CONFLICT(account_id) DO UPDATE SET
+           check_date=excluded.check_date, checked_at=excluded.checked_at, status=excluded.status,
+           am_total=excluded.am_total, am_done=excluded.am_done, aa_total=excluded.aa_total, aa_done=excluded.aa_done,
+           am_complete=excluded.am_complete, aa_complete=excluded.aa_complete, combined_complete=excluded.combined_complete,
            warnings=excluded.warnings, error_message=excluded.error_message, items=excluded.items`,
       )
-      .run({
-        account_id: accountId,
-        check_date: checkDate,
-        checked_at: new Date().toISOString(),
-        trigger: data.trigger,
-        status: data.status,
-        am_total: data.am_total,
-        am_done: data.am_done,
-        aa_total: data.aa_total,
-        aa_done: data.aa_done,
-        am_complete: data.am_complete ? 1 : 0,
-        aa_complete: data.aa_complete ? 1 : 0,
-        combined_complete: data.combined_complete ? 1 : 0,
-        warnings: JSON.stringify(data.warnings),
-        error_message: data.error_message,
-        items: JSON.stringify(data.items),
-      });
-    return this.getCheckForDate(accountId, checkDate)!;
+      .run({ ...this.checkParams(data), account_id: accountId, check_date: checkDate });
+  }
+
+  private rowToLive(r: Row): CheckWithItems {
+    return { ...rowToCheck({ ...r, id: -(r.account_id as number), trigger: 'live', final: 0 }), items: parseJson<CheckItem[]>(r.items, []) };
+  }
+
+  listLive(checkDate: string): CheckWithItems[] {
+    return this.db.prepare('SELECT * FROM live_checks WHERE check_date = ?').all(checkDate).map((r) => this.rowToLive(r as Row));
+  }
+
+  getLive(accountId: number): CheckWithItems | null {
+    const r = this.db.prepare('SELECT * FROM live_checks WHERE account_id = ?').get(accountId) as Row | undefined;
+    return r ? this.rowToLive(r) : null;
   }
 
   getCheckForDate(accountId: number, checkDate: string): CheckWithItems | null {
@@ -375,6 +414,37 @@ export class Queries {
 
   listRunItems(runId: number): RunItem[] {
     return this.db.prepare('SELECT * FROM run_items WHERE run_id = ? ORDER BY action, task_name').all(runId).map((r) => rowToItem(r as Row));
+  }
+
+  deleteRun(id: number): void {
+    this.db.prepare('DELETE FROM runs WHERE id = ?').run(id);
+  }
+
+  // ---- Completions the sweep deleted (so the checklist check still counts them) ----
+
+  recordCompletions(rows: Completion[]): void {
+    const stmt = this.db.prepare(
+      `INSERT INTO completions (task_gid, project_gid, parent_gid, name, section_name, assignee_name, completed, completed_at, num_subtasks, deleted_at, run_id)
+       VALUES (@task_gid, @project_gid, @parent_gid, @name, @section_name, @assignee_name, @completed, @completed_at, @num_subtasks, @deleted_at, @run_id)
+       ON CONFLICT(task_gid) DO UPDATE SET completed = excluded.completed, completed_at = excluded.completed_at, deleted_at = excluded.deleted_at, run_id = excluded.run_id`,
+    );
+    this.db.transaction(() => {
+      for (const r of rows) stmt.run({ ...r, completed: r.completed ? 1 : 0 });
+    })();
+  }
+
+  /** Deleted tasks of a project whose completion (or deletion) happened on or after `sinceIso`. */
+  listCompletionsSince(projectGid: string, sinceIso: string): Completion[] {
+    return (
+      this.db
+        .prepare('SELECT * FROM completions WHERE project_gid = ? AND (completed_at >= ? OR deleted_at >= ?)')
+        .all(projectGid, sinceIso, sinceIso) as (Omit<Completion, 'completed'> & { completed: number })[]
+    ).map((r) => ({ ...r, completed: Boolean(r.completed) }));
+  }
+
+  pruneCompletions(olderThanDays: number): number {
+    const cutoff = new Date(Date.now() - olderThanDays * 86400000).toISOString();
+    return this.db.prepare('DELETE FROM completions WHERE deleted_at < ?').run(cutoff).changes;
   }
 
   pruneRuns(olderThanDays: number): number {

@@ -37,7 +37,7 @@ interface RawTask {
   memberships?: { project?: { gid: string } | null; section?: { gid: string; name: string } | null }[];
 }
 
-const TASK_FIELDS = 'gid,name,completed,completed_at,num_subtasks,memberships.project.gid,memberships.section.name';
+const TASK_FIELDS = 'gid,name,completed,completed_at,num_subtasks,assignee.name,memberships.project.gid,memberships.section.name';
 const CHECKLIST_FIELDS = 'gid,name,completed,completed_at,due_on,num_subtasks,assignee.name,memberships.project.gid,memberships.section.name';
 
 export interface ChecklistTask {
@@ -167,6 +167,7 @@ export class AsanaClient {
         completed_at: t.completed_at ?? null,
         section_name: membership?.section?.name ?? null,
         num_subtasks: t.num_subtasks ?? 0,
+        assignee_name: t.assignee?.name ?? null,
       };
     });
   }
@@ -190,6 +191,16 @@ export class AsanaClient {
   async listChecklistTasks(projectGid: string): Promise<ChecklistTask[]> {
     const raw = await this.getAll<RawTask>(`/projects/${projectGid}/tasks`, { opt_fields: CHECKLIST_FIELDS });
     return raw.map((t) => this.toChecklistTask(t, projectGid, null));
+  }
+
+  /** True if any task in the project was modified (created, completed, edited, deleted) since `iso`. One request. */
+  async projectChangedSince(projectGid: string, iso: string): Promise<boolean> {
+    const page = await this.request<{ gid: string }[]>('GET', `/projects/${projectGid}/tasks`, {
+      modified_since: iso,
+      opt_fields: 'gid',
+      limit: '1',
+    });
+    return (page.data ?? []).length > 0;
   }
 
   async listSubtasks(taskGid: string): Promise<ChecklistTask[]> {

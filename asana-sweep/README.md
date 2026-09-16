@@ -66,9 +66,20 @@ Rules are live by default. If you want to watch a board before it is swept on sc
 
 Rules list > **New rule** > type the project name > pick a schedule > Create. It starts in dry run. That is it, no code change. Or use **Duplicate** on an existing rule and just change the project.
 
+## Live watching
+
+The service watches every linked board. Every 60 seconds (Checklists › Settings) it asks Asana whether anything on the board changed since the last look, which is one small request per board. When a board changed it:
+
+1. runs that board's sweep rule straight away, so a completed recurring task's spent copy is deleted within a minute of being ticked (the minimum age is ignored here; dry run is still respected), and
+2. re-evaluates the checklist and pushes the new status to every open dashboard tab, no reload needed.
+
+Deleted copies are remembered, so a task that was completed and then swept still counts as done for the day.
+
+"Refresh from Asana" forces a full re-read of every board.
+
 ## Checklist completion check (16:00 every workday)
 
-Separate from the sweep, the dashboard checks every account's checklist project once a day (weekdays 16:00 Madrid time by default, change it under Checklists > Settings) and records who is done.
+On top of the live view, the dashboard locks a snapshot of every account once a day (weekdays 16:00 Madrid time by default, change it under Checklists > Settings). That snapshot is the official record used by the Calendar, Analytics and Grades. Live updates after the lock still show on the Checklists page, with the locked status noted underneath.
 
 - **AM** = tasks assigned to the account manager named on the account.
 - **AA** = everything else: tasks assigned to anyone who is not the AM, and subtasks (the AA's action items).
@@ -145,6 +156,7 @@ src/sweep       match.ts (pure matching logic), runner.ts (fetch, plan, delete, 
 src/checklist   evaluate.ts (pure completion logic), checker.ts (daily check, Slack digest), reminders.ts (AM DMs), calendar.ts
 src/gmv         cruva.ts (REST client), sync.ts (daily pull), grading.ts (pure score + letter)
 src/reports     calendar, GMV and grade aggregations for the dashboard
+src/live        change watcher (per-board modified_since polling) and the event bus behind the dashboard's live updates
 src/scheduler   node-cron registration per rule and for the daily check, plain-English schedule text
 src/db          SQLite schema, migrations (seed rule), queries
 src/notify      Slack webhook

@@ -30,6 +30,7 @@ export class Scheduler {
     });
     this.q.pruneRuns(config.runRetentionDays);
     this.q.pruneChecks(config.runRetentionDays);
+    this.q.pruneCompletions(config.runRetentionDays);
     this.reloadCheckSchedule();
     log.info(`Scheduler started with ${this.tasks.size} active rule(s)`);
   }
@@ -49,7 +50,7 @@ export class Scheduler {
       return;
     }
     // The final check also DMs AMs who missed the deadline (when reminders are on).
-    this.checkTask = cron.schedule(expr, () => runAllChecks(this.q, { trigger: 'schedule', remind: true }), { timezone: tz, name: 'checklist-check' });
+    this.checkTask = cron.schedule(expr, () => runAllChecks(this.q, { trigger: 'schedule', remind: true, final: true }), { timezone: tz, name: 'checklist-check' });
     log.info(`Checklist check scheduled: "${expr}" ${tz}, next ${nextRun(expr, tz)?.toISOString() ?? 'unknown'}`);
     this.reloadReminderSchedule(tz);
     this.reloadGmvSchedule();

@@ -8,6 +8,8 @@ import type { AccountInput, AccountStatusRow, Analytics, AnalyticsAccount, Analy
 import { checkAccount, deadlineLabel, isCheckRunning, runAllChecks, todayIn } from '../checklist/checker.js';
 import { DEFAULT_REMINDER_TEXT, incompleteByPerson, notifyAms, renderReminder } from '../checklist/reminders.js';
 import { slackBot } from '../notify/slackbot.js';
+import { liveEvents } from '../live/events.js';
+import type { LiveWatcher } from '../live/index.js';
 import { buildCalendar, buildGmv, buildGrades } from '../reports/index.js';
 import { syncGmv } from '../gmv/sync.js';
 import type { PersonInput, ReminderSettings } from '../sweep/types.js';
@@ -84,7 +86,7 @@ export function parseRuleInput(body: Record<string, unknown>): RuleInput {
   };
 }
 
-export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider): Router {
+export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider, live: LiveWatcher): Router {
   const r = Router();
 
   const summarise = (ruleId: number): RuleSummary => {
@@ -279,12 +281,36 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   // ---- Accounts ----
   const accountRows = (date: string): AccountStatusRow[] => {
     const checks = new Map(q.listChecksForDate(date).map((c) => [c.account_id, c]));
+    const lives = new Map(q.listLive(date).map((c) => [c.account_id, c]));
     return q.listAccounts().map((account) => ({
       account,
       check: checks.get(account.id) ?? null,
+      live: lives.get(account.id) ?? null,
       has_sweep_rule: account.asana_project_gid ? q.ruleExistsForProject(account.asana_project_gid) : false,
     }));
   };
+
+  // ---- Live updates (server-sent events) ----
+  r.get('/events', (req, res) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.flushHeaders();
+    res.write(`event: hello\ndata: ${JSON.stringify({ at: new Date().toISOString() })}\n\n`);
+    const onUpdate = (e: unknown) => res.write(`event: update\ndata: ${JSON.stringify(e)}\n\n`);
+    liveEvents.on('update', onUpdate);
+    const ping = setInterval(() => res.write(': ping\n\n'), 25000);
+    req.on('close', () => {
+      liveEvents.off('update', onUpdate);
+      clearInterval(ping);
+    });
+  });
+
+  r.get('/checks/:id/live', (req, res) => {
+    const check = q.getLive(idParam(req));
+    if (!check) throw new HttpError(404, 'No live status for this account yet');
+    res.json({ check });
+  });
 
   const checkTz = () => q.getSetting('check_timezone', 'Europe/Madrid');
 
@@ -388,6 +414,11 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
       schedule_text: describeSchedule(cron, tz),
       next_run_at: scheduler.nextCheckAt()?.toISOString() ?? null,
       is_running: isCheckRunning(),
+      live_enabled: q.getSetting('live_enabled', '1') === '1',
+      live_interval_seconds: Number(q.getSetting('live_interval_seconds', '60')) || 60,
+      live_sweep_enabled: q.getSetting('live_sweep_enabled', '1') === '1',
+      live_last_tick_at: live.lastTickAt,
+      live_watching: live.watching,
     };
   };
 
@@ -406,8 +437,22 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     q.setSetting('check_timezone', tz);
     q.setSetting('check_enabled', bool(body.check_enabled, true) ? '1' : '0');
     q.setSetting('check_slack_webhook', webhook);
+    const interval = int(body.live_interval_seconds, 60);
+    if (!Number.isFinite(interval) || interval < 15 || interval > 3600) throw new HttpError(400, 'Live interval must be between 15 and 3600 seconds.');
+    q.setSetting('live_enabled', bool(body.live_enabled, true) ? '1' : '0');
+    q.setSetting('live_interval_seconds', String(interval));
+    q.setSetting('live_sweep_enabled', bool(body.live_sweep_enabled, true) ? '1' : '0');
     scheduler.reloadCheckSchedule();
+    live.start();
+    liveEvents.emitUpdate({ kind: 'settings' });
     res.json({ settings: settingsPayload() });
+  });
+
+  /** Re-evaluate every board on the next tick (and run it now). */
+  r.post('/live/refresh', async (_req, res) => {
+    live.reset();
+    await live.tick();
+    res.json({ ok: true, rows: accountRows(todayIn(checkTz())) });
   });
 
   // ---- People (AMs) and Slack reminders ----

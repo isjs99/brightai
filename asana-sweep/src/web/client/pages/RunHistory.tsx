@@ -95,7 +95,7 @@ function RunRows({ run, open, loaded, onToggle, projectGid }: { run: Run; open: 
           <div className="sub">{fmtRelative(run.started_at)}</div>
         </td>
         <td><StatusBadge status={run.status} /></td>
-        <td className="hide-sm">{run.trigger === 'manual' ? 'Run now' : 'Schedule'}</td>
+        <td className="hide-sm">{run.trigger === 'manual' ? 'Run now' : run.trigger === 'live' ? 'Live' : 'Schedule'}</td>
         <td className="num">{run.scanned_count}</td>
         <td className="num">{run.matched_count}</td>
         <td className="num">{run.deleted_count}</td>

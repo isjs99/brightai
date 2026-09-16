@@ -4,6 +4,7 @@ import { log } from '../logger.js';
 import { postSlack } from '../notify/slack.js';
 import { config } from '../config.js';
 import { buildPlan, checkCap, type PlanItem } from './match.js';
+import { liveEvents } from '../live/events.js';
 import type { PreviewResult, Rule, RuleInput, Run, RunItem, RunItemAction } from './types.js';
 
 const running = new Set<number>();
@@ -53,6 +54,8 @@ export interface RunOptions {
   client?: AsanaClient;
   /** Delete immediately: ignore the rule's dry_run flag and min_age_hours. Used by "Run now". */
   force?: boolean;
+  /** Ignore min_age_hours only (dry run is respected). Used by the live watcher. */
+  immediate?: boolean;
 }
 
 /**
@@ -67,9 +70,9 @@ export async function runRule(q: Queries, rule: Rule, opts: RunOptions): Promise
   running.add(rule.id);
   const client = opts.client ?? asana;
   const dryRun = opts.force ? false : rule.dry_run;
-  const minAgeHours = opts.force ? 0 : rule.min_age_hours;
+  const minAgeHours = opts.force || opts.immediate ? 0 : rule.min_age_hours;
   const run = q.createRun(rule.id, opts.trigger, dryRun);
-  log.info(`Run ${run.id} started for rule ${rule.id} (${rule.name}) via ${opts.trigger}${dryRun ? ' [dry run]' : ''}${opts.force ? ' [immediate]' : ''}`);
+  log.info(`Run ${run.id} started for rule ${rule.id} (${rule.name}) via ${opts.trigger}${dryRun ? ' [dry run]' : ''}${opts.force || opts.immediate ? ' [immediate]' : ''}`);
 
   let finished: Run;
   try {
@@ -79,6 +82,7 @@ export async function runRule(q: Queries, rule: Rule, opts: RunOptions): Promise
     const plan = buildPlan(tasks, { minAgeHours, requireSectionMatch: rule.require_section_match });
     const warnings = [...plan.warnings];
     if (opts.force) warnings.push('Run now: deleted immediately, ignoring dry run and the minimum age.');
+    else if (opts.immediate) warnings.push('Live sweep: deleted immediately on change, ignoring the minimum age.');
     for (const w of plan.warnings) log.warn(`Run ${run.id}: ${w}`);
 
     const capError = checkCap(plan, rule.max_deletes_per_run);
@@ -110,9 +114,40 @@ export async function runRule(q: Queries, rule: Rule, opts: RunOptions): Promise
       let failures = 0;
       for (const p of plan.toDelete) {
         try {
+          // Remember the task (and its subtasks) so the day's checklist check still counts it as done.
+          const subtasks = p.task.num_subtasks > 0 ? await client.listSubtasks(p.task.gid).catch(() => []) : [];
           await client.deleteTask(p.task.gid);
           deleted += 1;
           items.push(planToItem(p, 'deleted'));
+          const deletedAt = new Date().toISOString();
+          q.recordCompletions([
+            {
+              task_gid: p.task.gid,
+              project_gid: rule.asana_project_gid,
+              parent_gid: null,
+              name: p.task.name,
+              section_name: p.task.section_name,
+              assignee_name: p.task.assignee_name ?? null,
+              completed: true,
+              completed_at: p.task.completed_at,
+              num_subtasks: p.task.num_subtasks,
+              deleted_at: deletedAt,
+              run_id: run.id,
+            },
+            ...subtasks.map((s) => ({
+              task_gid: s.gid,
+              project_gid: rule.asana_project_gid,
+              parent_gid: p.task.gid,
+              name: s.name,
+              section_name: p.task.section_name,
+              assignee_name: s.assignee_name,
+              completed: s.completed,
+              completed_at: s.completed_at,
+              num_subtasks: s.num_subtasks,
+              deleted_at: deletedAt,
+              run_id: run.id,
+            })),
+          ]);
         } catch (err) {
           failures += 1;
           const msg = (err as Error).message;
@@ -146,7 +181,12 @@ export async function runRule(q: Queries, rule: Rule, opts: RunOptions): Promise
   }
 
   log.info(`Run ${finished.id} finished: ${finished.status} (${finished.scanned_count} scanned, ${finished.matched_count} matched, ${finished.deleted_count} deleted)`);
-  if (rule.notify_slack_webhook) {
+  liveEvents.emitUpdate({ kind: 'run', rule_id: rule.id });
+  // Live runs that found nothing are noise in the audit trail: keep only the ones that acted or failed.
+  if (opts.trigger === 'live' && finished.status === 'ok' && finished.deleted_count === 0 && finished.matched_count === 0) {
+    q.deleteRun(finished.id);
+  }
+  if (rule.notify_slack_webhook && opts.trigger !== 'live') {
     await postSlack(rule.notify_slack_webhook, slackMessage(rule, finished));
   }
   return finished;

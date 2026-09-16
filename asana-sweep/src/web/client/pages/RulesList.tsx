@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import type { RuleSummary } from '../../../sweep/types';
-import { api, fmtDate, fmtRelative } from '../api';
+import { api, fmtDate, fmtRelative, useLiveUpdates } from '../api';
 import { StatusBadge } from '../components';
 
 export default function RulesList() {
@@ -22,9 +22,10 @@ export default function RulesList() {
 
   useEffect(() => {
     load();
-    const t = setInterval(load, 30000);
+    const t = setInterval(load, 60000);
     return () => clearInterval(t);
   }, [load]);
+  useLiveUpdates((e) => { if (e.kind === 'run' || e.kind === 'settings') load(); });
 
   const replace = (rule: RuleSummary) => setRules((rs) => (rs ?? []).map((r) => (r.id === rule.id ? rule : r)));
 

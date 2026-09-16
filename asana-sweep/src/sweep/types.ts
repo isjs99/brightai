@@ -35,7 +35,7 @@ export interface Run {
   started_at: string;
   finished_at: string | null;
   status: RunStatus;
-  trigger: 'schedule' | 'manual';
+  trigger: 'schedule' | 'manual' | 'live';
   dry_run: boolean;
   scanned_count: number;
   matched_count: number;
@@ -120,7 +120,7 @@ export interface Check {
   account_id: number;
   check_date: string;
   checked_at: string;
-  trigger: 'schedule' | 'manual';
+  trigger: 'schedule' | 'manual' | 'live';
   status: CheckStatus;
   am_total: number;
   am_done: number;
@@ -131,6 +131,8 @@ export interface Check {
   combined_complete: boolean;
   warnings: string[];
   error_message: string | null;
+  /** True for the locked deadline snapshot (the official record for the day). */
+  final: boolean;
 }
 
 export interface CheckWithItems extends Check {
@@ -139,7 +141,10 @@ export interface CheckWithItems extends Check {
 
 export interface AccountStatusRow {
   account: Account;
+  /** The recorded check for the date (locked at the deadline). */
   check: Check | null;
+  /** Latest live evaluation from the watcher, today only. */
+  live: Check | null;
   has_sweep_rule: boolean;
 }
 
@@ -151,6 +156,11 @@ export interface CheckSettings {
   schedule_text: string;
   next_run_at: string | null;
   is_running: boolean;
+  live_enabled: boolean;
+  live_interval_seconds: number;
+  live_sweep_enabled: boolean;
+  live_last_tick_at: string | null;
+  live_watching: number;
 }
 
 export interface AnalyticsDay {
@@ -186,6 +196,21 @@ export interface Analytics {
   days: AnalyticsDay[];
   accounts: AnalyticsAccount[];
   ams: AnalyticsAm[];
+}
+
+/** A task the sweep deleted, kept so the day's checklist check can still count it as done. */
+export interface Completion {
+  task_gid: string;
+  project_gid: string;
+  parent_gid: string | null;
+  name: string;
+  section_name: string | null;
+  assignee_name: string | null;
+  completed: boolean;
+  completed_at: string | null;
+  num_subtasks: number;
+  deleted_at: string;
+  run_id: number | null;
 }
 
 // ---- People (AMs / AAs) and Slack reminders ----

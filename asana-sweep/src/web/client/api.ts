@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import type {
   Account,
   AccountInput,
@@ -20,6 +21,51 @@ import type {
   Run,
   RunItem,
 } from '../../sweep/types';
+
+/**
+ * Subscribe to server-sent live updates. `onUpdate` fires (debounced) whenever a check, run or
+ * watcher tick changes state on the server, so pages can refetch without polling.
+ */
+export function useLiveUpdates(onUpdate: (e: { kind: string; account_id?: number; rule_id?: number }) => void, debounceMs = 400): boolean {
+  const [connected, setConnected] = useState(false);
+  const cb = useRef(onUpdate);
+  cb.current = onUpdate;
+  useEffect(() => {
+    let es: EventSource | null = null;
+    let timer: number | null = null;
+    let pending: { kind: string; account_id?: number; rule_id?: number } | null = null;
+    let closed = false;
+    const open = () => {
+      if (closed) return;
+      es = new EventSource('/api/events');
+      es.addEventListener('hello', () => setConnected(true));
+      es.addEventListener('update', (ev) => {
+        try {
+          pending = JSON.parse((ev as MessageEvent).data);
+        } catch {
+          pending = { kind: 'unknown' };
+        }
+        if (timer) window.clearTimeout(timer);
+        timer = window.setTimeout(() => {
+          if (pending) cb.current(pending);
+          pending = null;
+        }, debounceMs);
+      });
+      es.onerror = () => {
+        setConnected(false);
+        es?.close();
+        if (!closed) window.setTimeout(open, 5000);
+      };
+    };
+    open();
+    return () => {
+      closed = true;
+      if (timer) window.clearTimeout(timer);
+      es?.close();
+    };
+  }, [debounceMs]);
+  return connected;
+}
 
 export function fmtMoney(n: number | null | undefined, currency = '$'): string {
   if (n === null || n === undefined) return '–';
@@ -110,8 +156,11 @@ export const api = {
   listChecks: (date?: string) => call<{ date: string; today: string; rows: AccountStatusRow[]; dates: string[]; is_running: boolean }>('GET', `/checks${date ? `?date=${date}` : ''}`),
   runChecks: () => call<{ checked: number; rows: AccountStatusRow[] }>('POST', '/checks/run'),
   getCheck: (id: number) => call<{ check: CheckWithItems }>('GET', `/checks/${id}`),
+  getLiveCheck: (accountId: number) => call<{ check: CheckWithItems }>('GET', `/checks/${accountId}/live`),
+  liveRefresh: () => call<{ ok: true; rows: AccountStatusRow[] }>('POST', '/live/refresh'),
   getCheckSettings: () => call<{ settings: CheckSettings }>('GET', '/check-settings'),
-  saveCheckSettings: (s: Pick<CheckSettings, 'check_cron' | 'check_timezone' | 'check_enabled' | 'check_slack_webhook'>) => call<{ settings: CheckSettings }>('PUT', '/check-settings', s),
+  saveCheckSettings: (s: Pick<CheckSettings, 'check_cron' | 'check_timezone' | 'check_enabled' | 'check_slack_webhook' | 'live_enabled' | 'live_interval_seconds' | 'live_sweep_enabled'>) =>
+    call<{ settings: CheckSettings }>('PUT', '/check-settings', s),
   analytics: (days: number) => call<Analytics>('GET', `/analytics?days=${days}`),
   // People + reminders
   listPeople: () => call<{ people: Person[] }>('GET', '/people'),

@@ -4,16 +4,17 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Queries } from '../db/queries.js';
 import { Scheduler } from '../scheduler/index.js';
+import { LiveWatcher } from '../live/index.js';
 import { SharedPasswordAuth } from './auth.js';
 import { buildRouter } from './routes.js';
 
-export function createApp(q: Queries, scheduler: Scheduler) {
+export function createApp(q: Queries, scheduler: Scheduler, live: LiveWatcher) {
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '256kb' }));
 
   const auth = new SharedPasswordAuth();
-  app.use('/api', buildRouter(q, scheduler, auth));
+  app.use('/api', buildRouter(q, scheduler, auth, live));
 
   // Built front end (dist/client). In dev, Vite serves the client on :5173 and proxies /api here.
   const here = dirname(fileURLToPath(import.meta.url));

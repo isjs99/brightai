@@ -4,7 +4,8 @@ import { log } from '../logger.js';
 import { postSlack } from '../notify/slack.js';
 import { config } from '../config.js';
 import { evaluateChecklist, localDate } from './evaluate.js';
-import type { Account, CheckWithItems } from '../sweep/types.js';
+import { liveEvents } from '../live/events.js';
+import type { Account, CheckItem, CheckWithItems } from '../sweep/types.js';
 
 let checkRunning = false;
 
@@ -16,14 +17,33 @@ export function todayIn(tz: string): string {
   return localDate(new Date().toISOString(), tz);
 }
 
-/** Check one account for the given date. Always records a row (status error / unlinked when it cannot evaluate). */
-export async function checkAccount(q: Queries, account: Account, opts: { trigger: 'schedule' | 'manual'; tz: string; client?: AsanaClient }): Promise<CheckWithItems> {
+export interface CheckOptions {
+  trigger: 'schedule' | 'manual' | 'live';
+  tz: string;
+  client?: AsanaClient;
+  /** Lock the result as the official snapshot for the day (the deadline check). */
+  final?: boolean;
+}
+
+/**
+ * Check one account for the given date. Always records a row (status error / unlinked when it
+ * cannot evaluate). Every check also refreshes the live status; the recorded check is only
+ * overwritten while the day's snapshot has not been locked.
+ */
+export async function checkAccount(q: Queries, account: Account, opts: CheckOptions): Promise<CheckWithItems> {
   const client = opts.client ?? asana;
   const checkDate = todayIn(opts.tz);
-  const empty = { am_total: 0, am_done: 0, aa_total: 0, aa_done: 0, am_complete: false, aa_complete: false, combined_complete: false, warnings: [] as string[], items: [] };
+  const empty = { am_total: 0, am_done: 0, aa_total: 0, aa_done: 0, am_complete: false, aa_complete: false, combined_complete: false, warnings: [] as string[], items: [] as CheckItem[] };
+  const record = (data: Omit<CheckWithItems, 'id' | 'account_id' | 'check_date' | 'checked_at' | 'final' | 'trigger'>) => {
+    q.upsertLive(account.id, checkDate, data);
+    const stored = q.upsertCheck(account.id, checkDate, { ...data, trigger: opts.trigger, final: opts.final });
+    liveEvents.emit('update', { kind: 'check', account_id: account.id });
+    // Callers that want "what Asana looks like right now" get the live figures even after the lock.
+    return opts.trigger === 'live' && stored.final ? q.getLive(account.id)! : stored;
+  };
 
   if (!account.asana_project_gid) {
-    return q.upsertCheck(account.id, checkDate, { ...empty, trigger: opts.trigger, status: 'unlinked', error_message: 'No Asana checklist project linked.' });
+    return record({ ...empty, status: 'unlinked', error_message: 'No Asana checklist project linked.' });
   }
 
   try {
@@ -34,17 +54,35 @@ export async function checkAccount(q: Queries, account: Account, opts: { trigger
     for (const t of topLevel) {
       if (t.num_subtasks > 0) subtasksByParent.set(t.gid, await client.listSubtasks(t.gid));
     }
+    // Completed copies the sweep already deleted today still count as done.
+    const dayStart = new Date(Date.now() - 48 * 3600000).toISOString();
+    for (const c of q.listCompletionsSince(account.asana_project_gid, dayStart)) {
+      if (topLevel.some((t) => t.gid === c.task_gid)) continue;
+      const task: ChecklistTask = {
+        gid: c.task_gid,
+        name: c.name,
+        completed: c.completed,
+        completed_at: c.completed_at,
+        due_on: null,
+        assignee_name: c.assignee_name,
+        section_name: c.section_name,
+        num_subtasks: c.num_subtasks,
+        parent_gid: c.parent_gid,
+      };
+      if (c.parent_gid) subtasksByParent.set(c.parent_gid, [...(subtasksByParent.get(c.parent_gid) ?? []), task]);
+      else topLevel.push(task);
+    }
     const result = evaluateChecklist(topLevel, subtasksByParent, {
       checkDate,
       tz: opts.tz,
       amName: account.am_name,
       aaName: account.aa_name,
     });
-    return q.upsertCheck(account.id, checkDate, { ...result, trigger: opts.trigger, error_message: null });
+    return record({ ...result, error_message: null });
   } catch (err) {
     const msg = (err as Error).message ?? String(err);
     log.error(`Check failed for ${account.name}: ${msg}`);
-    return q.upsertCheck(account.id, checkDate, { ...empty, trigger: opts.trigger, status: 'error', error_message: msg });
+    return record({ ...empty, status: 'error', error_message: msg });
   }
 }
 
@@ -54,7 +92,7 @@ export async function checkAccount(q: Queries, account: Account, opts: { trigger
  */
 export async function runAllChecks(
   q: Queries,
-  opts: { trigger: 'schedule' | 'manual'; client?: AsanaClient; notify?: boolean; remind?: boolean },
+  opts: { trigger: 'schedule' | 'manual'; client?: AsanaClient; notify?: boolean; remind?: boolean; final?: boolean },
 ): Promise<CheckWithItems[] | null> {
   if (checkRunning) {
     log.warn(`Checklist check already running, skipping ${opts.trigger} trigger.`);
@@ -67,7 +105,7 @@ export async function runAllChecks(
     const accounts = q.listAccounts().filter((a) => a.enabled);
     log.info(`Checklist check started (${opts.trigger}) for ${accounts.length} account(s)`);
     for (const account of accounts) {
-      results.push(await checkAccount(q, account, { trigger: opts.trigger, tz, client: opts.client }));
+      results.push(await checkAccount(q, account, { trigger: opts.trigger, tz, client: opts.client, final: opts.final }));
     }
     const complete = results.filter((r) => r.combined_complete).length;
     log.info(`Checklist check finished: ${complete}/${results.length} accounts complete`);
