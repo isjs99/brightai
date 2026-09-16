@@ -31,6 +31,28 @@ export function gradeOf(score: number | null): Grade | null {
 
 export const attainmentOf = (gmv: number, target: number | null): number | null => (target && target > 0 ? Math.round((gmv / target) * 1000) / 10 : null);
 
+export interface BonusRule {
+  threshold: number; // previous-month GMV at which the lower growth rate applies (30k)
+  growthBelowPct: number; // required MoM growth below the threshold (100)
+  growthAbovePct: number; // required MoM growth at or above the threshold (40)
+}
+
+export const DEFAULT_BONUS_RULE: BonusRule = { threshold: 30000, growthBelowPct: 100, growthAbovePct: 40 };
+
+/** Required growth for an account given last month's GMV. Null when there is no base to grow from. */
+export function requiredGrowthPct(prevGmv: number | null, rule: BonusRule): number | null {
+  if (prevGmv === null || prevGmv <= 0) return null;
+  return prevGmv < rule.threshold ? rule.growthBelowPct : rule.growthAbovePct;
+}
+
+/** The GMV this month must reach for the bonus: last month × (1 + required growth). */
+export function bonusTarget(prevGmv: number | null, rule: BonusRule): number | null {
+  const g = requiredGrowthPct(prevGmv, rule);
+  return g === null ? null : Math.round(prevGmv! * (1 + g / 100));
+}
+
+export const growthPct = (now: number, prev: number | null): number | null => (prev && prev > 0 ? Math.round(((now - prev) / prev) * 1000) / 10 : null);
+
 /** Straight-line projection of month-end GMV from the month-to-date figure. */
 export function projectMonth(gmv: number, daysElapsed: number, daysInMonth: number): number | null {
   if (daysElapsed <= 0) return null;

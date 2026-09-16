@@ -18,6 +18,7 @@ export class Scheduler {
   private checkTask: ScheduledTask | null = null;
   private reminderTask: ScheduledTask | null = null;
   private gmvTask: ScheduledTask | null = null;
+  private gmvMonthlyTask: ScheduledTask | null = null;
 
   constructor(private q: Queries) {}
 
@@ -86,6 +87,12 @@ export class Scheduler {
       return;
     }
     this.gmvTask = cron.schedule(expr, () => syncGmv(this.q, { days: 10 }), { timezone: tz, name: 'gmv-sync' });
+    // Once a month, re-pull the whole previous month so last month's base for the bonus rule is final.
+    const monthly = this.q.getSetting('gmv_monthly_cron', '30 7 1 * *');
+    if (cron.validate(monthly)) {
+      this.gmvMonthlyTask?.destroy();
+      this.gmvMonthlyTask = cron.schedule(monthly, () => syncGmv(this.q, { days: 45 }), { timezone: tz, name: 'gmv-monthly' });
+    }
     log.info(`GMV sync scheduled: "${expr}" ${tz}`);
   }
 
@@ -107,6 +114,8 @@ export class Scheduler {
     this.reminderTask = null;
     this.gmvTask?.destroy();
     this.gmvTask = null;
+    this.gmvMonthlyTask?.destroy();
+    this.gmvMonthlyTask = null;
   }
 
   /** Re-read a rule from the database and (re)register or unregister it. */

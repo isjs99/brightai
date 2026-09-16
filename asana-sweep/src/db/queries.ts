@@ -88,6 +88,9 @@ function rowToAccount(r: Row): Account {
     asana_project_name: (r.asana_project_name as string) ?? '',
     enabled: Boolean(r.enabled),
     notes: (r.notes as string | null) || null,
+    commission_pct: r.commission_pct === null || r.commission_pct === undefined ? null : Number(r.commission_pct),
+    commission_basis: r.commission_basis === 'mor' ? 'mor' : 'gmv',
+    settlement_pct: r.settlement_pct === null || r.settlement_pct === undefined ? 100 : Number(r.settlement_pct),
     created_at: r.created_at as string,
     updated_at: r.updated_at as string,
   };
@@ -139,8 +142,8 @@ export class Queries {
   createAccount(input: AccountInput): Account {
     const res = this.db
       .prepare(
-        `INSERT INTO accounts (name, markets, am_name, aa_name, asana_project_gid, asana_project_name, enabled, notes)
-         VALUES (@name, @markets, @am_name, @aa_name, @asana_project_gid, @asana_project_name, @enabled, @notes)`,
+        `INSERT INTO accounts (name, markets, am_name, aa_name, asana_project_gid, asana_project_name, enabled, notes, commission_pct, commission_basis, settlement_pct)
+         VALUES (@name, @markets, @am_name, @aa_name, @asana_project_gid, @asana_project_name, @enabled, @notes, @commission_pct, @commission_basis, @settlement_pct)`,
       )
       .run({ ...input, enabled: input.enabled ? 1 : 0 });
     return this.getAccount(Number(res.lastInsertRowid))!;
@@ -150,7 +153,9 @@ export class Queries {
     const res = this.db
       .prepare(
         `UPDATE accounts SET name=@name, markets=@markets, am_name=@am_name, aa_name=@aa_name, asana_project_gid=@asana_project_gid,
-            asana_project_name=@asana_project_name, enabled=@enabled, notes=@notes, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+            asana_project_name=@asana_project_name, enabled=@enabled, notes=@notes,
+            commission_pct=@commission_pct, commission_basis=@commission_basis, settlement_pct=@settlement_pct,
+            updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
          WHERE id=@id`,
       )
       .run({ ...input, id, enabled: input.enabled ? 1 : 0 });
@@ -507,11 +512,11 @@ export class Queries {
       account_id: r.account_id as number,
       shop_id: r.shop_id as string,
       shop_name: r.shop_name as string,
-      currency: (r.currency as string) ?? '$',
+      currency: (r.currency as string) || 'EUR',
     };
   }
 
-  addShop(accountId: number, shopId: string, shopName: string, currency = '$'): AccountShop {
+  addShop(accountId: number, shopId: string, shopName: string, currency = 'EUR'): AccountShop {
     this.db
       .prepare(
         `INSERT INTO account_shops (account_id, shop_id, shop_name, currency) VALUES (?, ?, ?, ?)
@@ -553,6 +558,25 @@ export class Queries {
   getTargets(month: string): Map<number, number> {
     const rows = this.db.prepare('SELECT account_id, target FROM gmv_targets WHERE month = ?').all(month) as { account_id: number; target: number }[];
     return new Map(rows.map((r) => [r.account_id, r.target]));
+  }
+
+  getSettlements(month: string): Map<number, number> {
+    const rows = this.db.prepare('SELECT account_id, amount FROM settlements WHERE month = ?').all(month) as { account_id: number; amount: number }[];
+    return new Map(rows.map((r) => [r.account_id, r.amount]));
+  }
+
+  setSettlement(accountId: number, month: string, amount: number | null): void {
+    if (amount === null) this.db.prepare('DELETE FROM settlements WHERE account_id = ? AND month = ?').run(accountId, month);
+    else
+      this.db
+        .prepare(`INSERT INTO settlements (account_id, month, amount) VALUES (?, ?, ?) ON CONFLICT(account_id, month) DO UPDATE SET amount = excluded.amount`)
+        .run(accountId, month, amount);
+  }
+
+  setAccountDeal(id: number, deal: { commission_pct: number | null; commission_basis: 'gmv' | 'mor'; settlement_pct: number }): void {
+    this.db
+      .prepare(`UPDATE accounts SET commission_pct = ?, commission_basis = ?, settlement_pct = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`)
+      .run(deal.commission_pct, deal.commission_basis, deal.settlement_pct, id);
   }
 
   setTarget(accountId: number, month: string, target: number | null): void {

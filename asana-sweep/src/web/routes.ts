@@ -12,6 +12,7 @@ import { liveEvents } from '../live/events.js';
 import type { LiveWatcher } from '../live/index.js';
 import { buildCalendar, buildGmv, buildGrades } from '../reports/index.js';
 import { syncGmv } from '../gmv/sync.js';
+import { currencyForShop } from '../gmv/currency.js';
 import type { PersonInput, ReminderSettings } from '../sweep/types.js';
 import type { AuthProvider } from './auth.js';
 import { requireAuth } from './auth.js';
@@ -49,7 +50,19 @@ export function parseAccountInput(body: Record<string, unknown>): AccountInput {
     asana_project_name: String(body.asana_project_name ?? '').trim(),
     enabled: bool(body.enabled, true),
     notes: optText(body.notes),
+    ...parseDeal(body),
   };
+}
+
+/** Commission deal fields shared by the account form and the GMV page. */
+export function parseDeal(body: Record<string, unknown>): { commission_pct: number | null; commission_basis: 'gmv' | 'mor'; settlement_pct: number } {
+  const pctRaw = body.commission_pct;
+  const commission_pct = pctRaw === null || pctRaw === undefined || pctRaw === '' ? null : Number(pctRaw);
+  if (commission_pct !== null && (!Number.isFinite(commission_pct) || commission_pct < 0 || commission_pct > 100)) throw new HttpError(400, 'Commission % must be between 0 and 100.');
+  const commission_basis = body.commission_basis === 'mor' ? 'mor' : 'gmv';
+  const settlement_pct = body.settlement_pct === undefined || body.settlement_pct === null || body.settlement_pct === '' ? 100 : Number(body.settlement_pct);
+  if (!Number.isFinite(settlement_pct) || settlement_pct < 0 || settlement_pct > 200) throw new HttpError(400, 'Settlement % must be between 0 and 200.');
+  return { commission_pct, commission_basis, settlement_pct };
 }
 
 /** Validate and normalise a rule payload from the dashboard. Throws HttpError(400) on bad input. */
@@ -615,7 +628,51 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const shopName = String(body.shop_name ?? '').trim() || shopId;
     if (!q.getAccount(accountId)) throw new HttpError(404, 'Account not found');
     if (!/^[a-f0-9]{24}$/i.test(shopId)) throw new HttpError(400, 'Cruva shop id should be 24 hex characters.');
-    res.status(201).json({ shop: q.addShop(accountId, shopId, shopName) });
+    const currency = String(body.currency ?? '').trim().toUpperCase() || currencyForShop(shopName);
+    res.status(201).json({ shop: q.addShop(accountId, shopId, shopName, currency) });
+  });
+
+  /** Commission deals per account plus the month's actual net settlement for MoR accounts. */
+  r.put('/gmv/deals', (req, res) => {
+    const body = (req.body ?? {}) as { month?: string; deals?: Record<string, Record<string, unknown>>; am_share_pct?: unknown };
+    const month = String(body.month ?? '');
+    if (!/^\d{4}-\d{2}$/.test(month)) throw new HttpError(400, 'month must be YYYY-MM');
+    if (body.am_share_pct !== undefined) {
+      const s = Number(body.am_share_pct);
+      if (!Number.isFinite(s) || s < 0 || s > 100) throw new HttpError(400, 'AM share % must be between 0 and 100.');
+      q.setSetting('am_share_pct', String(s));
+    }
+    for (const [id, d] of Object.entries(body.deals ?? {})) {
+      const accountId = Number(id);
+      if (!q.getAccount(accountId)) continue;
+      q.setAccountDeal(accountId, parseDeal(d));
+      if ('net_settlement' in d) {
+        const v = d.net_settlement;
+        const n = v === null || v === '' || v === undefined ? null : Number(v);
+        if (n !== null && (!Number.isFinite(n) || n < 0)) throw new HttpError(400, `Bad net settlement for account ${id}`);
+        q.setSettlement(accountId, month, n);
+      }
+    }
+    res.json(buildGmv(q, month));
+  });
+
+  r.put('/gmv/settings', (req, res) => {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const fx: Record<string, number> = {};
+    for (const [k, v] of Object.entries((body.fx_to_eur ?? {}) as Record<string, unknown>)) {
+      const n = Number(v);
+      if (!/^[A-Z]{3}$/i.test(k) || !Number.isFinite(n) || n <= 0) throw new HttpError(400, `Bad FX rate for ${k}`);
+      fx[k.toUpperCase()] = n;
+    }
+    const threshold = Number(body.bonus_threshold ?? 30000);
+    const below = Number(body.bonus_growth_below ?? 100);
+    const above = Number(body.bonus_growth_above ?? 40);
+    if (![threshold, below, above].every((n) => Number.isFinite(n) && n >= 0)) throw new HttpError(400, 'Bonus rule values must be numbers.');
+    q.setSetting('fx_to_eur', JSON.stringify(fx));
+    q.setSetting('bonus_threshold', String(threshold));
+    q.setSetting('bonus_growth_below', String(below));
+    q.setSetting('bonus_growth_above', String(above));
+    res.json(buildGmv(q, String(body.month ?? '') || todayIn(checkTz()).slice(0, 7)));
   });
   r.delete('/gmv/shops/:id', (req, res) => {
     if (!q.removeShop(idParam(req))) throw new HttpError(404, 'Shop not found');

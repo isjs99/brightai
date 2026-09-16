@@ -128,7 +128,11 @@ GMV page. Every account is mapped to its Cruva shops (Accounts › shops, or the
 - **Daily sync** at 07:15 from the Cruva REST API when `CRUVA_API_KEY` is set. The endpoint path defaults to `/v1/shop/stats` on `https://api.cruva.com`; override with `CRUVA_STATS_PATH` if Cruva's docs say otherwise. "Sync from Cruva" pulls the last 40 days on demand.
 - **Import**: paste JSON rows of `{ shop_id, date, total_gmv, affiliate_gmv, units }`.
 
-Set a monthly GMV target per account with "Set monthly targets" ("Copy from last month" carries them forward). The page shows month-to-date GMV, attainment, and a straight-line projection to month end, per account and per AM.
+Shops report in their market currency (UK → GBP, PL → PLN, everything else EUR) and totals are converted to EUR with editable FX rates ("Rates & rule"). While the month is running, "to date" excludes today because today's figures are still moving. On the 1st of each month the whole previous month is re-pulled so last month's base is final.
+
+**Bonus rule.** Each account's target is derived from last month's GMV: under €30k it must double (+100%), at or above €30k it needs +40%. The page shows last month, the growth needed, the target, GMV to date, growth (projected while the month runs), and a Bonus column: on track / behind while running, eligible / behind once the month closes. Threshold and percentages are editable under "Rates & rule". "Override targets" replaces the rule for an account for that month.
+
+**Commission & AM share.** Each account records the deal: commission % and whether it applies to actual GMV or to the net settlement amount (Merchant of Record). For MoR deals an estimated settlement % is used until the month's actual net settlement is entered. Agency billing = base × commission %, and each AM's share (default 10%) of that is shown per account and per AM. Edit deals on the GMV page or on the account form.
 
 ### Grades
 

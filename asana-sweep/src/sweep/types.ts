@@ -94,6 +94,12 @@ export interface Account {
   asana_project_name: string;
   enabled: boolean;
   notes: string | null;
+  /** Agency commission on the base amount, in percent. Null = no deal recorded. */
+  commission_pct: number | null;
+  /** What the commission is calculated on: actual GMV, or the net settlement amount (Merchant of Record). */
+  commission_basis: 'gmv' | 'mor';
+  /** For MoR accounts: estimated net settlement as a percent of GMV, used until the actual figure is entered. */
+  settlement_pct: number;
   created_at: string;
   updated_at: string;
 }
@@ -287,45 +293,99 @@ export interface AccountShop {
 
 export interface GmvShopRow {
   shop: AccountShop;
+  /** In the shop's market currency. */
   gmv: number;
   affiliate_gmv: number;
   units: number;
+  /** Converted to the report currency. */
+  gmv_report: number;
+  prev_gmv: number;
   last_synced: string | null;
 }
+
+export type BonusStatus = 'eligible' | 'on_track' | 'behind' | 'no_base' | 'no_data';
 
 export interface GmvAccountRow {
   account: Account;
   shops: GmvShopRow[];
+  /** All figures below are in the report currency. */
   gmv: number;
   affiliate_gmv: number;
   units: number;
+  prev_gmv: number | null;
+  required_growth_pct: number | null;
   target: number | null;
+  target_source: 'rule' | 'manual' | null;
   attainment: number | null;
   projected: number | null;
   projected_attainment: number | null;
+  growth_pct: number | null;
+  bonus: BonusStatus;
   daily: { date: string; gmv: number }[];
+  /** Commission deal for the month, in the report currency. */
+  commission_basis: 'gmv' | 'mor';
+  commission_pct: number | null;
+  settlement_pct: number;
+  /** Actual net settlement entered for this month (MoR accounts), or null. */
+  net_settlement: number | null;
+  /** The amount the commission is calculated on. */
+  base_amount: number | null;
+  base_source: 'gmv' | 'settlement_actual' | 'settlement_estimate' | null;
+  agency_billing: number | null;
+  am_share: number | null;
 }
 
 export interface GmvAmRow {
   am_name: string;
   accounts: number;
   gmv: number;
+  prev_gmv: number | null;
   target: number | null;
   attainment: number | null;
   projected: number | null;
   projected_attainment: number | null;
+  growth_pct: number | null;
+  eligible: number;
+  on_track: number;
+  agency_billing: number | null;
+  am_share: number | null;
+}
+
+export interface GmvSettings {
+  report_currency: string;
+  fx_to_eur: Record<string, number>;
+  bonus_threshold: number;
+  bonus_growth_below: number;
+  bonus_growth_above: number;
+  /** AM entitlement as a percent of agency billing. */
+  am_share_pct: number;
 }
 
 export interface GmvData {
   month: string;
+  prev_month: string;
   from: string;
+  /** Last day included: yesterday while the month is running (today is excluded as incomplete). */
   to: string;
+  month_closed: boolean;
   days_in_month: number;
   days_elapsed: number;
   currency: string;
+  settings: GmvSettings;
   accounts: GmvAccountRow[];
   ams: GmvAmRow[];
-  totals: { gmv: number; target: number | null; attainment: number | null; projected: number | null };
+  totals: {
+    gmv: number;
+    prev_gmv: number | null;
+    target: number | null;
+    attainment: number | null;
+    projected: number | null;
+    growth_pct: number | null;
+    eligible: number;
+    on_track: number;
+    agency_billing: number | null;
+    am_share: number | null;
+  };
   last_sync: GmvSync | null;
   cruva_configured: boolean;
 }

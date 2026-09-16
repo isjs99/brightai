@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import type { Account, AccountInput, AccountStatusRow } from '../../../sweep/types';
 import { api } from '../api';
 
-const EMPTY: AccountInput = { name: '', markets: '', am_name: '', aa_name: '', asana_project_gid: null, asana_project_name: '', enabled: true, notes: '' };
+const EMPTY: AccountInput = { name: '', markets: '', am_name: '', aa_name: '', asana_project_gid: null, asana_project_name: '', enabled: true, notes: '', commission_pct: null, commission_basis: 'gmv', settlement_pct: 100 };
 
 function ProjectSearch({ value, onPick }: { value: { gid: string | null; name: string }; onPick: (gid: string | null, name: string) => void }) {
   const [q, setQ] = useState('');
@@ -69,6 +69,11 @@ function AccountForm({ initial, onSave, onCancel }: { initial: AccountInput; onS
         <label className="field"><span className="lbl">AA (account assistant)</span><input type="text" value={form.aa_name ?? ''} onChange={(e) => set('aa_name', e.target.value)} placeholder="DM" /><span className="help">Optional. Anyone who is not the AM counts as AA anyway; unassigned subtasks count as AA.</span></label>
         <label className="field"><span className="lbl">Asana checklist project</span><ProjectSearch value={{ gid: form.asana_project_gid, name: form.asana_project_name }} onPick={(gid, name) => setForm((f) => ({ ...f, asana_project_gid: gid, asana_project_name: name }))} /></label>
         <label className="field"><span className="lbl">Notes</span><input type="text" value={form.notes ?? ''} onChange={(e) => set('notes', e.target.value)} placeholder="e.g. OCT PAUSE" /></label>
+        <label className="field"><span className="lbl">Agency commission (%)</span><input type="number" min={0} max={100} step={0.5} value={form.commission_pct ?? ''} onChange={(e) => set('commission_pct', e.target.value === '' ? null : Number(e.target.value))} placeholder="e.g. 15" /><span className="help">The deal with this client. Leave blank if there is none.</span></label>
+        <label className="field"><span className="lbl">Commission on</span><select value={form.commission_basis} onChange={(e) => set('commission_basis', e.target.value as 'gmv' | 'mor')}><option value="gmv">Actual GMV</option><option value="mor">Net settlement (MoR)</option></select></label>
+        {form.commission_basis === 'mor' && (
+          <label className="field"><span className="lbl">Estimated settlement (% of GMV)</span><input type="number" min={0} max={200} value={form.settlement_pct} onChange={(e) => set('settlement_pct', Number(e.target.value))} /><span className="help">Used until the month's actual net settlement is entered on the GMV page.</span></label>
+        )}
         <label className="field check"><input type="checkbox" checked={form.enabled} onChange={(e) => set('enabled', e.target.checked)} /><span>Included in the daily check</span></label>
       </div>
       {error && <p className="error">{error}</p>}
@@ -112,7 +117,19 @@ export default function Accounts() {
     try { await api.patchAccount(a.id, { enabled: !a.enabled }); await load(); } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   };
 
-  const toInput = (a: Account): AccountInput => ({ name: a.name, markets: a.markets, am_name: a.am_name, aa_name: a.aa_name, asana_project_gid: a.asana_project_gid, asana_project_name: a.asana_project_name, enabled: a.enabled, notes: a.notes });
+  const toInput = (a: Account): AccountInput => ({
+    name: a.name,
+    markets: a.markets,
+    am_name: a.am_name,
+    aa_name: a.aa_name,
+    asana_project_gid: a.asana_project_gid,
+    asana_project_name: a.asana_project_name,
+    enabled: a.enabled,
+    notes: a.notes,
+    commission_pct: a.commission_pct,
+    commission_basis: a.commission_basis,
+    settlement_pct: a.settlement_pct,
+  });
 
   const linked = rows?.filter((r) => r.account.asana_project_gid).length ?? 0;
 

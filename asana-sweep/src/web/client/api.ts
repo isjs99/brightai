@@ -67,8 +67,15 @@ export function useLiveUpdates(onUpdate: (e: { kind: string; account_id?: number
   return connected;
 }
 
-export function fmtMoney(n: number | null | undefined, currency = '$'): string {
+export function fmtMoney(n: number | null | undefined, currency = 'EUR'): string {
   if (n === null || n === undefined) return '–';
+  if (/^[A-Z]{3}$/.test(currency)) {
+    try {
+      return new Intl.NumberFormat('en-GB', { style: 'currency', currency, maximumFractionDigits: 0 }).format(Math.round(n));
+    } catch {
+      /* unknown code: fall through */
+    }
+  }
   return `${currency}${Math.round(n).toLocaleString('en-GB')}`;
 }
 
@@ -178,6 +185,9 @@ export const api = {
   saveTargets: (month: string, targets: Record<number, number | null>) => call<GmvData>('PUT', '/gmv/targets', { month, targets }),
   copyTargets: (from: string, to: string) => call<{ copied: number }>('POST', '/gmv/targets/copy', { from, to }),
   syncGmv: () => call<{ sync: GmvSync }>('POST', '/gmv/sync'),
+  saveGmvSettings: (s: { month: string; fx_to_eur: Record<string, number>; bonus_threshold: number; bonus_growth_below: number; bonus_growth_above: number }) => call<GmvData>('PUT', '/gmv/settings', s),
+  saveDeals: (s: { month: string; am_share_pct?: number; deals: Record<number, { commission_pct: number | null; commission_basis: 'gmv' | 'mor'; settlement_pct: number; net_settlement?: number | null }> }) =>
+    call<GmvData>('PUT', '/gmv/deals', s),
   importGmv: (rows: unknown[]) => call<{ imported: number; skipped: number }>('POST', '/gmv/import', { rows }),
   addShop: (account_id: number, shop_id: string, shop_name: string) => call<{ shop: AccountShop }>('POST', '/gmv/shops', { account_id, shop_id, shop_name }),
   removeShop: (id: number) => call<{ ok: true }>('DELETE', `/gmv/shops/${id}`),

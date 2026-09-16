@@ -370,6 +370,48 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 7,
+    name: 'market currencies, fx rates, bonus rule, monthly gmv pull',
+    up(db) {
+      const set = db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)`);
+      set.run('report_currency', 'EUR');
+      set.run('fx_to_eur', JSON.stringify({ GBP: 1.16, PLN: 0.235, AUD: 0.6 }));
+      set.run('bonus_threshold', '30000');
+      set.run('bonus_growth_below', '100');
+      set.run('bonus_growth_above', '40');
+      set.run('gmv_monthly_cron', '30 7 1 * *');
+      db.prepare(`UPDATE settings SET value = 'EUR' WHERE key = 'gmv_currency' AND value = '$'`).run();
+
+      // Shops carry their market currency: UK → GBP, PL → PLN, AU → AUD, everything else EUR.
+      const shops = db.prepare('SELECT id, shop_name FROM account_shops').all() as { id: number; shop_name: string }[];
+      const upd = db.prepare('UPDATE account_shops SET currency = ? WHERE id = ?');
+      for (const s of shops) {
+        const tokens = s.shop_name.toUpperCase().replace(/[()\-–_,]/g, ' ').split(/\s+/);
+        const cur = tokens.includes('UK') || tokens.includes('GB') ? 'GBP' : tokens.includes('PL') ? 'PLN' : tokens.includes('AU') ? 'AUD' : 'EUR';
+        upd.run(cur, s.id);
+      }
+    },
+  },
+  {
+    version: 8,
+    name: 'commission deals, settlement basis, AM share',
+    up(db) {
+      db.exec(`
+        ALTER TABLE accounts ADD COLUMN commission_pct REAL;
+        ALTER TABLE accounts ADD COLUMN commission_basis TEXT NOT NULL DEFAULT 'gmv';
+        ALTER TABLE accounts ADD COLUMN settlement_pct REAL NOT NULL DEFAULT 100;
+
+        CREATE TABLE settlements (
+          account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          month TEXT NOT NULL,
+          amount REAL NOT NULL,
+          PRIMARY KEY (account_id, month)
+        );
+      `);
+      db.prepare(`INSERT OR IGNORE INTO settings (key, value) VALUES ('am_share_pct', '10')`).run();
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {
