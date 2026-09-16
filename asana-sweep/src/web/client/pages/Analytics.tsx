@@ -104,7 +104,7 @@ function Bar({ value }: { value: number | null }) {
   );
 }
 
-const CELL: Record<string, string> = { complete: '✓', partial: '◐', none: '○', empty: '·', error: '!', unlinked: '·' };
+const CELL: Record<string, string> = { complete: '✓', partial: '◐', none: '○', empty: '–', error: '!', unlinked: '–' };
 
 export default function AnalyticsPage() {
   const [days, setDays] = useState(30);
@@ -183,7 +183,7 @@ export default function AnalyticsPage() {
             <span className="cell"><span className="s-complete">✓</span> complete</span>
             <span className="cell"><span className="s-partial">◐</span> partial</span>
             <span className="cell"><span className="s-none">○</span> nothing done</span>
-            <span className="cell"><span className="s-empty">·</span> no tasks due / not linked</span>
+            <span className="cell"><span className="s-empty">–</span> no tasks due / not linked</span>
             <span className="cell"><span className="s-error">!</span> error</span>
             <span className="cell"><span className="s-null"> </span> not checked</span>
           </div>

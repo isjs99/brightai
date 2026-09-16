@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactElement } from 'react';
 import type { CalendarAccountRow, CalendarCell, CalendarData } from '../../../sweep/types';
 import { api, currentMonth, fmtPct, monthLabel, shiftMonth } from '../api';
 
-const CELL: Record<string, string> = { complete: '✓', partial: '◐', none: '○', empty: '·', error: '!', unlinked: '·' };
+const CELL: Record<string, string> = { complete: '✓', partial: '◐', none: '○', empty: '–', error: '!', unlinked: '–' };
 
 function Cell({ c, today }: { c: CalendarCell; today: string }) {
   const future = c.date > today;
@@ -82,7 +82,7 @@ export default function CalendarPage() {
             <span className="cell"><span className="s-complete">✓</span> complete</span>
             <span className="cell"><span className="s-partial">◐</span> partial</span>
             <span className="cell"><span className="s-none">○</span> nothing done</span>
-            <span className="cell"><span className="s-empty">·</span> no tasks / not linked</span>
+            <span className="cell"><span className="s-empty">–</span> no tasks / not linked</span>
             <span className="cell"><span className="s-error">!</span> error</span>
             <span className="cell"><span className="s-null"> </span> not checked</span>
             <span className="cell"><span className="s-future"> </span> upcoming</span>

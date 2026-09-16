@@ -174,9 +174,11 @@ table.heat td.cell { padding: 3px; text-align: center; }
 .cell .s-complete { background: var(--good-bg); color: var(--good-ink); }
 .cell .s-partial { background: var(--warn-bg); color: var(--warn-ink); }
 .cell .s-none { background: var(--crit-bg); color: var(--crit-ink); }
-.cell .s-empty, .cell .s-error, .cell .s-unlinked { background: var(--surface-3); color: var(--muted); }
-.cell .s-null { background: transparent; border: 1px dashed var(--border-strong); }
-.cell .s-future { background: transparent; }
+.cell span { font-family: var(--sans); line-height: 22px; }
+.cell .s-empty, .cell .s-unlinked { background: var(--surface-2); color: var(--faint); border: 1px solid var(--border); line-height: 20px; }
+.cell .s-error { background: var(--crit-bg); color: var(--crit-ink); border: 1px solid var(--crit-border); line-height: 20px; }
+.cell .s-null { background: transparent; border: 1px dashed var(--border-strong); line-height: 20px; }
+.cell .s-future { background: transparent; border: 1px dotted var(--border); line-height: 20px; opacity: .7; }
 .legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); margin: 8px 0; align-items: center; }
 .legend .cell { display: inline-flex; align-items: center; gap: 4px; }
 .item-list { margin: 0; padding: 0; list-style: none; }
