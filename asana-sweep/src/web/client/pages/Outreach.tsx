@@ -123,6 +123,8 @@ function Drafts({ data, isAdmin, busy, run, onNotice, onError, kind, initialDraf
           <span className={`badge ${s.gmail_connected ? 'good' : 'muted'}`}>{s.gmail_connected ? `Gmail: ${s.gmail_email}` : s.gmail_configured ? 'Gmail not connected' : 'Gmail: compose-link mode'}</span>
           <span className={`badge ${s.llm_configured ? 'good' : 'muted'}`}>{s.llm_configured ? 'Claude drafting' : 'Template drafting (no ANTHROPIC_API_KEY)'}</span>
           <select value={only} onChange={(e) => setOnly(e.target.value as 'open' | 'all')}><option value="open">Open drafts</option><option value="all">All incl. sent</option></select>
+          {isAdmin && kind === 'cold' && s.gmail_connected && list.some((d) => d.status === 'draft') && <button className="small" disabled={busy === 'gmailall'} onClick={() => run('gmailall', api.draftsToGmailAll, (r) => onNotice(`${r.saved} draft(s) saved to Gmail${r.errors.length ? `, ${r.errors.length} failed: ${r.errors.slice(0, 2).join(' · ')}` : ''}. Send them from your drafts folder, then mark each as sent.`))} title="Save every open draft into Gmail drafts in one go">{busy === 'gmailall' ? 'Saving…' : `Save all ${list.filter((d) => d.status === 'draft').length} to Gmail`}</button>}
+          {isAdmin && kind === 'cold' && <Link className="button small" to="/bd">Bulk draft from the pipeline</Link>}
         </div>
         {kind === 'cold' && <span className="sub">Draft from a decision maker in the BD pipeline. Emails use the brand name, not the shop handle, and headings become real bold in Gmail.</span>}
       </div>

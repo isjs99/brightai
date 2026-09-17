@@ -80,7 +80,9 @@ export function renderOutreachPrompt(r: DraftRequest): { system: string; user: s
   const sys: string[] = [];
   sys.push(`You draft outreach emails on behalf of ${r.senderName}, ${r.senderTitle}, a TikTok Shop Partner agency. You write exactly as he writes; the examples below are emails he actually sent.`);
   sys.push('Voice: warm but direct, short sentences, British English, no hype words, no exclamation marks. Opens "Hi <first name>," and signs off "Very best,\\n' + firstName(r.senderName) + '".');
-  sys.push('Impact first. The first sentence is about them, with the one number or signal that matters most (momentum, a fresh launch, a category they lead). Then the two or three Brightform facts most relevant to that shop, nothing else. Then one clear ask for a call. Cut everything that does not earn its place: no throat-clearing, no "I hope you are well", no restating what they already know.');
+  sys.push('Impact first. The first sentence is about them, with the one number or signal that matters most (momentum, a fresh launch). Then the two or three Brightform facts most relevant to that shop, nothing else. Then one clear ask for a call. Cut everything that does not earn its place: no throat-clearing, no "I hope you are well", no restating what they already know.');
+  sys.push('Never use an exclamation mark anywhere. Do not name the product category in the opener ("in Home Appliances", "in the beauty space") and never use filler like "caught our eye", "impressive", "exciting" or "I came across". State the number plainly; the reference email below is the shape to copy.');
+  sys.push('', '## Reference email (the shape and tone every draft should match)', REFERENCE_EMAIL);
   sys.push(`Call the company "${brand}". Never use the TikTok Shop handle or shop name in the subject or body. Numbers about the prospect must come from the facts given; never invent them. Claims about Brightform must come from the pitch block; never invent awards, clients or numbers.`);
   sys.push('Do not reuse dated specifics from the examples (travel dates, city visits, names). Do not mention FastMoss or that the data was pulled from a tool; phrase it as "we track" or "we noticed".');
   sys.push(`Write the email in ${lang}. Subject under 50 characters, plain, e.g. "${brand} x TikTok Shop <Market>" or a concrete hook.`);
@@ -113,6 +115,11 @@ export function renderOutreachPrompt(r: DraftRequest): { system: string; user: s
 }
 
 /** Pull {subject, body} out of the model output, tolerating text around the JSON. */
+/** Isaac never uses exclamation marks; models keep adding them, so strip them from generated copy. */
+export function dropExclamations(text: string): string {
+  return text.replace(/!+(?=\s|$)/g, '.').replace(/!+/g, '');
+}
+
 export function parseDraftJson(text: string): { subject: string; body: string } {
   const start = text.indexOf('{');
   const end = text.lastIndexOf('}');
@@ -121,14 +128,14 @@ export function parseDraftJson(text: string): { subject: string; body: string } 
       const j = JSON.parse(text.slice(start, end + 1)) as { subject?: unknown; body?: unknown };
       const subject = String(j.subject ?? '').trim();
       const body = String(j.body ?? '').replace(/\r\n/g, '\n').trim();
-      if (subject && body) return { subject, body };
+      if (subject && body) return { subject: dropExclamations(subject), body: dropExclamations(body) };
     } catch {
       /* fall through */
     }
   }
   // Model wrote "Subject: ...\n\n<body>" instead.
   const m = text.match(/^\s*Subject:\s*(.+)\n+([\s\S]+)$/i);
-  if (m) return { subject: m[1].trim(), body: m[2].trim() };
+  if (m) return { subject: dropExclamations(m[1].trim()), body: dropExclamations(m[2].trim()) };
   throw new Error('The draft came back in an unexpected shape. Try again.');
 }
 
@@ -137,14 +144,30 @@ export function tailoredOpener(p: BdProspect): string {
   const market = MARKET_NAMES[p.market] ?? p.market;
   const brand = brandDisplayName(p);
   const band = riseBand(p.rise_score);
-  if (p.new_shop_30d) return `${brand} has been live on TikTok Shop ${market} for under a month and is already at ${money(p.gmv_7d, p.currency)} a week${p.category ? ` in ${p.category}` : ''}. That is a strong start.`;
-  if (p.gmv_started_30d) return `${brand} only just started selling on TikTok Shop ${market} and is already doing ${money(p.gmv_7d, p.currency)} a week${p.category ? ` in ${p.category}` : ''}.`;
-  if (band === 'surging') return `${brand} is one of the fastest-rising shops on TikTok Shop ${market} right now: ${money(p.gmv_7d, p.currency)} in the last seven days, about ${Math.round((p.rise_score ?? 0) * 100)}% of everything the shop has sold to date.`;
-  if (band === 'rising') return `${brand} is climbing on TikTok Shop ${market}: ${money(p.gmv_7d, p.currency)} in the last seven days${p.category ? ` in ${p.category}` : ''}.`;
-  return `We run a number of ${p.category ? `${p.category.toLowerCase()} ` : ''}brands on TikTok Shop ${market} and ${brand}${p.gmv_7d ? ` (around ${money(p.gmv_7d, p.currency)} a week)` : ''} looks like a shop we could grow.`;
+  const week = money(p.gmv_7d, p.currency);
+  if (p.new_shop_30d && p.gmv_7d) return `${brand} has been live on TikTok Shop ${market} for under a month and is already at ${week} a week.`;
+  if (p.gmv_started_30d && p.gmv_7d) return `${brand} only just started selling on TikTok Shop ${market} and is already doing ${week} a week.`;
+  if (band === 'surging' && p.gmv_7d) return `${brand} is one of the fastest-rising shops on TikTok Shop ${market} right now: ${week} in the last seven days, about ${Math.round((p.rise_score ?? 0) * 100)}% of everything the shop has sold to date.`;
+  if (band === 'rising' && p.gmv_7d) return `${brand} is climbing on TikTok Shop ${market}, with ${week} in the last seven days.`;
+  if (p.gmv_7d) return `${brand} did ${week} on TikTok Shop ${market} in the last seven days, and we think there is a lot more in it.`;
+  return `We track TikTok Shop ${market} closely and ${brand} looks like a shop we could grow.`;
 }
 
-/** The three proof points that matter most for a shop, from the pitch block's known facts. */
+/** The one-paragraph Brightform line used in the short note, as Isaac writes it. */
+export const BRIGHTFORM_LINE = 'I run Brightform, the #1 TikTok Shop Partner in the EU by GMV, with 42 shops under management across DE, FR, IT, ES and the UK. We run affiliate and creator programmes at scale, live commerce from our own studio and GMV Max, and act as Merchant of Record for brands without a local entity.';
+
+/** Reference email (a real one Isaac sent) that every draft should look like: opener with the number, one Brightform paragraph, one ask. */
+export const REFERENCE_EMAIL = `Hi Gianluca,
+
+Beper is climbing on TikTok Shop Italy, with €37,733 in the last seven days.
+
+${BRIGHTFORM_LINE}
+
+Would you be open to a quick call to see whether there's a fit? Grab a slot here: https://calendly.com/isaacsinclair/30min
+
+Very best,
+Isaac`;
+
 export function proofPoints(p: BdProspect): string[] {
   const out = ['#1 TikTok Shop Partner in Germany and the EU by GMV for 6 consecutive months, 42 shops under management'];
   out.push(p.shop_type === 'cross_border' ? 'Merchant of Record for brands without a local entity: logistics, invoicing and VAT handled by us' : 'Affiliate and creator programmes at scale, plus live commerce from our own studio');
@@ -158,18 +181,17 @@ export function templateDraft(r: DraftRequest): { subject: string; body: string 
   const market = MARKET_NAMES[p.market] ?? p.market;
   const brand = brandDisplayName(p);
   const subject = `${brand} x TikTok Shop ${market}`;
-  const cta = r.bookingUrl ? `Worth 20 minutes on a call? Grab a slot here:\n${r.bookingUrl}` : `Worth 20 minutes on a call to see whether there is a fit?`;
+  const cta = r.bookingUrl ? `Would you be open to a quick call to see whether there's a fit? Grab a slot here: ${r.bookingUrl}` : `Would you be open to a quick call to see whether there's a fit?`;
   const parts = [`Hi ${firstName(r.contact.name)},`, '', tailoredOpener(p), ''];
   if (r.style === 'intro') {
-    parts.push(`I run Brightform, a TikTok Shop Partner agency across DE, UK, FR, IT and ES. Why us:`, ...proofPoints(p).map((x) => `- ${x}`), '');
+    parts.push(`I run Brightform, the #1 TikTok Shop Partner in the EU by GMV, with 42 shops under management across DE, FR, IT, ES and the UK. Why us:`, ...proofPoints(p).map((x) => `- ${x}`), '');
   } else {
-    parts.push(`I run Brightform, the #1 TikTok Shop Partner in Germany and the EU by GMV, with 42 shops under management. We take shops like ${brand} from a good start to a scaled affiliate, live and GMV Max engine.`, '');
+    parts.push(BRIGHTFORM_LINE, '');
   }
   parts.push(cta, '', 'Very best,', firstName(r.senderName));
   return { subject, body: parts.join('\n') };
 }
 
-/** Plain-text email body -> HTML for Gmail: paragraphs, "- " bullets, short "Heading:" lines in bold, links clickable. */
 export function bodyToHtml(body: string): string {
   const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   const linkify = (t: string) => esc(t).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1">$1</a>');

@@ -19,6 +19,10 @@ import BdPage from './pages/Bd';
 import InboxPage from './pages/Inbox';
 import OutreachPage from './pages/Outreach';
 import MonitorPage from './pages/Monitor';
+import StockPage from './pages/Stock';
+import ReportsPage from './pages/Reports';
+import PlaybookPage from './pages/Playbook';
+import CopilotPage from './pages/Copilot';
 
 type Theme = 'system' | 'light' | 'dark';
 
@@ -129,6 +133,10 @@ const NAV: { section: string; items: { to: string; label: string; end?: boolean 
       { to: '/gmv-max', label: 'GMV Max' },
       { to: '/inbox', label: 'CS & affiliate inbox' },
       { to: '/monitor', label: 'Account monitor' },
+      { to: '/stock', label: 'Stock' },
+      { to: '/reports', label: 'Client reports' },
+      { to: '/playbook', label: 'Cruva playbook' },
+      { to: '/copilot', label: 'Client copilot' },
     ],
   },
   {
@@ -230,6 +238,10 @@ export default function App() {
               <Route path="/bd" element={<BdPage />} />
               <Route path="/outreach" element={<OutreachPage />} />
               <Route path="/monitor" element={<MonitorPage />} />
+              <Route path="/stock" element={<StockPage />} />
+              <Route path="/reports" element={<ReportsPage />} />
+              <Route path="/playbook" element={<PlaybookPage />} />
+              <Route path="/copilot" element={<CopilotPage />} />
               <Route path="/inbox" element={<InboxPage />} />
               <Route path="*" element={<Navigate to="/checklists" replace />} />
             </Routes>

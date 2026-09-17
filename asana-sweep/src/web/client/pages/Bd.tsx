@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import type { BdContact, BdData, BdOutreachEvent, BdProspect, BdProspectPatch, BdStatus, TtsContact } from '../../../sweep/types';
 import { api, fmtMoney, fmtPct, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
+
+const LANGS: Record<string, string> = { en: 'English', de: 'German', fr: 'French', it: 'Italian', es: 'Spanish' };
 
 const STATUSES: { v: BdStatus; label: string; cls: string }[] = [
   { v: 'new', label: 'New', cls: 'muted' },
@@ -40,6 +42,9 @@ export default function BdPage() {
   const [f, setF] = useState({ market: '', status: '', category: '', owner: '', rise: '', type: '', launch: '', contact: '', q: '', sort: 'rise' as 'rise' | 'gmv' | 'name' | 'updated' | 'launched', hideDone: false, hideClients: true });
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
+  const [showBulk, setShowBulk] = useState(false);
+  const [bulk, setBulk] = useState({ style: 'short' as 'short' | 'intro', language: 'en', limit: 25, to_gmail: true, include_drafted: false, instructions: '' });
+  const [bulkPreview, setBulkPreview] = useState<{ count: number; items: { prospect_id: number; shop_name: string; brand: string | null; market: string; contact_name: string; contact_title: string | null; contact_email: string | null }[] } | null>(null);
   const [add, setAdd] = useState({ shop_name: '', market: 'DE', brand: '', category: '', website: '', tiktok_handle: '', notes: '' });
   const [importText, setImportText] = useState('');
   const isAdmin = useIsAdmin();
@@ -123,6 +128,8 @@ export default function BdPage() {
       navigate(`/outreach?draft=${r.draft.id}`);
     } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   };
+
+  useEffect(() => { if (showBulk) api.bulkPreview({ market: f.market, include_drafted: bulk.include_drafted }).then(setBulkPreview).catch((e) => setError((e as Error).message)); }, [showBulk, f.market, bulk.include_drafted, data?.bulk_draft.finished_at]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!data) return <p>{error ?? 'Loading…'}</p>;
 
@@ -271,7 +278,9 @@ export default function BdPage() {
             ? <button onClick={() => run('enrich', api.stopEnrich, 'Stopping after the current prospect.')}>Stop</button>
             : <button onClick={() => { const n = data.prospects.filter((p) => !p.is_client && p.status !== 'won' && p.status !== 'lost' && p.contacts.length === 0).length; if (n && window.confirm(`Find decision makers for ${n} prospects without contacts? Reveals the top 4 per company (about ${n * 4} Apollo credits at most). Runs in the background.`)) run('enrich', () => api.enrichAll(), `Enrichment started for ${n} prospects.`); }} disabled={busy === 'enrich'} title="Resolve each company in Apollo, pull its decision makers and reveal the top four">Find decision makers for all</button>)}
           {connected && <span className="badge muted">Live</span>}
-          {isAdmin && <button onClick={() => { setShowAdd((s) => !s); setShowImport(false); }}>{showAdd ? 'Close' : '+ Prospect'}</button>}
+          {data.bulk_draft.running && <span className="badge accent" title={data.bulk_draft.current ?? ''}>Drafting {data.bulk_draft.done}/{data.bulk_draft.total}{data.bulk_draft.current ? ` · ${data.bulk_draft.current}` : ''}</span>}
+          {isAdmin && <button className={showBulk ? '' : 'primary'} onClick={() => { setShowBulk((s) => !s); setShowAdd(false); setShowImport(false); }} title="Draft one email per prospect to its most senior relevant decision maker and save them all into Gmail drafts">{showBulk ? 'Close' : 'Bulk emails to Gmail'}</button>}
+          {isAdmin && <button onClick={() => { setShowAdd((s) => !s); setShowImport(false); setShowBulk(false); }}>{showAdd ? 'Close' : '+ Prospect'}</button>}
           {isAdmin && <button onClick={() => { setShowImport((s) => !s); setShowAdd(false); }}>{showImport ? 'Close' : 'Import pull'}</button>}
         </div>
       </div>
@@ -287,6 +296,41 @@ export default function BdPage() {
           <label className="field"><span className="lbl">Website</span><input type="text" value={add.website} onChange={(e) => setAdd({ ...add, website: e.target.value })} placeholder="brand.com" /></label>
           <label className="field"><span className="lbl">TikTok handle</span><input type="text" value={add.tiktok_handle} onChange={(e) => setAdd({ ...add, tiktok_handle: e.target.value.replace(/^@/, '') })} /></label>
           <button className="primary" onClick={createProspect} disabled={!add.shop_name.trim() || busy === 'add'}>Add</button>
+        </div>
+      )}
+      {isAdmin && showBulk && (
+        <div className="card" style={{ marginBottom: 16 }}>
+          <div className="page-head" style={{ marginBottom: 6 }}>
+            <div>
+              <h3 style={{ margin: 0 }}>Bulk emails</h3>
+              <p className="hint" style={{ margin: 0 }}>One email per prospect to the most senior, most relevant contact with an email address (founder or ecommerce lead first, interns and support inboxes last). Prospects already drafted or emailed are skipped. Drafts land in {data.gmail_connected ? 'your Gmail drafts folder, ready to send in a batch' : 'Growth > Outreach emails (connect Gmail in Settings to save them straight into Gmail)'}.</p>
+            </div>
+            <div className="actions">
+              {data.bulk_draft.running
+                ? <button onClick={() => run('bulk', api.stopBulkDraft, 'Stopping after the current prospect.')}>Stop</button>
+                : <button className="primary" disabled={busy === 'bulk' || !bulkPreview || bulkPreview.count === 0} onClick={() => run('bulk', () => api.bulkDraft({ market: f.market || undefined, limit: bulk.limit, language: bulk.language, style: bulk.style, instructions: bulk.instructions || undefined, to_gmail: bulk.to_gmail, include_drafted: bulk.include_drafted }), `Drafting ${Math.min(bulk.limit, bulkPreview?.count ?? 0)} emails in the background${bulk.to_gmail && data.gmail_connected ? ', saving each one to Gmail' : ''}.`)}>{busy === 'bulk' ? 'Starting…' : `Draft ${Math.min(bulk.limit, bulkPreview?.count ?? 0)} emails`}</button>}
+            </div>
+          </div>
+          <div className="inline-form" style={{ marginBottom: 8 }}>
+            <label className="field" style={{ minWidth: 110 }}><span className="lbl">Shape</span><select value={bulk.style} onChange={(e) => setBulk({ ...bulk, style: e.target.value as 'short' | 'intro' })}><option value="short">Short note</option><option value="intro">Introduction</option></select></label>
+            <label className="field" style={{ minWidth: 110 }}><span className="lbl">Language</span><select value={bulk.language} onChange={(e) => setBulk({ ...bulk, language: e.target.value })}>{Object.entries(LANGS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+            <label className="field" style={{ minWidth: 90 }}><span className="lbl">Max this run</span><input type="number" min={1} max={200} value={bulk.limit} onChange={(e) => setBulk({ ...bulk, limit: Math.max(1, Number(e.target.value) || 1) })} /></label>
+            <label className="field" style={{ flex: 1, minWidth: 220 }}><span className="lbl">Extra instructions (optional)</span><input type="text" value={bulk.instructions} onChange={(e) => setBulk({ ...bulk, instructions: e.target.value })} placeholder="e.g. mention our Milan studio" /></label>
+            <label className="field check" title="Save each draft into the connected Gmail account"><input type="checkbox" checked={bulk.to_gmail} disabled={!data.gmail_connected} onChange={(e) => setBulk({ ...bulk, to_gmail: e.target.checked })} /> Save to Gmail drafts</label>
+            <label className="field check" title="Also draft for prospects that already have an open draft or a sent email"><input type="checkbox" checked={bulk.include_drafted} onChange={(e) => setBulk({ ...bulk, include_drafted: e.target.checked })} /> Include already drafted</label>
+          </div>
+          {data.bulk_draft.finished_at && !data.bulk_draft.running && <div className="banner info" style={{ marginBottom: 8 }}>Last run: {data.bulk_draft.drafted} drafted, {data.bulk_draft.gmail} saved to Gmail{data.bulk_draft.errors.length ? `, ${data.bulk_draft.errors.length} error(s): ${data.bulk_draft.errors.slice(0, 3).join(' · ')}` : ''}. <Link to="/outreach">Review drafts</Link>.</div>}
+          {!bulkPreview ? <p className="sub">Loading candidates…</p> : bulkPreview.count === 0 ? <p className="sub">Nothing to draft{f.market ? ` in ${f.market}` : ''}: every prospect with an email contact already has a draft or an email out. Tick "Include already drafted" to redo them.</p> : (
+            <>
+              <p className="sub">{bulkPreview.count} prospect(s){f.market ? ` in ${f.market}` : ' across all markets'} ready, sorted by momentum. Who gets the email:</p>
+              <div style={{ maxHeight: 220, overflow: 'auto' }}>
+                <table className="table compact">
+                  <thead><tr><th>Brand</th><th>Market</th><th>Contact</th><th>Title</th><th>Email</th></tr></thead>
+                  <tbody>{bulkPreview.items.slice(0, bulk.limit).map((i) => <tr key={i.prospect_id}><td>{i.brand ?? i.shop_name}</td><td>{i.market}</td><td>{i.contact_name}</td><td className="sub">{i.contact_title ?? ''}</td><td className="sub">{i.contact_email}</td></tr>)}</tbody>
+                </table>
+              </div>
+            </>
+          )}
         </div>
       )}
       {isAdmin && showImport && (

@@ -889,6 +889,156 @@ const migrations: Migration[] = [
       for (const n of SEED_WATCHLIST) wl.run(n);
     },
   },
+  {
+    version: 18,
+    name: 'stock, incidents, client reports, cruva playbook, client copilot',
+    up(db) {
+      db.exec(`
+        ALTER TABLE accounts ADD COLUMN slack_channel TEXT;
+        ALTER TABLE accounts ADD COLUMN client_slack_channel TEXT;
+        ALTER TABLE accounts ADD COLUMN client_domain TEXT;
+
+        CREATE TABLE stock_snapshots (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          shop_id TEXT NOT NULL,
+          account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+          product_id TEXT NOT NULL,
+          product_title TEXT NOT NULL,
+          sku_id TEXT NOT NULL,
+          sku_name TEXT,
+          seller_sku TEXT,
+          product_status TEXT,
+          on_hand INTEGER NOT NULL DEFAULT 0,
+          sold_7d INTEGER NOT NULL DEFAULT 0,
+          sold_30d INTEGER NOT NULL DEFAULT 0,
+          captured_at TEXT NOT NULL,
+          UNIQUE(shop_id, sku_id)
+        );
+        CREATE INDEX stock_snapshots_shop ON stock_snapshots(shop_id);
+
+        CREATE TABLE stock_overrides (
+          shop_id TEXT NOT NULL,
+          sku_id TEXT NOT NULL,
+          velocity REAL,
+          exclude INTEGER NOT NULL DEFAULT 0,
+          note TEXT,
+          PRIMARY KEY (shop_id, sku_id)
+        );
+
+        CREATE TABLE incidents (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+          shop_id TEXT,
+          kind TEXT NOT NULL,
+          severity TEXT NOT NULL,
+          title TEXT NOT NULL,
+          message TEXT NOT NULL,
+          recommended_action TEXT NOT NULL,
+          owner TEXT,
+          owner_slack_id TEXT,
+          source TEXT NOT NULL DEFAULT 'monitor',
+          dedupe_key TEXT NOT NULL,
+          slack_channel TEXT,
+          slack_ts TEXT,
+          posted_at TEXT,
+          post_error TEXT,
+          resolved_at TEXT,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+        CREATE INDEX incidents_open ON incidents(resolved_at, dedupe_key);
+
+        CREATE TABLE client_reports (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          period TEXT NOT NULL,
+          period_start TEXT NOT NULL,
+          period_end TEXT NOT NULL,
+          title TEXT NOT NULL,
+          body TEXT NOT NULL,
+          data_json TEXT NOT NULL DEFAULT '{}',
+          generator TEXT NOT NULL DEFAULT 'template',
+          status TEXT NOT NULL DEFAULT 'draft',
+          slack_channel TEXT,
+          sent_at TEXT,
+          created_by TEXT,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+
+        CREATE TABLE cruva_playbook (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          kind TEXT NOT NULL,
+          key TEXT NOT NULL,
+          language TEXT NOT NULL DEFAULT '*',
+          name TEXT NOT NULL,
+          description TEXT,
+          config_json TEXT NOT NULL DEFAULT '{}',
+          enabled INTEGER NOT NULL DEFAULT 1,
+          source TEXT NOT NULL DEFAULT 'seed',
+          updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          UNIQUE(kind, key, language)
+        );
+
+        CREATE TABLE cruva_setup (
+          shop_id TEXT NOT NULL,
+          playbook_key TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          status TEXT NOT NULL,
+          remote_id TEXT,
+          remote_name TEXT,
+          checked_at TEXT,
+          applied_at TEXT,
+          note TEXT,
+          PRIMARY KEY (shop_id, kind, playbook_key)
+        );
+
+        CREATE TABLE cruva_remote_items (
+          shop_id TEXT NOT NULL,
+          kind TEXT NOT NULL,
+          remote_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          raw_json TEXT,
+          seen_at TEXT NOT NULL,
+          PRIMARY KEY (shop_id, kind, remote_id)
+        );
+
+        CREATE TABLE copilot_questions (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+          source TEXT NOT NULL DEFAULT 'manual',
+          channel TEXT,
+          thread_ts TEXT,
+          external_id TEXT,
+          asked_by TEXT,
+          question TEXT NOT NULL,
+          answer TEXT,
+          sources_json TEXT NOT NULL DEFAULT '[]',
+          generator TEXT,
+          status TEXT NOT NULL DEFAULT 'open',
+          created_by TEXT,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          answered_at TEXT,
+          sent_at TEXT
+        );
+        CREATE UNIQUE INDEX copilot_questions_external ON copilot_questions(source, external_id) WHERE external_id IS NOT NULL;
+
+        CREATE TABLE copilot_evidence (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL,
+          ref TEXT NOT NULL,
+          title TEXT NOT NULL,
+          text TEXT NOT NULL,
+          url TEXT,
+          occurred_at TEXT,
+          indexed_at TEXT NOT NULL,
+          UNIQUE(kind, ref)
+        );
+        CREATE INDEX copilot_evidence_account ON copilot_evidence(account_id, kind);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

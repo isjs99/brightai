@@ -24,6 +24,15 @@ import type {
   BdActivityRow,
   MonitorFlag,
   CruvaOutreach,
+  StockSku,
+  Incident,
+  ClientReport,
+  ReportData,
+  PlaybookItem,
+  PlaybookKind,
+  PlaybookSetupCell,
+  CopilotQuestion,
+  CopilotSource,
   InboxConversation,
   InboxMessage,
   InboxReply,
@@ -120,6 +129,9 @@ function rowToAccount(r: Row): Account {
     commission_pct: r.commission_pct === null || r.commission_pct === undefined ? null : Number(r.commission_pct),
     commission_basis: r.commission_basis === 'mor' ? 'mor' : 'gmv',
     settlement_pct: r.settlement_pct === null || r.settlement_pct === undefined ? 100 : Number(r.settlement_pct),
+    slack_channel: (r.slack_channel as string | null) || null,
+    client_slack_channel: (r.client_slack_channel as string | null) || null,
+    client_domain: (r.client_domain as string | null) || null,
     created_at: r.created_at as string,
     updated_at: r.updated_at as string,
   };
@@ -171,8 +183,8 @@ export class Queries {
   createAccount(input: AccountInput): Account {
     const res = this.db
       .prepare(
-        `INSERT INTO accounts (name, markets, am_name, aa_name, asana_project_gid, asana_project_name, enabled, notes, commission_pct, commission_basis, settlement_pct)
-         VALUES (@name, @markets, @am_name, @aa_name, @asana_project_gid, @asana_project_name, @enabled, @notes, @commission_pct, @commission_basis, @settlement_pct)`,
+        `INSERT INTO accounts (name, markets, am_name, aa_name, asana_project_gid, asana_project_name, enabled, notes, commission_pct, commission_basis, settlement_pct, slack_channel, client_slack_channel, client_domain)
+         VALUES (@name, @markets, @am_name, @aa_name, @asana_project_gid, @asana_project_name, @enabled, @notes, @commission_pct, @commission_basis, @settlement_pct, @slack_channel, @client_slack_channel, @client_domain)`,
       )
       .run({ ...input, enabled: input.enabled ? 1 : 0 });
     return this.getAccount(Number(res.lastInsertRowid))!;
@@ -184,6 +196,7 @@ export class Queries {
         `UPDATE accounts SET name=@name, markets=@markets, am_name=@am_name, aa_name=@aa_name, asana_project_gid=@asana_project_gid,
             asana_project_name=@asana_project_name, enabled=@enabled, notes=@notes,
             commission_pct=@commission_pct, commission_basis=@commission_basis, settlement_pct=@settlement_pct,
+            slack_channel=@slack_channel, client_slack_channel=@client_slack_channel, client_domain=@client_domain,
             updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
          WHERE id=@id`,
       )
@@ -1752,4 +1765,275 @@ export class Queries {
     return this.db.prepare(`UPDATE accounts SET ${sets.join(', ')}, updated_at = @now WHERE id = @id`).run(params).changes > 0;
   }
 
+  /** Set only the Slack / client fields of an account (from the incidents, reports or copilot pages). */
+  setAccountChannels(id: number, s: Partial<{ slack_channel: string | null; client_slack_channel: string | null; client_domain: string | null }>): Account | null {
+    const sets: string[] = [];
+    const params: Record<string, unknown> = { id };
+    for (const k of ['slack_channel', 'client_slack_channel', 'client_domain'] as const) {
+      if (s[k] !== undefined) { sets.push(`${k} = @${k}`); params[k] = s[k] ? String(s[k]).trim() : null; }
+    }
+    if (!sets.length) return this.getAccount(id);
+    this.db.prepare(`UPDATE accounts SET ${sets.join(', ')}, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = @id`).run(params);
+    return this.getAccount(id);
+  }
+
+  // ---- Stock snapshots ----
+
+  replaceStockSnapshot(shopId: string, accountId: number | null, rows: Omit<StockSku, 'shop_id' | 'account_id' | 'captured_at' | 'velocity_override' | 'exclude' | 'note'>[], capturedAt = new Date().toISOString()): number {
+    const del = this.db.prepare('DELETE FROM stock_snapshots WHERE shop_id = ?');
+    const ins = this.db.prepare(`INSERT INTO stock_snapshots (shop_id, account_id, product_id, product_title, sku_id, sku_name, seller_sku, product_status, on_hand, sold_7d, sold_30d, captured_at)
+      VALUES (@shop_id, @account_id, @product_id, @product_title, @sku_id, @sku_name, @seller_sku, @product_status, @on_hand, @sold_7d, @sold_30d, @captured_at)
+      ON CONFLICT(shop_id, sku_id) DO UPDATE SET product_title = excluded.product_title, sku_name = excluded.sku_name, seller_sku = excluded.seller_sku, product_status = excluded.product_status, on_hand = excluded.on_hand, sold_7d = excluded.sold_7d, sold_30d = excluded.sold_30d, captured_at = excluded.captured_at, account_id = excluded.account_id`);
+    let n = 0;
+    this.db.transaction(() => {
+      del.run(shopId);
+      for (const r of rows) n += ins.run({ ...r, shop_id: shopId, account_id: accountId, captured_at: capturedAt }).changes;
+    })();
+    return n;
+  }
+
+  listStock(shopId?: string): StockSku[] {
+    const rows = (shopId
+      ? this.db.prepare('SELECT s.*, o.velocity AS velocity_override, o.exclude AS exclude, o.note AS note FROM stock_snapshots s LEFT JOIN stock_overrides o ON o.shop_id = s.shop_id AND o.sku_id = s.sku_id WHERE s.shop_id = ? ORDER BY s.product_title COLLATE NOCASE, s.sku_name COLLATE NOCASE').all(shopId)
+      : this.db.prepare('SELECT s.*, o.velocity AS velocity_override, o.exclude AS exclude, o.note AS note FROM stock_snapshots s LEFT JOIN stock_overrides o ON o.shop_id = s.shop_id AND o.sku_id = s.sku_id ORDER BY s.shop_id, s.product_title COLLATE NOCASE').all()) as Row[];
+    return rows.map((r) => ({
+      shop_id: r.shop_id as string, account_id: (r.account_id as number | null) ?? null, product_id: r.product_id as string, product_title: r.product_title as string, sku_id: r.sku_id as string, sku_name: (r.sku_name as string | null) ?? null, seller_sku: (r.seller_sku as string | null) ?? null, product_status: (r.product_status as string | null) ?? null,
+      on_hand: Number(r.on_hand), sold_7d: Number(r.sold_7d), sold_30d: Number(r.sold_30d), captured_at: r.captured_at as string,
+      velocity_override: r.velocity_override === null || r.velocity_override === undefined ? null : Number(r.velocity_override), exclude: Boolean(r.exclude), note: (r.note as string | null) ?? null,
+    }));
+  }
+
+  setStockOverride(shopId: string, skuId: string, o: { velocity?: number | null; exclude?: boolean; note?: string | null }): void {
+    const cur = this.db.prepare('SELECT * FROM stock_overrides WHERE shop_id = ? AND sku_id = ?').get(shopId, skuId) as Row | undefined;
+    const velocity = o.velocity !== undefined ? o.velocity : ((cur?.velocity as number | null) ?? null);
+    const exclude = o.exclude !== undefined ? o.exclude : Boolean(cur?.exclude);
+    const note = o.note !== undefined ? o.note : ((cur?.note as string | null) ?? null);
+    if (velocity === null && !exclude && !note) { this.db.prepare('DELETE FROM stock_overrides WHERE shop_id = ? AND sku_id = ?').run(shopId, skuId); return; }
+    this.db.prepare('INSERT INTO stock_overrides (shop_id, sku_id, velocity, exclude, note) VALUES (?, ?, ?, ?, ?) ON CONFLICT(shop_id, sku_id) DO UPDATE SET velocity = excluded.velocity, exclude = excluded.exclude, note = excluded.note').run(shopId, skuId, velocity, exclude ? 1 : 0, note);
+  }
+
+  // ---- Incidents ----
+
+  private rowToIncident(r: Row): Incident {
+    return {
+      id: r.id as number, account_id: (r.account_id as number | null) ?? null, account_name: (r.account_name as string | null) ?? null, shop_id: (r.shop_id as string | null) ?? null, kind: r.kind as string, severity: r.severity as Incident['severity'],
+      title: r.title as string, message: r.message as string, recommended_action: r.recommended_action as string, owner: (r.owner as string | null) ?? null, owner_slack_id: (r.owner_slack_id as string | null) ?? null, source: r.source as string, dedupe_key: r.dedupe_key as string,
+      slack_channel: (r.slack_channel as string | null) ?? null, slack_ts: (r.slack_ts as string | null) ?? null, posted_at: (r.posted_at as string | null) ?? null, post_error: (r.post_error as string | null) ?? null, resolved_at: (r.resolved_at as string | null) ?? null, created_at: r.created_at as string,
+    };
+  }
+
+  listIncidents(opts: { open?: boolean; limit?: number } = {}): Incident[] {
+    return (this.db.prepare(`SELECT i.*, a.name AS account_name FROM incidents i LEFT JOIN accounts a ON a.id = i.account_id ${opts.open ? 'WHERE i.resolved_at IS NULL' : ''} ORDER BY i.created_at DESC LIMIT ?`).all(opts.limit ?? 300) as Row[]).map((r) => this.rowToIncident(r));
+  }
+
+  getIncident(id: number): Incident | null {
+    const r = this.db.prepare('SELECT i.*, a.name AS account_name FROM incidents i LEFT JOIN accounts a ON a.id = i.account_id WHERE i.id = ?').get(id) as Row | undefined;
+    return r ? this.rowToIncident(r) : null;
+  }
+
+  /** Open incident with this key, or one resolved less than cooldownHours ago (so a flapping condition does not spam Slack). */
+  findIncidentByKey(key: string, cooldownHours: number): Incident | null {
+    const cut = new Date(Date.now() - cooldownHours * 3600000).toISOString();
+    const r = this.db.prepare('SELECT i.*, a.name AS account_name FROM incidents i LEFT JOIN accounts a ON a.id = i.account_id WHERE i.dedupe_key = ? AND (i.resolved_at IS NULL OR i.resolved_at > ?) ORDER BY i.created_at DESC LIMIT 1').get(key, cut) as Row | undefined;
+    return r ? this.rowToIncident(r) : null;
+  }
+
+  createIncident(i: Omit<Incident, 'id' | 'account_name' | 'slack_ts' | 'posted_at' | 'post_error' | 'resolved_at' | 'created_at'>): Incident {
+    const res = this.db.prepare(`INSERT INTO incidents (account_id, shop_id, kind, severity, title, message, recommended_action, owner, owner_slack_id, source, dedupe_key, slack_channel)
+      VALUES (@account_id, @shop_id, @kind, @severity, @title, @message, @recommended_action, @owner, @owner_slack_id, @source, @dedupe_key, @slack_channel)`).run(i);
+    return this.getIncident(Number(res.lastInsertRowid))!;
+  }
+
+  updateIncident(id: number, patch: Partial<Pick<Incident, 'slack_ts' | 'posted_at' | 'post_error' | 'resolved_at' | 'slack_channel' | 'message' | 'recommended_action'>>): Incident | null {
+    const keys = Object.keys(patch) as (keyof typeof patch)[];
+    if (keys.length) this.db.prepare(`UPDATE incidents SET ${keys.map((k) => `${k} = @${k}`).join(', ')} WHERE id = @id`).run({ ...patch, id });
+    return this.getIncident(id);
+  }
+
+  /** Resolve open incidents whose key is not in the live set (only for the given source). */
+  resolveMissingIncidents(source: string, liveKeys: Set<string>): Incident[] {
+    const open = this.listIncidents({ open: true }).filter((i) => i.source === source && !liveKeys.has(i.dedupe_key));
+    const now = new Date().toISOString();
+    for (const i of open) this.updateIncident(i.id, { resolved_at: now });
+    return open.map((i) => ({ ...i, resolved_at: now }));
+  }
+
+  // ---- Client reports ----
+
+  private rowToReport(r: Row): ClientReport {
+    return {
+      id: r.id as number, account_id: r.account_id as number, account_name: (r.account_name as string | null) ?? '', period: r.period as ClientReport['period'], period_start: r.period_start as string, period_end: r.period_end as string,
+      title: r.title as string, body: r.body as string, data: parseJson<ReportData>(r.data_json, {} as ReportData), generator: r.generator as ClientReport['generator'], status: r.status as ClientReport['status'],
+      slack_channel: (r.slack_channel as string | null) ?? null, sent_at: (r.sent_at as string | null) ?? null, created_by: (r.created_by as string | null) ?? null, created_at: r.created_at as string, updated_at: r.updated_at as string,
+    };
+  }
+
+  listReports(): ClientReport[] {
+    return (this.db.prepare('SELECT r.*, a.name AS account_name FROM client_reports r JOIN accounts a ON a.id = r.account_id ORDER BY r.updated_at DESC LIMIT 200').all() as Row[]).map((r) => this.rowToReport(r));
+  }
+
+  getReport(id: number): ClientReport | null {
+    const r = this.db.prepare('SELECT r.*, a.name AS account_name FROM client_reports r JOIN accounts a ON a.id = r.account_id WHERE r.id = ?').get(id) as Row | undefined;
+    return r ? this.rowToReport(r) : null;
+  }
+
+  createReport(i: { account_id: number; period: 'weekly' | 'monthly'; period_start: string; period_end: string; title: string; body: string; data: ReportData; generator: 'claude' | 'template'; slack_channel: string | null; created_by: string | null }): ClientReport {
+    const res = this.db.prepare(`INSERT INTO client_reports (account_id, period, period_start, period_end, title, body, data_json, generator, slack_channel, created_by) VALUES (@account_id, @period, @period_start, @period_end, @title, @body, @data_json, @generator, @slack_channel, @created_by)`)
+      .run({ ...i, data_json: JSON.stringify(i.data) });
+    return this.getReport(Number(res.lastInsertRowid))!;
+  }
+
+  updateReport(id: number, patch: Partial<{ title: string; body: string; data: ReportData; generator: 'claude' | 'template'; status: 'draft' | 'sent'; slack_channel: string | null; sent_at: string | null }>): ClientReport | null {
+    const sets: string[] = [];
+    const params: Record<string, unknown> = { id };
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined) continue;
+      if (k === 'data') { sets.push('data_json = @data_json'); params.data_json = JSON.stringify(v); continue; }
+      sets.push(`${k} = @${k}`); params[k] = v;
+    }
+    if (sets.length) this.db.prepare(`UPDATE client_reports SET ${sets.join(', ')}, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = @id`).run(params);
+    return this.getReport(id);
+  }
+
+  deleteReport(id: number): boolean {
+    return this.db.prepare('DELETE FROM client_reports WHERE id = ?').run(id).changes > 0;
+  }
+
+  // ---- Cruva playbook ----
+
+  private rowToPlaybook(r: Row): PlaybookItem {
+    return { id: r.id as number, kind: r.kind as PlaybookKind, key: r.key as string, language: r.language as string, name: r.name as string, description: (r.description as string | null) ?? null, config: parseJson<Record<string, unknown>>(r.config_json, {}), enabled: Boolean(r.enabled), source: r.source as string, updated_at: r.updated_at as string };
+  }
+
+  listPlaybook(): PlaybookItem[] {
+    return (this.db.prepare('SELECT * FROM cruva_playbook ORDER BY kind, key, language').all() as Row[]).map((r) => this.rowToPlaybook(r));
+  }
+
+  getPlaybookItem(id: number): PlaybookItem | null {
+    const r = this.db.prepare('SELECT * FROM cruva_playbook WHERE id = ?').get(id) as Row | undefined;
+    return r ? this.rowToPlaybook(r) : null;
+  }
+
+  upsertPlaybookItem(i: { kind: PlaybookKind; key: string; language: string; name: string; description?: string | null; config: Record<string, unknown>; enabled?: boolean; source?: string }): PlaybookItem {
+    this.db.prepare(`INSERT INTO cruva_playbook (kind, key, language, name, description, config_json, enabled, source) VALUES (@kind, @key, @language, @name, @description, @config_json, @enabled, @source)
+      ON CONFLICT(kind, key, language) DO UPDATE SET name = excluded.name, description = excluded.description, config_json = excluded.config_json, enabled = excluded.enabled, source = excluded.source, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')`)
+      .run({ kind: i.kind, key: i.key, language: i.language, name: i.name, description: i.description ?? null, config_json: JSON.stringify(i.config), enabled: i.enabled === false ? 0 : 1, source: i.source ?? 'manual' });
+    return (this.db.prepare('SELECT * FROM cruva_playbook WHERE kind = ? AND key = ? AND language = ?').get(i.kind, i.key, i.language) as Row | undefined) ? this.rowToPlaybook(this.db.prepare('SELECT * FROM cruva_playbook WHERE kind = ? AND key = ? AND language = ?').get(i.kind, i.key, i.language) as Row) : (undefined as never);
+  }
+
+  seedPlaybookIfEmpty(items: Parameters<Queries['upsertPlaybookItem']>[0][]): number {
+    if ((this.db.prepare('SELECT COUNT(*) AS n FROM cruva_playbook').get() as { n: number }).n > 0) return 0;
+    let n = 0;
+    this.db.transaction(() => { for (const i of items) { this.upsertPlaybookItem({ ...i, source: 'seed' }); n += 1; } })();
+    return n;
+  }
+
+  updatePlaybookItem(id: number, patch: Partial<{ name: string; description: string | null; config: Record<string, unknown>; enabled: boolean; language: string }>): PlaybookItem | null {
+    const sets: string[] = [];
+    const params: Record<string, unknown> = { id };
+    if (patch.name !== undefined) { sets.push('name = @name'); params.name = patch.name; }
+    if (patch.description !== undefined) { sets.push('description = @description'); params.description = patch.description; }
+    if (patch.config !== undefined) { sets.push('config_json = @config_json'); params.config_json = JSON.stringify(patch.config); }
+    if (patch.enabled !== undefined) { sets.push('enabled = @enabled'); params.enabled = patch.enabled ? 1 : 0; }
+    if (patch.language !== undefined) { sets.push('language = @language'); params.language = patch.language; }
+    if (sets.length) this.db.prepare(`UPDATE cruva_playbook SET ${sets.join(', ')}, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = @id`).run(params);
+    return this.getPlaybookItem(id);
+  }
+
+  deletePlaybookItem(id: number): boolean {
+    return this.db.prepare('DELETE FROM cruva_playbook WHERE id = ?').run(id).changes > 0;
+  }
+
+  listPlaybookCells(): PlaybookSetupCell[] {
+    return (this.db.prepare('SELECT * FROM cruva_setup').all() as Row[]).map((r) => ({ shop_id: r.shop_id as string, kind: r.kind as PlaybookKind, playbook_key: r.playbook_key as string, status: r.status as PlaybookSetupCell['status'], remote_id: (r.remote_id as string | null) ?? null, remote_name: (r.remote_name as string | null) ?? null, checked_at: (r.checked_at as string | null) ?? null, applied_at: (r.applied_at as string | null) ?? null, note: (r.note as string | null) ?? null }));
+  }
+
+  setPlaybookCell(c: { shop_id: string; kind: PlaybookKind; playbook_key: string; status: PlaybookSetupCell['status']; remote_id?: string | null; remote_name?: string | null; checked_at?: string | null; applied_at?: string | null; note?: string | null }): void {
+    const cur = this.db.prepare('SELECT * FROM cruva_setup WHERE shop_id = ? AND kind = ? AND playbook_key = ?').get(c.shop_id, c.kind, c.playbook_key) as Row | undefined;
+    this.db.prepare(`INSERT INTO cruva_setup (shop_id, kind, playbook_key, status, remote_id, remote_name, checked_at, applied_at, note) VALUES (@shop_id, @kind, @playbook_key, @status, @remote_id, @remote_name, @checked_at, @applied_at, @note)
+      ON CONFLICT(shop_id, kind, playbook_key) DO UPDATE SET status = excluded.status, remote_id = excluded.remote_id, remote_name = excluded.remote_name, checked_at = excluded.checked_at, applied_at = excluded.applied_at, note = excluded.note`)
+      .run({ shop_id: c.shop_id, kind: c.kind, playbook_key: c.playbook_key, status: c.status, remote_id: c.remote_id !== undefined ? c.remote_id : ((cur?.remote_id as string | null) ?? null), remote_name: c.remote_name !== undefined ? c.remote_name : ((cur?.remote_name as string | null) ?? null), checked_at: c.checked_at !== undefined ? c.checked_at : ((cur?.checked_at as string | null) ?? null), applied_at: c.applied_at !== undefined ? c.applied_at : ((cur?.applied_at as string | null) ?? null), note: c.note !== undefined ? c.note : ((cur?.note as string | null) ?? null) });
+  }
+
+  replaceRemoteItems(shopId: string, kind: PlaybookKind, items: { remote_id: string; name: string; enabled: boolean; raw?: unknown }[]): number {
+    const now = new Date().toISOString();
+    const del = this.db.prepare('DELETE FROM cruva_remote_items WHERE shop_id = ? AND kind = ?');
+    const ins = this.db.prepare('INSERT OR REPLACE INTO cruva_remote_items (shop_id, kind, remote_id, name, enabled, raw_json, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+    let n = 0;
+    this.db.transaction(() => { del.run(shopId, kind); for (const i of items) n += ins.run(shopId, kind, i.remote_id, i.name, i.enabled ? 1 : 0, i.raw === undefined ? null : JSON.stringify(i.raw).slice(0, 20000), now).changes; })();
+    return n;
+  }
+
+  listRemoteItems(shopId?: string): { shop_id: string; kind: PlaybookKind; remote_id: string; name: string; enabled: boolean; seen_at: string }[] {
+    return ((shopId ? this.db.prepare('SELECT shop_id, kind, remote_id, name, enabled, seen_at FROM cruva_remote_items WHERE shop_id = ?').all(shopId) : this.db.prepare('SELECT shop_id, kind, remote_id, name, enabled, seen_at FROM cruva_remote_items').all()) as Row[]).map((r) => ({ shop_id: r.shop_id as string, kind: r.kind as PlaybookKind, remote_id: r.remote_id as string, name: r.name as string, enabled: Boolean(r.enabled), seen_at: r.seen_at as string }));
+  }
+
+  // ---- Client question copilot ----
+
+  private rowToQuestion(r: Row): CopilotQuestion {
+    return {
+      id: r.id as number, account_id: (r.account_id as number | null) ?? null, account_name: (r.account_name as string | null) ?? null, source: r.source as CopilotQuestion['source'], channel: (r.channel as string | null) ?? null, thread_ts: (r.thread_ts as string | null) ?? null, external_id: (r.external_id as string | null) ?? null,
+      asked_by: (r.asked_by as string | null) ?? null, question: r.question as string, answer: (r.answer as string | null) ?? null, sources: parseJson<CopilotSource[]>(r.sources_json, []), generator: (r.generator as CopilotQuestion['generator']) ?? null, status: r.status as CopilotQuestion['status'],
+      created_by: (r.created_by as string | null) ?? null, created_at: r.created_at as string, answered_at: (r.answered_at as string | null) ?? null, sent_at: (r.sent_at as string | null) ?? null,
+    };
+  }
+
+  listQuestions(limit = 200): CopilotQuestion[] {
+    return (this.db.prepare('SELECT c.*, a.name AS account_name FROM copilot_questions c LEFT JOIN accounts a ON a.id = c.account_id ORDER BY c.created_at DESC LIMIT ?').all(limit) as Row[]).map((r) => this.rowToQuestion(r));
+  }
+
+  getQuestion(id: number): CopilotQuestion | null {
+    const r = this.db.prepare('SELECT c.*, a.name AS account_name FROM copilot_questions c LEFT JOIN accounts a ON a.id = c.account_id WHERE c.id = ?').get(id) as Row | undefined;
+    return r ? this.rowToQuestion(r) : null;
+  }
+
+  /** Returns null when a question with this source + external id already exists. */
+  createQuestion(i: { account_id: number | null; source: CopilotQuestion['source']; channel?: string | null; thread_ts?: string | null; external_id?: string | null; asked_by?: string | null; question: string; created_by?: string | null }): CopilotQuestion | null {
+    if (i.external_id && this.db.prepare('SELECT 1 FROM copilot_questions WHERE source = ? AND external_id = ?').get(i.source, i.external_id)) return null;
+    const res = this.db.prepare('INSERT INTO copilot_questions (account_id, source, channel, thread_ts, external_id, asked_by, question, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(i.account_id, i.source, i.channel ?? null, i.thread_ts ?? null, i.external_id ?? null, i.asked_by ?? null, i.question, i.created_by ?? null);
+    return this.getQuestion(Number(res.lastInsertRowid));
+  }
+
+  updateQuestion(id: number, patch: Partial<{ answer: string | null; sources: CopilotSource[]; generator: CopilotQuestion['generator']; status: CopilotQuestion['status']; answered_at: string | null; sent_at: string | null; account_id: number | null; question: string }>): CopilotQuestion | null {
+    const sets: string[] = [];
+    const params: Record<string, unknown> = { id };
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined) continue;
+      if (k === 'sources') { sets.push('sources_json = @sources_json'); params.sources_json = JSON.stringify(v); continue; }
+      sets.push(`${k} = @${k}`); params[k] = v;
+    }
+    if (sets.length) this.db.prepare(`UPDATE copilot_questions SET ${sets.join(', ')} WHERE id = @id`).run(params);
+    return this.getQuestion(id);
+  }
+
+  deleteQuestion(id: number): boolean {
+    return this.db.prepare('DELETE FROM copilot_questions WHERE id = ?').run(id).changes > 0;
+  }
+
+  upsertEvidence(rows: { account_id: number | null; kind: string; ref: string; title: string; text: string; url?: string | null; occurred_at?: string | null }[]): number {
+    const now = new Date().toISOString();
+    const stmt = this.db.prepare(`INSERT INTO copilot_evidence (account_id, kind, ref, title, text, url, occurred_at, indexed_at) VALUES (@account_id, @kind, @ref, @title, @text, @url, @occurred_at, @indexed_at)
+      ON CONFLICT(kind, ref) DO UPDATE SET account_id = excluded.account_id, title = excluded.title, text = excluded.text, url = excluded.url, occurred_at = excluded.occurred_at, indexed_at = excluded.indexed_at`);
+    let n = 0;
+    this.db.transaction(() => { for (const r of rows) n += stmt.run({ url: null, occurred_at: null, ...r, text: r.text.slice(0, 60000), indexed_at: now }).changes; })();
+    return n;
+  }
+
+  listEvidence(opts: { accountId?: number | null; kinds?: string[] } = {}): { id: number; account_id: number | null; kind: string; ref: string; title: string; text: string; url: string | null; occurred_at: string | null; indexed_at: string }[] {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.accountId !== undefined && opts.accountId !== null) { where.push('(account_id = ? OR account_id IS NULL)'); params.push(opts.accountId); }
+    if (opts.kinds?.length) { where.push(`kind IN (${opts.kinds.map(() => '?').join(',')})`); params.push(...opts.kinds); }
+    return (this.db.prepare(`SELECT * FROM copilot_evidence ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY occurred_at DESC`).all(...params) as Row[]).map((r) => ({ id: r.id as number, account_id: (r.account_id as number | null) ?? null, kind: r.kind as string, ref: r.ref as string, title: r.title as string, text: r.text as string, url: (r.url as string | null) ?? null, occurred_at: (r.occurred_at as string | null) ?? null, indexed_at: r.indexed_at as string }));
+  }
+
+  hasEvidence(kind: string, ref: string): boolean {
+    return Boolean(this.db.prepare('SELECT 1 FROM copilot_evidence WHERE kind = ? AND ref = ?').get(kind, ref));
+  }
+
+  evidenceCounts(): Record<string, number> {
+    const out: Record<string, number> = {};
+    for (const r of this.db.prepare('SELECT kind, COUNT(*) AS n FROM copilot_evidence GROUP BY kind').all() as { kind: string; n: number }[]) out[r.kind] = r.n;
+    return out;
+  }
 }

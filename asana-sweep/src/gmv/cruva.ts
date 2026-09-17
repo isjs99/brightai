@@ -112,4 +112,52 @@ export function parseStats(body: unknown): DailyGmv[] {
   }));
 }
 
+/** Endpoint paths for the CRM objects; Cruva's public REST docs were not reachable, so they are overridable via CRUVA_ENDPOINTS (JSON) or the cruva_endpoints setting. */
+export const DEFAULT_CRUVA_ENDPOINTS: Record<string, string> = { automation: '/v1/automations', workflow: '/v1/workflows', email_campaign: '/v1/email-campaigns', group: '/v1/groups', list: '/v1/lists' };
+
+export function cruvaEndpoints(override?: string | null): Record<string, string> {
+  const out = { ...DEFAULT_CRUVA_ENDPOINTS };
+  for (const src of [process.env.CRUVA_ENDPOINTS, override]) {
+    if (!src) continue;
+    try {
+      for (const [k, v] of Object.entries(JSON.parse(src) as Record<string, string>)) if (typeof v === 'string' && v.startsWith('/')) out[k] = v;
+    } catch { /* ignore bad JSON */ }
+  }
+  return out;
+}
+
+export class CruvaCrmClient {
+  constructor(private apiKey: string = process.env.CRUVA_API_KEY?.trim() ?? '', private baseUrl: string = (process.env.CRUVA_BASE_URL?.trim() || 'https://api.cruva.com').replace(/\/+$/, ''), private fetchFn: typeof fetch = fetch) {}
+
+  get configured(): boolean {
+    return Boolean(this.apiKey);
+  }
+
+  async request<T = unknown>(method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', path: string, shopId: string, body?: unknown, query?: Record<string, string>): Promise<T> {
+    if (!this.apiKey) throw new Error('CRUVA_API_KEY is not set.');
+    const url = new URL(this.baseUrl + path);
+    for (const [k, v] of Object.entries(query ?? {})) url.searchParams.set(k, v);
+    let res: Response;
+    for (let attempt = 1; ; attempt++) {
+      res = await this.fetchFn(url, { method, headers: { 'Content-Type': 'application/json', 'x-api-key': this.apiKey, 'x-shop-id': shopId }, body: body === undefined ? undefined : JSON.stringify(body) });
+      if (res.status === 429 && attempt < 5) { await new Promise((r) => setTimeout(r, 500 * 2 ** attempt)); continue; }
+      break;
+    }
+    const text = await res.text();
+    if (res.status === 404) throw new Error(`Cruva endpoint ${path} not found (404). Set CRUVA_ENDPOINTS to the right paths, or paste the MCP listing instead.`);
+    if (!res.ok) throw new Error(`Cruva ${res.status} ${method} ${path}: ${text.slice(0, 200)}`);
+    try { return JSON.parse(text) as T; } catch { throw new Error(`Cruva returned non-JSON for ${path}`); }
+  }
+
+  /** List a CRM object type; accepts { data: [...] }, { items: [...] }, { automations: [...] } or a bare array. */
+  async list(path: string, shopId: string): Promise<Record<string, unknown>[]> {
+    const body = await this.request<unknown>('GET', path, shopId, undefined, { page_size: '100' });
+    if (Array.isArray(body)) return body as Record<string, unknown>[];
+    const o = (body ?? {}) as Record<string, unknown>;
+    for (const k of ['data', 'items', 'results', 'automations', 'workflows', 'campaigns', 'groups', 'lists']) if (Array.isArray(o[k])) return o[k] as Record<string, unknown>[];
+    return [];
+  }
+}
+
 export const cruva = new CruvaClient();
+export const cruvaCrm = new CruvaCrmClient();

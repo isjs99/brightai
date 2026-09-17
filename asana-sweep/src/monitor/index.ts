@@ -36,6 +36,8 @@ export const RULES: Omit<MonitorRule, 'enabled'>[] = [
 export class AccountMonitor {
   private scanning = false;
   private timer: NodeJS.Timeout | null = null;
+  /** Called after every scan (the incident engine turns flags into Slack alerts). */
+  afterScan: (() => Promise<void>) | null = null;
 
   constructor(private q: Queries, private client: TtsClient = tts) {}
 
@@ -89,6 +91,7 @@ export class AccountMonitor {
       this.q.setSetting('monitor_last_scan_error', '');
       if (r.opened || r.resolved) log.info(`Account monitor: ${found.length} flag(s), ${r.opened} new, ${r.resolved} resolved`);
       liveEvents.emitUpdate({ kind: 'monitor' });
+      if (this.afterScan) await this.afterScan().catch((err) => log.warn(`Incident pass failed: ${(err as Error).message}`));
       return { ...r, found: found.length };
     } catch (err) {
       this.q.setSetting('monitor_last_scan_error', (err as Error).message);

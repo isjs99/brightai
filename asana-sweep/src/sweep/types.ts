@@ -100,6 +100,12 @@ export interface Account {
   commission_basis: 'gmv' | 'mor';
   /** For MoR accounts: estimated net settlement as a percent of GMV, used until the actual figure is entered. */
   settlement_pct: number;
+  /** Internal Slack channel for this account (incidents land here); default channel when empty. */
+  slack_channel: string | null;
+  /** Shared client Slack channel (reports go here, client questions are picked up from here). */
+  client_slack_channel: string | null;
+  /** Client email domain, used to spot client emails and tl;dv calls with them. */
+  client_domain: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -894,6 +900,22 @@ export interface BdData {
   enrich: BdEnrichStatus;
   /** Enrich new prospects with Apollo automatically after every pull or import. */
   auto_enrich: boolean;
+  bulk_draft: BulkDraftStatus;
+}
+
+/** Progress of a bulk "draft an email to the best contact of every prospect" run. */
+export interface BulkDraftStatus {
+  running: boolean;
+  total: number;
+  done: number;
+  drafted: number;
+  gmail: number;
+  skipped: number;
+  current: string | null;
+  errors: string[];
+  started_at: string | null;
+  finished_at: string | null;
+  to_gmail: boolean;
 }
 
 /** Progress of the background "find decision makers for every prospect" job. */
@@ -1073,4 +1095,226 @@ export interface ReplyContext {
   history: { when: string; who: string; text: string }[];
   cruva_outreach: { when: string | null; summary: string }[];
   library: { title: string; body: string; language: string; scope: string }[];
+}
+
+// ---- Stock ----
+
+export interface StockSku {
+  shop_id: string;
+  account_id: number | null;
+  product_id: string;
+  product_title: string;
+  sku_id: string;
+  sku_name: string | null;
+  seller_sku: string | null;
+  product_status: string | null;
+  on_hand: number;
+  sold_7d: number;
+  sold_30d: number;
+  captured_at: string;
+  /** Manual units-per-day override, when the AM knows better than the last 30 days. */
+  velocity_override: number | null;
+  exclude: boolean;
+  note: string | null;
+}
+
+/** A SKU with the derived countdown and what to send in to cover the chosen number of days. */
+export interface StockProjectionRow extends StockSku {
+  velocity: number;
+  days_left: number | null;
+  stockout_at: string | null;
+  /** Units needed to cover cover_days (plus lead time) minus what is on hand. */
+  send_in: number;
+  level: 'out' | 'crit' | 'warn' | 'ok' | 'idle';
+}
+
+export interface StockProjection {
+  shop_id: string;
+  shop_name: string;
+  account_id: number | null;
+  account_name: string | null;
+  cover_days: number;
+  lead_days: number;
+  captured_at: string | null;
+  rows: StockProjectionRow[];
+  totals: { skus: number; send_in_units: number; send_in_skus: number; out: number; crit: number; warn: number };
+}
+
+export interface StockData {
+  shops: { shop_id: string; shop_name: string; account_id: number | null; account_name: string | null; market: string | null; token_ok: boolean; skus: number; captured_at: string | null; out: number; crit: number; warn: number; next_stockout_days: number | null }[];
+  alerts: (StockProjectionRow & { shop_name: string; account_name: string | null })[];
+  settings: { crit_days: number; warn_days: number; default_cover_days: number; default_lead_days: number };
+  last_scan_at: string | null;
+  last_scan_error: string | null;
+  scanning: boolean;
+  tts_configured: boolean;
+}
+
+// ---- Incidents (instant issue alerts to Slack) ----
+
+export type IncidentSeverity = 'crit' | 'warn' | 'info';
+
+export interface Incident {
+  id: number;
+  account_id: number | null;
+  account_name: string | null;
+  shop_id: string | null;
+  kind: string;
+  severity: IncidentSeverity;
+  title: string;
+  message: string;
+  recommended_action: string;
+  owner: string | null;
+  owner_slack_id: string | null;
+  source: string;
+  dedupe_key: string;
+  slack_channel: string | null;
+  slack_ts: string | null;
+  posted_at: string | null;
+  post_error: string | null;
+  resolved_at: string | null;
+  created_at: string;
+}
+
+export interface IncidentKind {
+  kind: string;
+  title: string;
+  severity: IncidentSeverity;
+  description: string;
+  action: string;
+  source: string;
+}
+
+export interface IncidentsData {
+  incidents: Incident[];
+  kinds: IncidentKind[];
+  accounts: { id: number; name: string; am_name: string | null; slack_channel: string | null; open: number }[];
+  settings: { enabled: boolean; post_to_slack: boolean; default_channel: string; cooldown_hours: number };
+  slack_configured: boolean;
+  llm_configured: boolean;
+  last_scan_at: string | null;
+}
+
+// ---- Client reports ----
+
+export interface ClientReport {
+  id: number;
+  account_id: number;
+  account_name: string;
+  period: 'weekly' | 'monthly';
+  period_start: string;
+  period_end: string;
+  title: string;
+  body: string;
+  data: ReportData;
+  generator: 'claude' | 'template';
+  status: 'draft' | 'sent';
+  slack_channel: string | null;
+  sent_at: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReportData {
+  gmv: { total: number; affiliate: number; units: number; prev_total: number; prev_affiliate: number; prev_units: number; currency: string; days_with_data: number; by_shop: { shop_id: string; shop_name: string; total: number; affiliate: number; units: number; prev_total: number }[] };
+  tts: { shop_id: string; shop_name: string; gmv: number | null; orders: number | null; refunds: number | null; conversion: number | null; visitors: number | null; error: string | null }[];
+  market: { market: string; prospects: number; surging: number; category_leaders: { name: string; gmv_7d: number | null; currency: string; category: string | null }[] }[];
+  calls: { id: string; title: string; happened_at: string; notes: string[]; url: string | null }[];
+  incidents: { kind: string; severity: string; title: string; created_at: string; resolved_at: string | null }[];
+  promotions: { name: string; begin_at: string; end_at: string }[];
+  checklist: { days: number; complete: number };
+  notes: string[];
+}
+
+export interface ReportsData {
+  reports: ClientReport[];
+  accounts: { id: number; name: string; client_slack_channel: string | null; client_domain: string | null; markets: string | null; shops: number }[];
+  slack_configured: boolean;
+  llm_configured: boolean;
+  tldv_configured: boolean;
+  tts_configured: boolean;
+}
+
+// ---- Cruva playbook (best practice matrix) ----
+
+export type PlaybookKind = 'automation' | 'workflow' | 'email_campaign' | 'group' | 'list';
+
+export interface PlaybookItem {
+  id: number;
+  kind: PlaybookKind;
+  key: string;
+  language: string;
+  name: string;
+  description: string | null;
+  config: Record<string, unknown>;
+  enabled: boolean;
+  source: string;
+  updated_at: string;
+}
+
+export interface PlaybookSetupCell {
+  shop_id: string;
+  kind: PlaybookKind;
+  playbook_key: string;
+  status: 'set' | 'missing' | 'unknown' | 'queued' | 'error';
+  remote_id: string | null;
+  remote_name: string | null;
+  checked_at: string | null;
+  applied_at: string | null;
+  note: string | null;
+}
+
+export interface PlaybookData {
+  items: PlaybookItem[];
+  shops: { shop_id: string; shop_name: string; account_id: number; account_name: string; language: string; market: string | null; remote_counts: Record<string, number>; checked_at: string | null }[];
+  cells: PlaybookSetupCell[];
+  languages: string[];
+  cruva_configured: boolean;
+  endpoints: Record<string, string>;
+  last_error: string | null;
+}
+
+// ---- Client question copilot ----
+
+export interface CopilotSource {
+  kind: string;
+  title: string;
+  snippet: string;
+  url: string | null;
+  occurred_at: string | null;
+  score: number;
+}
+
+export interface CopilotQuestion {
+  id: number;
+  account_id: number | null;
+  account_name: string | null;
+  source: 'slack' | 'email' | 'manual';
+  channel: string | null;
+  thread_ts: string | null;
+  external_id: string | null;
+  asked_by: string | null;
+  question: string;
+  answer: string | null;
+  sources: CopilotSource[];
+  generator: 'claude' | 'template' | null;
+  status: 'open' | 'drafted' | 'answered' | 'dismissed';
+  created_by: string | null;
+  created_at: string;
+  answered_at: string | null;
+  sent_at: string | null;
+}
+
+export interface CopilotData {
+  questions: CopilotQuestion[];
+  accounts: { id: number; name: string; client_slack_channel: string | null; client_domain: string | null; evidence: number }[];
+  settings: { watch_slack: boolean; watch_email: boolean; notify_am: boolean };
+  evidence_counts: Record<string, number>;
+  last_index_at: string | null;
+  last_index_error: string | null;
+  slack_configured: boolean;
+  gmail_connected: boolean;
+  tldv_configured: boolean;
+  llm_configured: boolean;
 }

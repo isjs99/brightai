@@ -13,6 +13,12 @@ import { AccountMonitor } from '../monitor/index.js';
 import { draftCallFollowups, tldv } from '../bd/tldv.js';
 import { scanEnterpriseAlerts } from '../bd/alerts.js';
 import { GmailClient } from '../bd/gmail.js';
+import { BulkDraftJob } from '../bd/bulk.js';
+import { StockTracker } from '../stock/index.js';
+import { IncidentEngine } from '../incidents/index.js';
+import { ClientReports } from '../reports/client.js';
+import { PlaybookEngine } from '../playbook/index.js';
+import { Copilot } from '../copilot/index.js';
 import { slackBot } from '../notify/slackbot.js';
 import { apollo } from '../bd/apollo.js';
 import type { Rule } from '../sweep/types.js';
@@ -35,6 +41,12 @@ export class Scheduler {
   readonly enrich: EnrichJob;
   readonly monitor: AccountMonitor;
   readonly gmail: GmailClient;
+  readonly bulkDrafts: BulkDraftJob;
+  readonly stock: StockTracker;
+  readonly incidents: IncidentEngine;
+  readonly reports: ClientReports;
+  readonly playbook: PlaybookEngine;
+  readonly copilot: Copilot;
   private tldvTask: ScheduledTask | null = null;
   private followupTask: ScheduledTask | null = null;
 
@@ -44,6 +56,13 @@ export class Scheduler {
     this.enrich = new EnrichJob(q);
     this.monitor = new AccountMonitor(q);
     this.gmail = new GmailClient(q);
+    this.bulkDrafts = new BulkDraftJob(q, this.gmail);
+    this.stock = new StockTracker(q);
+    this.incidents = new IncidentEngine(q);
+    this.reports = new ClientReports(q);
+    this.playbook = new PlaybookEngine(q);
+    this.copilot = new Copilot(q, { gmail: this.gmail });
+    this.monitor.afterScan = async () => { await this.incidents.scan(); };
   }
 
   start(): void {
@@ -67,6 +86,10 @@ export class Scheduler {
     this.pullsTask = cron.schedule('0 6 * * *', () => { importPullFiles(this.q); this.q.markExistingClients(); this.autoEnrich(); scanEnterpriseAlerts(this.q); }, { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Account monitor: rolling scan of every account for the flags the team otherwise catches by hand.
     this.monitor.start();
+    // Stock countdown (products + 30 days of orders per shop), Cruva playbook library, client question copilot.
+    this.stock.start();
+    this.playbook.seed();
+    this.copilot.start();
     // tl;dv: every 30 minutes, draft follow-ups for calls that just ended.
     this.tldvTask = cron.schedule('*/30 * * * *', () => this.checkCalls());
     setTimeout(() => this.checkCalls(), 30000);
@@ -183,6 +206,9 @@ export class Scheduler {
   stop(): void {
     this.leads.stop();
     this.inbox.stop();
+    this.stock.stop();
+    this.copilot.stop();
+    this.monitor.stop();
     this.pullsTask?.destroy();
     this.pullsTask = null;
     for (const [id, task] of this.tasks) {

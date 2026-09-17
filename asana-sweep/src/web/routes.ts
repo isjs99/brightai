@@ -34,12 +34,18 @@ import type { ConversationDetail, ContextEntry, InboxData } from '../sweep/types
 import { normaliseDomain } from '../bd/score.js';
 import { importPullFiles, isoDate, parseProspectInput } from '../bd/import.js';
 import { GmailClient, gmailComposeUrl } from '../bd/gmail.js';
-import { bodyToHtml, LANGUAGES as OUTREACH_LANGUAGES, outreachInputs, parseDraftJson, renderOutreachPrompt, templateDraft } from '../bd/outreach.js';
+import { bodyToHtml, LANGUAGES as OUTREACH_LANGUAGES, outreachInputs } from '../bd/outreach.js';
+import { generateDraft as generateOutreachDraft } from '../bd/draft.js';
+import { bulkCandidates } from '../bd/bulk.js';
+import { projectionCsv } from '../stock/index.js';
+import { periodBounds } from '../reports/client.js';
+import type { PlaybookKind, PlaybookSetupCell } from '../sweep/types.js';
 import type { BdEmailDraft, OutreachData, OutreachExample } from '../sweep/types.js';
 import type { BdCountryRow, BdData, BdProspectInput, BdProspectPatch, BdStatus } from '../sweep/types.js';
 import type { AuthProvider } from './auth.js';
 import { requireAdminForWrites, requireAuth, SharedPasswordAuth } from './auth.js';
 import { config } from '../config.js';
+import { log } from '../logger.js';
 
 class HttpError extends Error {
   constructor(public status: number, message: string) {
@@ -73,6 +79,9 @@ export function parseAccountInput(body: Record<string, unknown>): AccountInput {
     asana_project_name: String(body.asana_project_name ?? '').trim(),
     enabled: bool(body.enabled, true),
     notes: optText(body.notes),
+    slack_channel: optText(body.slack_channel),
+    client_slack_channel: optText(body.client_slack_channel),
+    client_domain: optText(body.client_domain)?.toLowerCase().replace(/^@/, '') ?? null,
     ...parseDeal(body),
   };
 }
@@ -1124,6 +1133,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
         gmv_started_30d: prospects.filter((p) => p.gmv_started_30d).length,
       },
       enrich: enrichJob.state,
+      bulk_draft: scheduler.bulkDrafts.state,
       auto_enrich: q.getSetting('apollo_auto_enrich', '1') === '1',
     };
   };
@@ -1305,14 +1315,9 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
 
   /** Generate subject + body for one contact, with Claude when configured, else the template. */
   const generateDraft = async (prospectId: number, contact: { name: string; title: string | null; email: string | null }, opts: { language: string; style: 'short' | 'intro'; instructions: string | null }): Promise<{ subject: string; body: string; generator: BdEmailDraft['generator'] }> => {
-    const prospect = q.getProspect(prospectId);
-    if (!prospect) throw new HttpError(404, 'Prospect not found');
-    const req = { prospect, contact, ...opts, ...outreachInputs(q), previousDrafts: q.listDrafts({ prospectId, includeDiscarded: true }) };
-    if (!config.anthropicApiKey) return { ...templateDraft(req), generator: 'template' };
-    const { system, user } = renderOutreachPrompt(req);
+    if (!q.getProspect(prospectId)) throw new HttpError(404, 'Prospect not found');
     try {
-      const text = await draftWithClaude(system, user, { maxTokens: 1500 });
-      return { ...parseDraftJson(text), generator: 'claude' };
+      return await generateOutreachDraft(q, prospectId, contact, opts);
     } catch (err) {
       throw new HttpError(502, (err as Error).message);
     }
@@ -1337,6 +1342,50 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     q.logOutreach(contact.prospect_id, { channel: 'gmail', action: 'note', note: `Email drafted: "${g.subject}"`, contact_name: contact.name, actor: actorOf(req) });
     liveEvents.emitUpdate({ kind: 'bd' });
     res.status(201).json({ draft, ...outreachData() });
+  });
+
+  /** Bulk: one email per prospect to its most senior relevant contact, optionally saved straight into Gmail drafts. */
+  r.get('/bd/drafts/bulk/preview', (req, res) => {
+    const market = optText(req.query.market);
+    const ids = String(req.query.ids ?? '').split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0);
+    const items = bulkCandidates(q, { market, ids: ids.length ? ids : undefined, include_drafted: req.query.include_drafted === '1' });
+    res.json({ count: items.length, items: items.slice(0, 200).map((i) => ({ prospect_id: i.prospect.id, shop_name: i.prospect.shop_name, brand: i.prospect.brand, market: i.prospect.market, contact_id: i.contact.id, contact_name: i.contact.name, contact_title: i.contact.title, contact_email: i.contact.email })) });
+  });
+
+  r.post('/bd/drafts/bulk', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const opts = draftOpts(b);
+    const ids = Array.isArray(b.ids) ? (b.ids as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n > 0) : undefined;
+    const limit = Math.min(Math.max(Number(b.limit) || 25, 1), 200);
+    if (scheduler.bulkDrafts.state.running) throw new HttpError(409, 'A bulk draft run is already going. Wait for it to finish or stop it.');
+    const state = scheduler.bulkDrafts.start({ ids, market: optText(b.market), limit, include_drafted: bool(b.include_drafted, false) }, { ...opts, to_gmail: bool(b.to_gmail, true), actor: actorOf(req) });
+    if (bool(b.to_gmail, true) && !gmail.connected) log.warn('Bulk drafts: Gmail is not connected, drafts stay in the dashboard');
+    res.status(202).json({ state, ...bdData() });
+  });
+
+  r.post('/bd/drafts/bulk/stop', (_req, res) => {
+    scheduler.bulkDrafts.stop();
+    res.json(bdData());
+  });
+
+  /** Push every open dashboard draft into Gmail in one go. */
+  r.post('/outreach/drafts/gmail-all', async (req, res) => {
+    if (!gmail.connected) throw new HttpError(400, 'Connect Gmail in Settings first.');
+    const open = q.listDrafts({}).filter((d) => d.status === 'draft');
+    let saved = 0;
+    const errors: string[] = [];
+    for (const d of open) {
+      try {
+        const g = await gmail.createDraft({ to: d.to_email, toName: d.to_name, subject: d.subject, body: d.body, html: bodyToHtml(d.body) });
+        q.updateDraft(d.id, { status: 'gmail', gmail_draft_id: g.draft_id, gmail_message_id: g.message_id, gmail_url: g.url });
+        q.logOutreach(d.prospect_id, { channel: 'gmail', action: 'note', note: `Draft "${d.subject}" saved to Gmail (${gmail.email})`, contact_name: d.to_name, actor: actorOf(req) });
+        saved += 1;
+      } catch (err) {
+        errors.push(`${d.shop_name}: ${(err as Error).message}`);
+      }
+    }
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json({ saved, errors, ...outreachData() });
   });
 
   r.post('/outreach/drafts/:id/regenerate', async (req, res) => {
@@ -1806,6 +1855,313 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (status === 500) console.error(err);
     else if (status === 502) console.warn(`Asana error on ${_req.method} ${_req.path}: ${message}`);
     res.status(status).json({ error: message });
+  });
+
+
+  // ---- Stock countdown and replenishment ----
+  const stock = scheduler.stock;
+  r.get('/stock', (_req, res) => res.json(stock.data()));
+  r.post('/stock/scan', async (req, res) => {
+    const shopId = optText((req.body ?? {}).shop_id);
+    const result = await stock.scan(shopId ?? undefined);
+    res.json({ ...result, ...stock.data() });
+  });
+  r.put('/stock/settings', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    for (const [k, key] of [['crit_days', 'stock_crit_days'], ['warn_days', 'stock_warn_days'], ['default_cover_days', 'stock_cover_days'], ['default_lead_days', 'stock_lead_days']] as const) {
+      if (b[k] !== undefined) { const n = Number(b[k]); if (!Number.isFinite(n) || n < 0) throw new HttpError(400, `${k} must be a number.`); q.setSetting(key, String(n)); }
+    }
+    liveEvents.emitUpdate({ kind: 'stock' });
+    res.json(stock.data());
+  });
+  r.get('/stock/:shopId/projection', (req, res) => {
+    const days = req.query.days !== undefined ? Number(req.query.days) : undefined;
+    const lead = req.query.lead !== undefined ? Number(req.query.lead) : undefined;
+    res.json(stock.projection(String(req.params.shopId), days, lead));
+  });
+  r.get('/stock/:shopId/projection.csv', (req, res) => {
+    const days = req.query.days !== undefined ? Number(req.query.days) : undefined;
+    const lead = req.query.lead !== undefined ? Number(req.query.lead) : undefined;
+    const p = stock.projection(String(req.params.shopId), days, lead);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${p.shop_name.replace(/[^A-Za-z0-9_-]+/g, '_')}_replenish_${p.cover_days}d_${new Date().toISOString().slice(0, 10)}.csv"`);
+    res.send(projectionCsv(p, { onlyNeeded: req.query.all !== '1' }));
+  });
+  r.put('/stock/:shopId/skus/:skuId', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const velocity = b.velocity === undefined ? undefined : b.velocity === null || b.velocity === '' ? null : Number(b.velocity);
+    if (velocity !== undefined && velocity !== null && (!Number.isFinite(velocity) || velocity < 0)) throw new HttpError(400, 'Units per day must be a positive number.');
+    q.setStockOverride(String(req.params.shopId), String(req.params.skuId), { velocity, exclude: b.exclude === undefined ? undefined : bool(b.exclude, false), note: b.note === undefined ? undefined : optText(b.note) });
+    liveEvents.emitUpdate({ kind: 'stock' });
+    const days = req.query.days !== undefined ? Number(req.query.days) : undefined;
+    res.json(stock.projection(String(req.params.shopId), days));
+  });
+
+  // ---- Incidents (instant issue alerts to Slack) ----
+  const incidents = scheduler.incidents;
+  r.get('/incidents', (_req, res) => res.json(incidents.data()));
+  r.post('/incidents/scan', async (_req, res) => {
+    const result = await incidents.scan();
+    res.json({ ...result, ...incidents.data() });
+  });
+  r.put('/incidents/settings', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    if (b.enabled !== undefined) q.setSetting('incidents_enabled', bool(b.enabled, true) ? '1' : '0');
+    if (b.post_to_slack !== undefined) q.setSetting('incidents_post_slack', bool(b.post_to_slack, true) ? '1' : '0');
+    if (b.default_channel !== undefined) q.setSetting('incidents_default_channel', String(b.default_channel ?? '').trim());
+    if (b.cooldown_hours !== undefined) { const n = Number(b.cooldown_hours); if (!Number.isFinite(n) || n < 0) throw new HttpError(400, 'Cooldown must be a number of hours.'); q.setSetting('incidents_cooldown_hours', String(n)); }
+    liveEvents.emitUpdate({ kind: 'incidents' });
+    res.json(incidents.data());
+  });
+  r.put('/incidents/accounts/:id/channel', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    if (!q.setAccountChannels(idParam(req), { slack_channel: optText(b.slack_channel) })) throw new HttpError(404, 'Account not found');
+    liveEvents.emitUpdate({ kind: 'incidents' });
+    res.json(incidents.data());
+  });
+  /** Anything outside the API can raise an incident (ad account disconnected, campaign rejected, a Zap from TikTok Ads): body { account_id | account, kind, message, severity? }. Same token as the ingest endpoints, or a dashboard session. */
+  const ingestIncident = async (b: Record<string, unknown>) => {
+    const kind = String(b.kind ?? '').trim();
+    if (!incidents.kinds().some((k) => k.kind === kind)) throw new HttpError(400, `Unknown incident kind "${kind}". Known: ${incidents.kinds().map((k) => k.kind).join(', ')}`);
+    const message = String(b.message ?? '').trim();
+    if (!message) throw new HttpError(400, 'message is required.');
+    let accountId = b.account_id !== undefined && b.account_id !== null ? Number(b.account_id) : null;
+    if (accountId === null && b.account) { const name = String(b.account).toLowerCase(); accountId = q.listAccounts().find((a) => a.name.toLowerCase() === name)?.id ?? null; }
+    const sev = b.severity === 'crit' || b.severity === 'warn' || b.severity === 'info' ? b.severity : undefined;
+    return incidents.apply('ingest', [{ account_id: accountId, shop_id: optText(b.shop_id), kind, message, severity: sev, fingerprint: optText(b.fingerprint) ?? message.slice(0, 40), source: 'ingest' }]);
+  };
+  r.post('/incidents/ingest', async (req, res) => {
+    const result = await ingestIncident((req.body ?? {}) as Record<string, unknown>);
+    res.status(201).json({ opened: result.opened.length, ...incidents.data() });
+  });
+  r.post('/incidents/:id/resolve', async (req, res) => {
+    const inc = q.getIncident(idParam(req));
+    if (!inc) throw new HttpError(404, 'Incident not found');
+    q.updateIncident(inc.id, { resolved_at: new Date().toISOString() });
+    liveEvents.emitUpdate({ kind: 'incidents' });
+    res.json(incidents.data());
+  });
+  r.post('/incidents/:id/repost', async (req, res) => {
+    const inc = q.getIncident(idParam(req));
+    if (!inc) throw new HttpError(404, 'Incident not found');
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    if (b.slack_channel !== undefined) q.updateIncident(inc.id, { slack_channel: optText(b.slack_channel) });
+    const out = await incidents.post(q.getIncident(inc.id)!);
+    if (out.post_error) throw new HttpError(502, out.post_error);
+    liveEvents.emitUpdate({ kind: 'incidents' });
+    res.json(incidents.data());
+  });
+
+  // ---- Client reports ----
+  const reports = scheduler.reports;
+  r.get('/reports', (_req, res) => res.json(reports.data()));
+  r.get('/reports/period', (req, res) => {
+    const period = req.query.period === 'monthly' ? 'monthly' : 'weekly';
+    res.json(periodBounds(period, optText(req.query.end)));
+  });
+  r.post('/reports/generate', async (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const accountId = Number(b.account_id);
+    if (!Number.isInteger(accountId)) throw new HttpError(400, 'account_id is required.');
+    const period = b.period === 'monthly' ? 'monthly' : 'weekly';
+    const end = optText(b.end);
+    if (end && !/^\d{4}-\d{2}-\d{2}$/.test(end)) throw new HttpError(400, 'End date must be YYYY-MM-DD.');
+    try {
+      const report = await reports.generate(accountId, period, { endDate: end, instructions: optText(b.instructions), notes: Array.isArray(b.notes) ? (b.notes as unknown[]).map(String).filter(Boolean) : optText(b.notes) ? String(b.notes).split('\n').map((x) => x.trim()).filter(Boolean) : [], actor: actorOf(req) });
+      res.status(201).json({ report, ...reports.data() });
+    } catch (err) {
+      throw new HttpError(502, (err as Error).message);
+    }
+  });
+  r.post('/reports/:id/regenerate', async (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    try {
+      const report = await reports.regenerate(idParam(req), { instructions: optText(b.instructions), notes: optText(b.notes) ? String(b.notes).split('\n').map((x) => x.trim()).filter(Boolean) : undefined, refresh: b.refresh === undefined ? true : bool(b.refresh, true) });
+      res.json({ report, ...reports.data() });
+    } catch (err) {
+      throw new HttpError(502, (err as Error).message);
+    }
+  });
+  r.put('/reports/:id', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const patch: Parameters<Queries['updateReport']>[1] = {};
+    if (b.title !== undefined) { const v = optText(b.title); if (!v) throw new HttpError(400, 'Title cannot be empty.'); patch.title = v; }
+    if (b.body !== undefined) { const v = String(b.body ?? '').replace(/\r\n/g, '\n').trim(); if (!v) throw new HttpError(400, 'Body cannot be empty.'); patch.body = v; }
+    if (b.slack_channel !== undefined) patch.slack_channel = optText(b.slack_channel);
+    const report = q.updateReport(idParam(req), patch);
+    if (!report) throw new HttpError(404, 'Report not found');
+    liveEvents.emitUpdate({ kind: 'reports' });
+    res.json({ report, ...reports.data() });
+  });
+  r.post('/reports/:id/send', async (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    try {
+      const report = await reports.send(idParam(req), optText(b.slack_channel));
+      res.json({ report, ...reports.data() });
+    } catch (err) {
+      throw new HttpError(502, (err as Error).message);
+    }
+  });
+  r.get('/reports/:id/export.md', (req, res) => {
+    const rep = q.getReport(idParam(req));
+    if (!rep) throw new HttpError(404, 'Report not found');
+    res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${rep.title.replace(/[^A-Za-z0-9_-]+/g, '_')}.md"`);
+    res.send(`# ${rep.title}\n\n${rep.body}\n`);
+  });
+  r.delete('/reports/:id', (req, res) => {
+    if (!q.deleteReport(idParam(req))) throw new HttpError(404, 'Report not found');
+    liveEvents.emitUpdate({ kind: 'reports' });
+    res.json(reports.data());
+  });
+  r.put('/reports/accounts/:id', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    if (!q.setAccountChannels(idParam(req), { client_slack_channel: b.client_slack_channel === undefined ? undefined : optText(b.client_slack_channel), client_domain: b.client_domain === undefined ? undefined : optText(b.client_domain)?.toLowerCase().replace(/^@/, '') ?? null })) throw new HttpError(404, 'Account not found');
+    liveEvents.emitUpdate({ kind: 'reports' });
+    res.json(reports.data());
+  });
+
+  // ---- Cruva playbook (best practice matrix) ----
+  const playbook = scheduler.playbook;
+  const KINDS: PlaybookKind[] = ['automation', 'workflow', 'email_campaign', 'group', 'list'];
+  r.get('/playbook', (_req, res) => res.json(playbook.data()));
+  r.post('/playbook/check', async (req, res) => {
+    try {
+      const result = await playbook.check(optText((req.body ?? {}).shop_id) ?? undefined);
+      res.json({ ...result, ...playbook.data() });
+    } catch (err) {
+      throw new HttpError(400, (err as Error).message);
+    }
+  });
+  r.post('/playbook/shops/:shopId/import', (req, res) => {
+    const text = String((req.body ?? {}).text ?? '');
+    try {
+      const result = playbook.importListing(String(req.params.shopId), text);
+      res.json({ ...result, ...playbook.data() });
+    } catch (err) {
+      throw new HttpError(400, (err as Error).message);
+    }
+  });
+  r.put('/playbook/shops/:shopId', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    if (b.language !== undefined) q.setSetting(`playbook_lang_${String(req.params.shopId)}`, String(b.language ?? '').trim());
+    liveEvents.emitUpdate({ kind: 'playbook' });
+    res.json(playbook.data());
+  });
+  r.post('/playbook/apply', async (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const shopIds = Array.isArray(b.shop_ids) ? (b.shop_ids as unknown[]).map(String) : [];
+    const keys = Array.isArray(b.keys) ? (b.keys as unknown[]).map(String) : [];
+    if (!shopIds.length || !keys.length) throw new HttpError(400, 'Pick at least one shop and one playbook item.');
+    const result = await playbook.apply({ shop_ids: shopIds, keys, language: optText(b.language), brands: b.brands && typeof b.brands === 'object' ? (b.brands as Record<string, string>) : undefined });
+    res.json({ ...result, ...playbook.data() });
+  });
+  r.post('/playbook/cells', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const kind = String(b.kind ?? '') as PlaybookKind;
+    if (!KINDS.includes(kind)) throw new HttpError(400, 'Bad kind.');
+    const status = String(b.status ?? '') as PlaybookSetupCell['status'];
+    if (!['set', 'missing', 'unknown', 'queued', 'error'].includes(status)) throw new HttpError(400, 'Bad status.');
+    playbook.mark(String(b.shop_id ?? ''), kind, String(b.key ?? ''), status, optText(b.note));
+    res.json(playbook.data());
+  });
+  r.put('/playbook/settings', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    if (b.endpoints !== undefined) { const t = String(b.endpoints ?? '').trim(); if (t) { try { JSON.parse(t); } catch { throw new HttpError(400, 'Endpoints must be JSON like {"automation": "/v1/automations"}.'); } } q.setSetting('cruva_endpoints', t); }
+    res.json(playbook.data());
+  });
+  r.post('/playbook/items', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const kind = String(b.kind ?? '') as PlaybookKind;
+    if (!KINDS.includes(kind)) throw new HttpError(400, 'Bad kind.');
+    const key = String(b.key ?? '').trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_');
+    const name = optText(b.name);
+    if (!key || !name) throw new HttpError(400, 'Key and name are required.');
+    let cfg: Record<string, unknown> = {};
+    if (b.config !== undefined) { try { cfg = typeof b.config === 'string' ? (JSON.parse(b.config) as Record<string, unknown>) : (b.config as Record<string, unknown>); } catch { throw new HttpError(400, 'Config must be valid JSON.'); } }
+    q.upsertPlaybookItem({ kind, key, language: optText(b.language) ?? '*', name, description: optText(b.description), config: cfg, enabled: b.enabled === undefined ? true : bool(b.enabled, true), source: 'manual' });
+    liveEvents.emitUpdate({ kind: 'playbook' });
+    res.status(201).json(playbook.data());
+  });
+  r.put('/playbook/items/:id', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const patch: Parameters<Queries['updatePlaybookItem']>[1] = {};
+    if (b.name !== undefined) { const v = optText(b.name); if (!v) throw new HttpError(400, 'Name cannot be empty.'); patch.name = v; }
+    if (b.description !== undefined) patch.description = optText(b.description);
+    if (b.enabled !== undefined) patch.enabled = bool(b.enabled, true);
+    if (b.language !== undefined) patch.language = optText(b.language) ?? '*';
+    if (b.config !== undefined) { try { patch.config = typeof b.config === 'string' ? (JSON.parse(b.config) as Record<string, unknown>) : (b.config as Record<string, unknown>); } catch { throw new HttpError(400, 'Config must be valid JSON.'); } }
+    if (!q.updatePlaybookItem(idParam(req), patch)) throw new HttpError(404, 'Item not found');
+    liveEvents.emitUpdate({ kind: 'playbook' });
+    res.json(playbook.data());
+  });
+  r.delete('/playbook/items/:id', (req, res) => {
+    if (!q.deletePlaybookItem(idParam(req))) throw new HttpError(404, 'Item not found');
+    liveEvents.emitUpdate({ kind: 'playbook' });
+    res.json(playbook.data());
+  });
+
+  // ---- Client question copilot ----
+  const copilot = scheduler.copilot;
+  r.get('/copilot', (_req, res) => res.json(copilot.data()));
+  r.post('/copilot/index', async (_req, res) => {
+    const result = await copilot.index();
+    res.json({ ...result, ...copilot.data() });
+  });
+  r.post('/copilot/poll', async (_req, res) => {
+    const result = await copilot.poll();
+    res.json({ ...result, ...copilot.data() });
+  });
+  r.put('/copilot/settings', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    if (b.watch_slack !== undefined) q.setSetting('copilot_watch_slack', bool(b.watch_slack, true) ? '1' : '0');
+    if (b.watch_email !== undefined) q.setSetting('copilot_watch_email', bool(b.watch_email, true) ? '1' : '0');
+    if (b.notify_am !== undefined) q.setSetting('copilot_notify_am', bool(b.notify_am, true) ? '1' : '0');
+    res.json(copilot.data());
+  });
+  r.post('/copilot/questions', async (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const question = optText(b.question);
+    if (!question) throw new HttpError(400, 'Type the question first.');
+    const accountId = b.account_id === undefined || b.account_id === null || b.account_id === '' ? null : Number(b.account_id);
+    try {
+      const created = await copilot.ask({ account_id: accountId, question, source: 'manual', asked_by: optText(b.asked_by), created_by: actorOf(req) });
+      res.status(201).json({ question: created, ...copilot.data() });
+    } catch (err) {
+      throw new HttpError(502, (err as Error).message);
+    }
+  });
+  r.post('/copilot/questions/:id/answer', async (req, res) => {
+    try {
+      const question = await copilot.answer(idParam(req));
+      res.json({ question, ...copilot.data() });
+    } catch (err) {
+      throw new HttpError(502, (err as Error).message);
+    }
+  });
+  r.put('/copilot/questions/:id', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const patch: Parameters<Queries['updateQuestion']>[1] = {};
+    if (b.answer !== undefined) patch.answer = optText(b.answer);
+    if (b.status !== undefined && ['open', 'drafted', 'answered', 'dismissed'].includes(String(b.status))) patch.status = String(b.status) as 'open';
+    if (b.account_id !== undefined) patch.account_id = b.account_id === null || b.account_id === '' ? null : Number(b.account_id);
+    const question = q.updateQuestion(idParam(req), patch);
+    if (!question) throw new HttpError(404, 'Question not found');
+    liveEvents.emitUpdate({ kind: 'copilot' });
+    res.json({ question, ...copilot.data() });
+  });
+  r.post('/copilot/questions/:id/send', async (req, res) => {
+    try {
+      const result = await copilot.send(idParam(req), optText((req.body ?? {}).answer));
+      res.json({ ...result, ...copilot.data() });
+    } catch (err) {
+      throw new HttpError(502, (err as Error).message);
+    }
+  });
+  r.delete('/copilot/questions/:id', (req, res) => {
+    if (!q.deleteQuestion(idParam(req))) throw new HttpError(404, 'Question not found');
+    liveEvents.emitUpdate({ kind: 'copilot' });
+    res.json(copilot.data());
   });
 
   return r;

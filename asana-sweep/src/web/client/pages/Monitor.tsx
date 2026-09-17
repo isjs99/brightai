@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { MonitorData, MonitorFlag } from '../../../sweep/types';
+import { useSearchParams } from 'react-router-dom';
+import type { Incident, IncidentsData, MonitorData, MonitorFlag } from '../../../sweep/types';
 import { api, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
 
 /** Account management > Account monitor: every managed account scanned on a schedule for the flags the team otherwise catches by hand. */
 export default function MonitorPage() {
+  const [params, setParams] = useSearchParams();
+  const tab = params.get('tab') === 'incidents' ? 'incidents' : 'flags';
+  const setTab = (t: 'flags' | 'incidents') => setParams(t === 'flags' ? {} : { tab: t });
   const [data, setData] = useState<MonitorData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -45,6 +49,12 @@ export default function MonitorPage() {
       {notice && <div className="banner info">{notice}</div>}
       {data.last_scan_error && <div className="banner crit">Last scan failed: {data.last_scan_error}</div>}
 
+      <div className="tabs">
+        <button className={`tab ${tab === 'flags' ? 'active' : ''}`} onClick={() => setTab('flags')}>Flags <span className="sub">{data.flags.length}</span></button>
+        <button className={`tab ${tab === 'incidents' ? 'active' : ''}`} onClick={() => setTab('incidents')}>Instant alerts to Slack</button>
+      </div>
+      {tab === 'incidents' && <Incidents isAdmin={isAdmin} onError={setError} onNotice={setNotice} />}
+      {tab === 'flags' && <>
       <div className="stats" style={{ marginBottom: 14 }}>
         <div className="stat"><span className="v">{data.flags.filter((f) => f.severity === 'crit').length}</span><span className="k">critical</span></div>
         <div className="stat"><span className="v">{data.flags.filter((f) => f.severity === 'warn').length}</span><span className="k">warnings</span></div>
@@ -90,6 +100,101 @@ export default function MonitorPage() {
               <td className="sub">{fmtRelative(f.first_seen_at)}</td>
               <td className="sub">{fmtRelative(f.last_seen_at)}</td>
               <td>{isAdmin && !f.acknowledged_at && <button className="small" onClick={() => run(`a${f.id}`, () => api.ackFlag(f.id))} title="Seen it; keeps the flag but dims it">Ack</button>}</td>
+            </tr>
+          ))}
+        </tbody></table></div>
+      )}
+      </>}
+    </>
+  );
+}
+
+const SEV: Record<Incident['severity'], { label: string; cls: string }> = { crit: { label: 'Critical', cls: 'crit' }, warn: { label: 'Warning', cls: 'warn' }, info: { label: 'Info', cls: 'muted' } };
+
+/** Incidents: every issue that needs a human today, posted to the account's internal Slack channel with what happened, severity, action and owner. */
+function Incidents({ isAdmin, onError, onNotice }: { isAdmin: boolean; onError: (e: string | null) => void; onNotice: (n: string | null) => void }) {
+  const [data, setData] = useState<IncidentsData | null>(null);
+  const [only, setOnly] = useState<'open' | 'all'>('open');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [showKinds, setShowKinds] = useState(false);
+  const [manual, setManual] = useState({ account_id: '', kind: 'ad_account_disconnected', message: '' });
+  const load = useCallback(() => api.incidents().then(setData).catch((e) => onError((e as Error).message)), [onError]);
+  useEffect(() => { load(); }, [load]);
+  useLiveUpdates((e) => { if (e.kind === 'incidents') load(); });
+  const run = async <T extends IncidentsData,>(key: string, fn: () => Promise<T>, after?: (r: T) => void) => {
+    setBusy(key);
+    onError(null);
+    try { const r = await fn(); setData(r); after?.(r); } catch (e) { onError((e as Error).message); } finally { setBusy(null); }
+  };
+  if (!data) return <p>Loading…</p>;
+  const list = data.incidents.filter((i) => only === 'all' || !i.resolved_at);
+  const kindTitle = (k: string) => data.kinds.find((x) => x.kind === k)?.title ?? k;
+  return (
+    <>
+      <div className="card" style={{ marginBottom: 14 }}>
+        <div className="page-head" style={{ marginBottom: 6 }}>
+          <div>
+            <h3 style={{ margin: 0 }}>Instant issue alerts</h3>
+            <p className="sub" style={{ margin: 0 }}>Negative balance, payout failures, account status changes, violations, listing and EPR failures, overdue shipments, expiring authorisation, stock-outs, GMV drops and inbox SLA breaches are picked up on every monitor scan and posted straight to Slack: what happened, severity, the recommended action and the owner (the account's AM). Ad account and campaign issues come in through the ingest endpoint or the form below.</p>
+          </div>
+          <div className="actions">
+            <span className={`badge ${data.slack_configured ? 'good' : 'muted'}`}>{data.slack_configured ? 'Slack bot ready' : 'No SLACK_BOT_TOKEN'}</span>
+            <span className={`badge ${data.llm_configured ? 'good' : 'muted'}`} title="Claude tailors the what-happened and the action per incident">{data.llm_configured ? 'Claude notes' : 'Template notes'}</span>
+            <span className="badge muted">{data.last_scan_at ? `Last pass ${fmtRelative(data.last_scan_at)}` : 'No pass yet'}</span>
+            {isAdmin && <button className="primary" disabled={busy === 'scan'} onClick={() => run('scan', api.incidentsScan, (r) => onNotice(`${r.opened} new incident(s), ${r.resolved} resolved${r.errors.length ? `; ${r.errors.length} source error(s): ${r.errors.slice(0, 2).join(' · ')}` : ''}.`))}>{busy === 'scan' ? 'Scanning…' : 'Scan now'}</button>}
+            <button onClick={() => setShowKinds(!showKinds)}>{showKinds ? 'Hide kinds' : 'Kinds'}</button>
+          </div>
+        </div>
+        {isAdmin && (
+          <div className="inline-form">
+            <label className="field check"><input type="checkbox" checked={data.settings.enabled} onChange={(e) => run('s', () => api.incidentsSettings({ enabled: e.target.checked }))} /> Alerts on</label>
+            <label className="field check"><input type="checkbox" checked={data.settings.post_to_slack} onChange={(e) => run('s', () => api.incidentsSettings({ post_to_slack: e.target.checked }))} /> Post to Slack</label>
+            <label className="field" style={{ minWidth: 200 }}><span className="lbl">Default Slack channel</span><input type="text" defaultValue={data.settings.default_channel} placeholder="#ops-alerts" onBlur={(e) => e.target.value !== data.settings.default_channel && run('s', () => api.incidentsSettings({ default_channel: e.target.value }))} /><span className="help">Used when the account has no internal channel.</span></label>
+            <label className="field" style={{ minWidth: 120 }}><span className="lbl">Re-alert after (hours)</span><input type="number" min={0} defaultValue={data.settings.cooldown_hours} onBlur={(e) => run('s', () => api.incidentsSettings({ cooldown_hours: Number(e.target.value) || 0 }))} /></label>
+          </div>
+        )}
+        {showKinds && (
+          <div className="grid-wrap" style={{ marginTop: 10 }}><table><thead><tr><th>Kind</th><th>Severity</th><th>Source</th><th>Detects</th><th>Recommended action</th></tr></thead><tbody>
+            {data.kinds.map((k) => <tr key={k.kind}><td><b>{k.title}</b><div className="sub">{k.kind}</div></td><td><span className={`badge ${SEV[k.severity].cls}`}>{SEV[k.severity].label}</span></td><td><span className="badge muted">{k.source === 'tts' ? 'TikTok API' : k.source === 'monitor' ? 'Monitor flags' : k.source === 'stock' ? 'Stock' : 'Ingest / manual'}</span></td><td className="sub">{k.description}</td><td className="sub">{k.action}</td></tr>)}
+          </tbody></table></div>
+        )}
+      </div>
+
+      {isAdmin && (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <div className="page-head" style={{ marginBottom: 6 }}><h3 style={{ margin: 0 }}>Channels per account</h3><span className="sub">Internal channel the account's incidents post to (the bot must be a member). Also on the Accounts page.</span></div>
+          <div className="inline-form">
+            {data.accounts.map((a) => <label key={a.id} className="field" style={{ minWidth: 200 }}><span className="lbl">{a.name}{a.open ? ` (${a.open} open)` : ''}</span><input type="text" defaultValue={a.slack_channel ?? ''} placeholder={data.settings.default_channel || '#channel'} onBlur={(e) => e.target.value !== (a.slack_channel ?? '') && run(`c${a.id}`, () => api.incidentChannel(a.id, e.target.value))} /></label>)}
+          </div>
+          <details style={{ marginTop: 8 }}>
+            <summary className="sub" style={{ cursor: 'pointer' }}>Raise an incident by hand (ad account disconnected, campaign rejected)</summary>
+            <div className="inline-form" style={{ marginTop: 6 }}>
+              <label className="field" style={{ minWidth: 180 }}><span className="lbl">Account</span><select value={manual.account_id} onChange={(e) => setManual({ ...manual, account_id: e.target.value })}><option value="">None</option>{data.accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label>
+              <label className="field" style={{ minWidth: 200 }}><span className="lbl">Kind</span><select value={manual.kind} onChange={(e) => setManual({ ...manual, kind: e.target.value })}>{data.kinds.map((k) => <option key={k.kind} value={k.kind}>{k.title}</option>)}</select></label>
+              <label className="field" style={{ flex: 1, minWidth: 260 }}><span className="lbl">What happened</span><input type="text" value={manual.message} onChange={(e) => setManual({ ...manual, message: e.target.value })} placeholder="e.g. GMV Max campaign 'DE Sept' rejected: product image policy" /></label>
+              <button className="primary" disabled={!manual.message.trim() || busy === 'man'} onClick={() => run('man', () => api.incidentIngest({ account_id: manual.account_id ? Number(manual.account_id) : null, kind: manual.kind, message: manual.message }), (r) => { onNotice(r.opened ? 'Incident raised and posted.' : 'Already open (deduped).'); setManual({ ...manual, message: '' }); })}>Raise</button>
+            </div>
+            <p className="sub" style={{ marginBottom: 0 }}>Other tools can post the same thing to <code>POST /api/incidents/ingest</code> with <code>{'{ "account": "Kijimea DE", "kind": "campaign_issue", "message": "..." }'}</code>.</p>
+          </details>
+        </div>
+      )}
+
+      <div className="toolbar">
+        <select value={only} onChange={(e) => setOnly(e.target.value as 'open' | 'all')}><option value="open">Open</option><option value="all">All incl. resolved</option></select>
+        <span className="sub">{list.length} incident{list.length === 1 ? '' : 's'}</span>
+      </div>
+      {list.length === 0 ? <div className="empty">No incidents{only === 'open' ? ' open' : ''}.</div> : (
+        <div className="grid-wrap"><table><thead><tr><th>Severity</th><th>Account</th><th>What happened</th><th>Recommended action</th><th>Owner</th><th>Slack</th><th>When</th><th></th></tr></thead><tbody>
+          {list.map((i) => (
+            <tr key={i.id} className={i.resolved_at ? 'dim' : ''}>
+              <td><span className={`badge ${SEV[i.severity].cls}`}>{SEV[i.severity].label}</span></td>
+              <td><b>{i.account_name ?? '–'}</b><div className="sub">{i.source}</div></td>
+              <td style={{ maxWidth: 360 }}><div><b>{i.title}</b>{i.kind !== i.title ? <span className="sub"> · {kindTitle(i.kind)}</span> : null}</div><div className="sub">{i.message}</div></td>
+              <td className="sub" style={{ maxWidth: 360 }}>{i.recommended_action}</td>
+              <td className="sub">{i.owner ?? 'unassigned'}</td>
+              <td className="sub">{i.posted_at ? <span className="badge good" title={i.slack_channel ?? ''}>Posted {fmtRelative(i.posted_at)}</span> : i.post_error ? <span className="badge crit" title={i.post_error}>Not posted</span> : <span className="badge muted">Not posted</span>}</td>
+              <td className="sub">{fmtRelative(i.created_at)}{i.resolved_at ? <div>resolved {fmtRelative(i.resolved_at)}</div> : null}</td>
+              <td>{isAdmin && <span className="actions">{!i.posted_at && <button className="small" onClick={() => run(`p${i.id}`, () => api.repostIncident(i.id, window.prompt('Slack channel', i.slack_channel ?? data.settings.default_channel) ?? undefined), () => onNotice('Posted.'))}>Post</button>}{!i.resolved_at && <button className="small" onClick={() => run(`r${i.id}`, () => api.resolveIncident(i.id))}>Resolve</button>}</span>}</td>
             </tr>
           ))}
         </tbody></table></div>
