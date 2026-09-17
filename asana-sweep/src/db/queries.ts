@@ -16,6 +16,13 @@ import type {
   ContextEntry,
   BdEmailDraft,
   OutreachExample,
+  BdFollowup,
+  TtsContact,
+  WatchlistEntry,
+  BdAlert,
+  BdActivity,
+  BdActivityRow,
+  MonitorFlag,
   CruvaOutreach,
   InboxConversation,
   InboxMessage,
@@ -985,8 +992,19 @@ export class Queries {
       apollo_id: (r.apollo_id as string | null) ?? null,
       enriched: Boolean(r.enriched),
       notes: (r.notes as string | null) ?? null,
+      linkedin_status: ((r.linkedin_status as string | null) ?? 'none') as BdContact['linkedin_status'],
+      linkedin_requested_at: (r.linkedin_requested_at as string | null) ?? null,
+      linkedin_connected_at: (r.linkedin_connected_at as string | null) ?? null,
+      linkedin_messaged_at: (r.linkedin_messaged_at as string | null) ?? null,
       created_at: r.created_at as string,
     };
+  }
+
+  /** Move a contact along the LinkedIn sequence and stamp the step. */
+  setContactLinkedin(id: number, status: BdContact['linkedin_status'], at = new Date().toISOString()): BdContact | null {
+    const col = status === 'requested' ? 'linkedin_requested_at' : status === 'connected' ? 'linkedin_connected_at' : status === 'messaged' ? 'linkedin_messaged_at' : null;
+    this.db.prepare(`UPDATE bd_contacts SET linkedin_status = ?${col ? `, ${col} = COALESCE(${col}, ?)` : ''} WHERE id = ?`).run(...(col ? [status, at, id] : [status, id]));
+    return this.getContact(id);
   }
 
   private rowToOutreach(r: Row): BdOutreachEvent {
@@ -1175,6 +1193,7 @@ export class Queries {
       shop_name: (r.shop_name as string) ?? '', market: (r.market as string) ?? '',
       to_name: r.to_name as string, to_email: r.to_email as string, subject: r.subject as string, body: r.body as string,
       language: r.language as string, style: r.style as BdEmailDraft['style'], status: r.status as BdEmailDraft['status'], generator: r.generator as BdEmailDraft['generator'],
+      kind: ((r.kind as string | null) ?? 'cold') as BdEmailDraft['kind'], meeting_id: (r.meeting_id as string | null) ?? null, meeting_title: (r.meeting_title as string | null) ?? null,
       gmail_draft_id: (r.gmail_draft_id as string | null) ?? null, gmail_message_id: (r.gmail_message_id as string | null) ?? null, gmail_url: (r.gmail_url as string | null) ?? null,
       created_by: (r.created_by as string | null) ?? null, created_at: r.created_at as string, updated_at: r.updated_at as string,
     };
@@ -1196,11 +1215,16 @@ export class Queries {
     return r ? this.rowToDraft(r) : null;
   }
 
-  createDraft(d: { prospect_id: number; contact_id: number | null; to_name: string; to_email: string; subject: string; body: string; language: string; style: BdEmailDraft['style']; generator: BdEmailDraft['generator']; created_by?: string | null }): BdEmailDraft {
+  createDraft(d: { prospect_id: number; contact_id: number | null; to_name: string; to_email: string; subject: string; body: string; language: string; style: BdEmailDraft['style']; generator: BdEmailDraft['generator']; created_by?: string | null; kind?: BdEmailDraft['kind']; meeting_id?: string | null; meeting_title?: string | null }): BdEmailDraft {
     const info = this.db
-      .prepare(`INSERT INTO bd_email_drafts (prospect_id, contact_id, to_name, to_email, subject, body, language, style, generator, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(d.prospect_id, d.contact_id, d.to_name, d.to_email, d.subject, d.body, d.language, d.style, d.generator, d.created_by ?? null);
+      .prepare(`INSERT INTO bd_email_drafts (prospect_id, contact_id, to_name, to_email, subject, body, language, style, generator, created_by, kind, meeting_id, meeting_title) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(d.prospect_id, d.contact_id, d.to_name, d.to_email, d.subject, d.body, d.language, d.style, d.generator, d.created_by ?? null, d.kind ?? 'cold', d.meeting_id ?? null, d.meeting_title ?? null);
     return this.getDraft(Number(info.lastInsertRowid))!;
+  }
+
+  draftForMeeting(meetingId: string): BdEmailDraft | null {
+    const r = this.db.prepare(`${Queries.DRAFT_SELECT} WHERE d.meeting_id = ?`).get(meetingId) as Row | undefined;
+    return r ? this.rowToDraft(r) : null;
   }
 
   updateDraft(id: number, patch: Partial<Pick<BdEmailDraft, 'subject' | 'body' | 'language' | 'style' | 'status' | 'generator' | 'gmail_draft_id' | 'gmail_message_id' | 'gmail_url' | 'to_email' | 'to_name'>>): BdEmailDraft | null {
@@ -1244,6 +1268,186 @@ export class Queries {
 
   deleteExample(id: number): boolean {
     return this.db.prepare('DELETE FROM outreach_examples WHERE id = ?').run(id).changes > 0;
+  }
+
+  // ---- Follow-ups (BD sequence reminders) ----
+
+  private rowToFollowup(r: Row, now = Date.now()): BdFollowup {
+    return { id: r.id as number, prospect_id: r.prospect_id as number, contact_id: (r.contact_id as number | null) ?? null, shop_name: (r.shop_name as string) ?? '', contact_name: (r.contact_name as string | null) ?? null, linkedin_url: (r.linkedin_url as string | null) ?? null, kind: r.kind as BdFollowup['kind'], title: r.title as string, due_at: r.due_at as string, done_at: (r.done_at as string | null) ?? null, note: (r.note as string | null) ?? null, created_by: (r.created_by as string | null) ?? null, created_at: r.created_at as string, overdue: !r.done_at && Date.parse(r.due_at as string) < now };
+  }
+
+  private static FOLLOWUP_SELECT = `SELECT f.*, p.shop_name, c.name AS contact_name, c.linkedin_url FROM bd_followups f JOIN bd_prospects p ON p.id = f.prospect_id LEFT JOIN bd_contacts c ON c.id = f.contact_id`;
+
+  listFollowups(opts: { includeDone?: boolean; prospectId?: number } = {}): BdFollowup[] {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (!opts.includeDone) where.push('f.done_at IS NULL');
+    if (opts.prospectId !== undefined) { where.push('f.prospect_id = ?'); params.push(opts.prospectId); }
+    return (this.db.prepare(`${Queries.FOLLOWUP_SELECT}${where.length ? ` WHERE ${where.join(' AND ')}` : ''} ORDER BY f.done_at IS NOT NULL, f.due_at`).all(...params) as Row[]).map((r) => this.rowToFollowup(r));
+  }
+
+  getFollowup(id: number): BdFollowup | null {
+    const r = this.db.prepare(`${Queries.FOLLOWUP_SELECT} WHERE f.id = ?`).get(id) as Row | undefined;
+    return r ? this.rowToFollowup(r) : null;
+  }
+
+  addFollowup(f: { prospect_id: number; contact_id?: number | null; kind: BdFollowup['kind']; title: string; due_at: string; note?: string | null; created_by?: string | null }): BdFollowup {
+    // One open follow-up of a kind per contact: refresh the existing one instead of stacking.
+    const existing = this.db.prepare(`SELECT id FROM bd_followups WHERE prospect_id = ? AND contact_id IS ? AND kind = ? AND done_at IS NULL`).get(f.prospect_id, f.contact_id ?? null, f.kind) as { id: number } | undefined;
+    if (existing) {
+      this.db.prepare(`UPDATE bd_followups SET title = ?, due_at = ?, note = COALESCE(?, note) WHERE id = ?`).run(f.title, f.due_at, f.note ?? null, existing.id);
+      return this.getFollowup(existing.id)!;
+    }
+    const info = this.db.prepare(`INSERT INTO bd_followups (prospect_id, contact_id, kind, title, due_at, note, created_by) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(f.prospect_id, f.contact_id ?? null, f.kind, f.title, f.due_at, f.note ?? null, f.created_by ?? null);
+    return this.getFollowup(Number(info.lastInsertRowid))!;
+  }
+
+  completeFollowup(id: number, note?: string | null): BdFollowup | null {
+    this.db.prepare(`UPDATE bd_followups SET done_at = ?, note = COALESCE(?, note) WHERE id = ? AND done_at IS NULL`).run(new Date().toISOString(), note ?? null, id);
+    return this.getFollowup(id);
+  }
+
+  /** Close open follow-ups of the given kinds for a contact (the step happened). */
+  closeFollowups(contactId: number, kinds: BdFollowup['kind'][]): number {
+    if (!kinds.length) return 0;
+    return this.db.prepare(`UPDATE bd_followups SET done_at = ? WHERE contact_id = ? AND done_at IS NULL AND kind IN (${kinds.map(() => '?').join(',')})`).run(new Date().toISOString(), contactId, ...kinds).changes;
+  }
+
+  snoozeFollowup(id: number, dueAt: string): BdFollowup | null {
+    this.db.prepare(`UPDATE bd_followups SET due_at = ? WHERE id = ?`).run(dueAt, id);
+    return this.getFollowup(id);
+  }
+
+  // ---- TikTok Shop contacts (who to loop in per market / category) ----
+
+  private rowToTtsContact(r: Row): TtsContact {
+    return { id: r.id as number, market: r.market as string, category: (r.category as string | null) ?? null, name: r.name as string, role: (r.role as string | null) ?? null, lark: (r.lark as string | null) ?? null, email: (r.email as string | null) ?? null, notes: (r.notes as string | null) ?? null, is_agency_manager: Boolean(r.is_agency_manager) };
+  }
+
+  listTtsContacts(): TtsContact[] {
+    return (this.db.prepare('SELECT * FROM tts_contacts ORDER BY market, is_agency_manager DESC, category NULLS FIRST, name').all() as Row[]).map((r) => this.rowToTtsContact(r));
+  }
+
+  saveTtsContact(c: Partial<TtsContact> & { market: string; name: string }): TtsContact {
+    if (c.id) {
+      this.db.prepare(`UPDATE tts_contacts SET market = ?, category = ?, name = ?, role = ?, lark = ?, email = ?, notes = ?, is_agency_manager = ? WHERE id = ?`).run(c.market, c.category ?? null, c.name, c.role ?? null, c.lark ?? null, c.email ?? null, c.notes ?? null, c.is_agency_manager ? 1 : 0, c.id);
+      return this.rowToTtsContact(this.db.prepare('SELECT * FROM tts_contacts WHERE id = ?').get(c.id) as Row);
+    }
+    const info = this.db.prepare(`INSERT INTO tts_contacts (market, category, name, role, lark, email, notes, is_agency_manager) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(c.market, c.category ?? null, c.name, c.role ?? null, c.lark ?? null, c.email ?? null, c.notes ?? null, c.is_agency_manager ? 1 : 0);
+    return this.rowToTtsContact(this.db.prepare('SELECT * FROM tts_contacts WHERE id = ?').get(Number(info.lastInsertRowid)) as Row);
+  }
+
+  deleteTtsContact(id: number): boolean {
+    return this.db.prepare('DELETE FROM tts_contacts WHERE id = ?').run(id).changes > 0;
+  }
+
+  // ---- Enterprise watchlist and alerts ----
+
+  listWatchlist(): WatchlistEntry[] {
+    return (this.db.prepare('SELECT * FROM bd_watchlist ORDER BY name COLLATE NOCASE').all() as Row[]).map((r) => ({ id: r.id as number, name: r.name as string, source: r.source as WatchlistEntry['source'], enabled: Boolean(r.enabled) }));
+  }
+
+  addWatchlist(name: string, source: WatchlistEntry['source'] = 'manual'): boolean {
+    return this.db.prepare(`INSERT OR IGNORE INTO bd_watchlist (name, source) VALUES (?, ?)`).run(name.trim(), source).changes > 0;
+  }
+
+  setWatchlist(id: number, enabled: boolean): boolean {
+    return this.db.prepare('UPDATE bd_watchlist SET enabled = ? WHERE id = ?').run(enabled ? 1 : 0, id).changes > 0;
+  }
+
+  deleteWatchlist(id: number): boolean {
+    return this.db.prepare('DELETE FROM bd_watchlist WHERE id = ?').run(id).changes > 0;
+  }
+
+  private static ALERT_SELECT = `SELECT a.*, p.shop_name, p.market, p.launched_at, p.gmv_7d, p.currency FROM bd_alerts a JOIN bd_prospects p ON p.id = a.prospect_id`;
+
+  listAlerts(includeDismissed = false): BdAlert[] {
+    return (this.db.prepare(`${Queries.ALERT_SELECT}${includeDismissed ? '' : ' WHERE a.dismissed_at IS NULL'} ORDER BY a.created_at DESC`).all() as Row[]).map((r) => ({ id: r.id as number, prospect_id: r.prospect_id as number, shop_name: r.shop_name as string, market: r.market as string, kind: r.kind as BdAlert['kind'], watch_name: (r.watch_name as string | null) ?? null, message: r.message as string, created_at: r.created_at as string, dismissed_at: (r.dismissed_at as string | null) ?? null, launched_at: (r.launched_at as string | null) ?? null, gmv_7d: (r.gmv_7d as number | null) ?? null, currency: (r.currency as string) ?? 'EUR' }));
+  }
+
+  addAlert(a: { prospect_id: number; kind: BdAlert['kind']; watch_name: string | null; message: string }): boolean {
+    return this.db.prepare(`INSERT OR IGNORE INTO bd_alerts (prospect_id, kind, watch_name, message) VALUES (?, ?, ?, ?)`).run(a.prospect_id, a.kind, a.watch_name, a.message).changes > 0;
+  }
+
+  dismissAlert(id: number): boolean {
+    return this.db.prepare('UPDATE bd_alerts SET dismissed_at = ? WHERE id = ? AND dismissed_at IS NULL').run(new Date().toISOString(), id).changes > 0;
+  }
+
+  // ---- BD activity tracker ----
+
+  bdActivity(days = 30): BdActivity {
+    const since = new Date(Date.now() - days * 86400000).toISOString();
+    const rows = new Map<string, BdActivityRow>();
+    const row = (actor: string | null) => {
+      const key = actor?.trim() || 'unknown';
+      let r = rows.get(key);
+      if (!r) { r = { actor: key, contacted: 0, tts_am: 0, gmail: 0, linkedin: 0, notes: 0, drafts: 0, emails_sent: 0, linkedin_requests: 0, linkedin_connected: 0, replies: 0, meetings: 0, prospects_touched: 0, last_active_at: null }; rows.set(key, r); }
+      return r;
+    };
+    const touched = new Map<string, Set<number>>();
+    const weekOf = (iso: string) => { const d = new Date(iso); const day = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - day); return d.toISOString().slice(0, 10); };
+    const weekly = new Map<string, { week: string; contacted: number; emails_sent: number; linkedin_requests: number; replies: number }>();
+    const wk = (iso: string) => { const w = weekOf(iso); let x = weekly.get(w); if (!x) { x = { week: w, contacted: 0, emails_sent: 0, linkedin_requests: 0, replies: 0 }; weekly.set(w, x); } return x; };
+    for (const e of this.db.prepare('SELECT * FROM bd_outreach_log WHERE created_at >= ?').all(since) as Row[]) {
+      const r = row(e.actor as string | null);
+      const at = e.created_at as string;
+      r.last_active_at = !r.last_active_at || at > r.last_active_at ? at : r.last_active_at;
+      (touched.get(r.actor) ?? touched.set(r.actor, new Set()).get(r.actor)!).add(e.prospect_id as number);
+      const note = String(e.note ?? '');
+      if (e.action === 'contacted') {
+        r.contacted += 1; wk(at).contacted += 1;
+        if (e.channel === 'tts_am') r.tts_am += 1; else if (e.channel === 'gmail') { r.gmail += 1; if (/^Sent /.test(note)) { r.emails_sent += 1; wk(at).emails_sent += 1; } } else if (e.channel === 'linkedin') { r.linkedin += 1; if (/connection request/i.test(note)) { r.linkedin_requests += 1; wk(at).linkedin_requests += 1; } }
+      } else if (e.action === 'note') {
+        r.notes += 1;
+        if (/accepted the LinkedIn/i.test(note)) r.linkedin_connected += 1;
+      } else if (e.action === 'replied') { r.replies += 1; wk(at).replies += 1; if (/→ meeting/.test(note)) r.meetings += 1; }
+      else if (e.action === 'status' && /→ meeting/.test(note)) r.meetings += 1;
+    }
+    for (const d of this.db.prepare('SELECT created_by, prospect_id, created_at FROM bd_email_drafts WHERE created_at >= ?').all(since) as Row[]) {
+      const r = row(d.created_by as string | null);
+      r.drafts += 1;
+      (touched.get(r.actor) ?? touched.set(r.actor, new Set()).get(r.actor)!).add(d.prospect_id as number);
+    }
+    for (const r of rows.values()) r.prospects_touched = touched.get(r.actor)?.size ?? 0;
+    const list = [...rows.values()].sort((a, b) => b.contacted + b.drafts - (a.contacted + a.drafts));
+    const totals = list.reduce((t, r) => ({ contacted: t.contacted + r.contacted, emails_sent: t.emails_sent + r.emails_sent, linkedin_requests: t.linkedin_requests + r.linkedin_requests, replies: t.replies + r.replies, meetings: t.meetings + r.meetings }), { contacted: 0, emails_sent: 0, linkedin_requests: 0, replies: 0, meetings: 0 });
+    return { days, rows: list, weekly: [...weekly.values()].sort((a, b) => a.week.localeCompare(b.week)), totals };
+  }
+
+  // ---- Account monitor flags ----
+
+  private rowToFlag(r: Row): MonitorFlag {
+    return { id: r.id as number, account_id: (r.account_id as number | null) ?? null, account_name: (r.account_name as string | null) ?? null, shop_id: (r.shop_id as string | null) ?? null, code: r.code as string, severity: r.severity as MonitorFlag['severity'], message: r.message as string, detail: (r.detail as string | null) ?? null, first_seen_at: r.first_seen_at as string, last_seen_at: r.last_seen_at as string, resolved_at: (r.resolved_at as string | null) ?? null, acknowledged_at: (r.acknowledged_at as string | null) ?? null };
+  }
+
+  listFlags(includeResolved = false): MonitorFlag[] {
+    return (this.db.prepare(`SELECT f.*, a.name AS account_name FROM monitor_flags f LEFT JOIN accounts a ON a.id = f.account_id${includeResolved ? '' : ' WHERE f.resolved_at IS NULL'} ORDER BY CASE f.severity WHEN 'crit' THEN 0 WHEN 'warn' THEN 1 ELSE 2 END, f.last_seen_at DESC`).all() as Row[]).map((r) => this.rowToFlag(r));
+  }
+
+  /** Replace the open flags found by a scan: matching open ones get last_seen bumped, missing ones are resolved, new ones inserted. */
+  applyScan(found: { account_id: number | null; shop_id: string | null; code: string; severity: MonitorFlag['severity']; message: string; detail?: string | null }[], scope: { account_ids?: number[] } = {}): { opened: number; resolved: number } {
+    const now = new Date().toISOString();
+    const open = this.listFlags(false).filter((f) => !scope.account_ids || (f.account_id !== null && scope.account_ids.includes(f.account_id)));
+    const key = (f: { account_id: number | null; shop_id: string | null; code: string }) => `${f.account_id ?? ''}|${f.shop_id ?? ''}|${f.code}`;
+    const seen = new Set<string>();
+    let opened = 0;
+    const upd = this.db.prepare('UPDATE monitor_flags SET last_seen_at = ?, message = ?, detail = ?, severity = ? WHERE id = ?');
+    const ins = this.db.prepare('INSERT INTO monitor_flags (account_id, shop_id, code, severity, message, detail, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    for (const f of found) {
+      const k = key(f);
+      seen.add(k);
+      const existing = open.find((o) => key(o) === k);
+      if (existing) upd.run(now, f.message, f.detail ?? null, f.severity, existing.id);
+      else { ins.run(f.account_id, f.shop_id, f.code, f.severity, f.message, f.detail ?? null, now, now); opened += 1; }
+    }
+    let resolved = 0;
+    const res = this.db.prepare('UPDATE monitor_flags SET resolved_at = ? WHERE id = ?');
+    for (const o of open) if (!seen.has(key(o))) { res.run(now, o.id); resolved += 1; }
+    return { opened, resolved };
+  }
+
+  acknowledgeFlag(id: number): boolean {
+    return this.db.prepare('UPDATE monitor_flags SET acknowledged_at = ? WHERE id = ?').run(new Date().toISOString(), id).changes > 0;
   }
 
   deleteProspect(id: number): boolean {

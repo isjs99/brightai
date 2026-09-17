@@ -10,12 +10,12 @@ export const SEED_SENDER_TITLE = 'Co-Founder/CEO, Brightform';
 export const SEED_BOOKING_URL = 'https://calendly.com/isaacsinclair/30min';
 export const SEED_SENT_QUERY = 'in:sent (TikTok Shop OR TikTok) -to:brightform.agency -subject:Re: -subject:Fwd: newer_than:1y';
 
-export const SEED_PITCH = `*Who we are*
+export const SEED_PITCH = `Who we are:
 - Official TikTok Shop Gold Partner, one of the first agency partners in Europe (launching 4yrs ago in the UK)
 - Team in Barcelona, Manchester, Munich, Paris, Milan and Amsterdam
 - Operating across EU5 (ES, DE, FR, IT, UK) and Ireland with native speakers in every market
 
-*Credentials*
+Credentials:
 - #1 TikTok Shop Partner in Germany and the EU by GMV for 6 consecutive months
 - Biggest TSP Agency by GMV, Q1
 - 2 of 3 FMCG ACE Awards and 1 of 3 Beauty ACE Awards, Q2 Germany
@@ -23,7 +23,7 @@ export const SEED_PITCH = `*Who we are*
 - FastMoss Agency of the Year 2025
 - EUR 8.19M client GMV across DE/FR/IT in six months, 42 shops under management
 
-*What we do*
+What we do:
 - End to end TikTok Shop management: shop setup, catalogue, content, affiliate, LIVE and GMV Max
 - Affiliate and creator programmes at scale, with active sample and commission management
 - Live commerce: own studio, creator training and fully managed streams
@@ -52,12 +52,12 @@ I'm in Paris on 26 and 27 August and wanted to see if you had 30 minutes free wh
 
 To give you an introduction to Brightform:
 
-*Who we are*
+Who we are:
 - Official TikTok Shop Gold Partner, one of the first agency partners in Europe (launching 4yrs ago in the UK)
 - Team in Barcelona, Manchester, Munich, Paris, Milan and Amsterdam
 - Operating across EU5 (ES, DE, FR, IT, UK) and Ireland with native speakers in every market
 
-*Credentials*
+Credentials:
 - #1 TikTok Shop Partner in Germany and the EU by GMV for 5 consecutive months
 - Biggest TSP Agency by GMV, Q1
 - 2 of 3 FMCG ACE Awards and 1 of 3 Beauty ACE Awards, Q2 Germany
@@ -65,7 +65,7 @@ To give you an introduction to Brightform:
 - FastMoss Agency of the Year 2025
 - EUR 8.19M client GMV across DE/FR/IT in six months, 42 shops under management
 
-*What we do*
+What we do:
 - End to end TikTok Shop management: shop setup, catalogue, content, affiliate, LIVE and GMV Max
 - Affiliate and creator programmes at scale, with active sample and commission management
 - Live commerce: own studio, creator training and fully managed streams
@@ -88,7 +88,7 @@ I hope you are very well, and it's a pleasure to be introduced.
 
 To give you an introduction to Brightform:
 
-*Credentials*
+Credentials:
 - #1 TikTok Shop Partner in Germany and the EU by GMV for 5 consecutive months
 - Biggest TSP Agency by GMV, Q1
 - 2 of 3 FMCG ACE Awards and 1 of 3 Beauty ACE Awards, Q2 Germany
@@ -96,12 +96,12 @@ To give you an introduction to Brightform:
 - FastMoss Agency of the Year 2025
 - EUR 8.19M client GMV across DE/FR/IT in six months, 42 shops under management
 
-*Who we are*
+Who we are:
 - Official TikTok Shop Gold Partner, one of the first agency partners in Europe (launching 4yrs ago in the UK)
 - Team in Barcelona, Manchester, Munich, Paris, Milan and Amsterdam
 - Operating across EU5 (ES, DE, FR, IT, UK) and Ireland with native speakers in every market
 
-*What we do*
+What we do:
 - End to end TikTok Shop management: shop setup, catalogue, content, affiliate, LIVE and GMV Max
 - Affiliate and creator programmes at scale, with active sample and commission management
 - Live commerce: own studio, creator training and fully managed streams
@@ -122,12 +122,12 @@ Isaac`,
 
 I'd love to talk about a partnership with WPP.
 
-*Who we are*
+Who we are:
 - Official TikTok Shop Gold Partner, one of the first agency partners in Europe (launching 4yrs ago in the UK)
 - Team in Barcelona, Manchester, Munich, Paris, Milan and Amsterdam
 - Operating across EU5 (ES, DE, FR, IT, UK) and Ireland with native speakers in every market
 
-*Credentials*
+Credentials:
 - #1 TikTok Shop Partner in Germany and the EU by GMV for 5 consecutive months
 - Biggest TSP Agency by GMV, Q1
 - 2 of 3 FMCG ACE Awards and 1 of 3 Beauty ACE Awards, Q2 Germany
@@ -135,7 +135,7 @@ I'd love to talk about a partnership with WPP.
 - FastMoss Agency of the Year 2025
 - EUR 8.19M client GMV across DE/FR/IT in six months, 42 shops under management
 
-*What we do*
+What we do:
 - End to end TikTok Shop management: shop setup, catalogue, content, affiliate, LIVE and GMV Max
 - Affiliate and creator programmes at scale, with active sample and commission management
 - Live commerce: own studio, creator training and fully managed streams

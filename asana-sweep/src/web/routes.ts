@@ -22,6 +22,10 @@ import { importLeadsCsv, leadsSettings, leadsSyncStatus, syncLeads } from '../le
 import { amSummary } from '../leads/points.js';
 import { apollo } from '../bd/apollo.js';
 import { enrichProspect } from '../bd/enrich.js';
+import { advanceLinkedin, LINKEDIN_STEPS, suggestTtsContact } from '../bd/sequence.js';
+import { scanEnterpriseAlerts, syncWatchlistFromSheet } from '../bd/alerts.js';
+import { draftCallFollowups, tldv } from '../bd/tldv.js';
+import type { BdFollowup, TtsContact } from '../sweep/types.js';
 import { autoReplyBlocker, inboxSettings, sendReply, syncInbox } from '../inbox/sync.js';
 import { buildContext, renderPrompt } from '../inbox/context.js';
 import { draftWithClaude } from '../inbox/llm.js';
@@ -30,7 +34,7 @@ import type { ConversationDetail, ContextEntry, InboxData } from '../sweep/types
 import { normaliseDomain } from '../bd/score.js';
 import { importPullFiles, isoDate, parseProspectInput } from '../bd/import.js';
 import { GmailClient, gmailComposeUrl } from '../bd/gmail.js';
-import { LANGUAGES as OUTREACH_LANGUAGES, outreachInputs, parseDraftJson, renderOutreachPrompt, templateDraft } from '../bd/outreach.js';
+import { bodyToHtml, LANGUAGES as OUTREACH_LANGUAGES, outreachInputs, parseDraftJson, renderOutreachPrompt, templateDraft } from '../bd/outreach.js';
 import type { BdEmailDraft, OutreachData, OutreachExample } from '../sweep/types.js';
 import type { BdCountryRow, BdData, BdProspectInput, BdProspectPatch, BdStatus } from '../sweep/types.js';
 import type { AuthProvider } from './auth.js';
@@ -199,7 +203,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
       throw new HttpError(400, (err as Error).message);
     }
     liveEvents.emitUpdate({ kind: 'bd' });
-    if (result.added) scheduler.autoEnrich();
+    if (result.added) { scheduler.autoEnrich(); scanEnterpriseAlerts(q); }
     res.json({ result });
   });
 
@@ -1081,8 +1085,9 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
 
   const BD_STATUSES: BdStatus[] = ['new', 'researching', 'contacted', 'replied', 'meeting', 'won', 'lost'];
 
-  const gmail = new GmailClient(q);
+  const gmail = scheduler.gmail;
   const enrichJob = scheduler.enrich;
+  const monitor = scheduler.monitor;
 
   const bdData = (): BdData => {
     const prospects = q.listProspects(false);
@@ -1125,7 +1130,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
 
   r.get('/bd', (_req, res) => res.json(bdData()));
 
-  r.post('/bd/pulls/import', (_req, res) => { const r = importPullFiles(q); if (r.added) scheduler.autoEnrich(); res.json(r); });
+  r.post('/bd/pulls/import', (_req, res) => { const r = importPullFiles(q); if (r.added) { scheduler.autoEnrich(); scanEnterpriseAlerts(q); } res.json(r); });
 
   r.post('/bd/prospects', (req, res) => {
     const input = parseProspectInput({ source: 'manual', ...((req.body ?? {}) as Record<string, unknown>) });
@@ -1263,7 +1268,12 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
 
   // ---- BD outreach emails: draft in Isaac's voice, review in the inbox, hand off to Gmail ----
 
-  const actorOf = (req: Request): string => (auth instanceof SharedPasswordAuth ? auth.roleOf(req) ?? 'admin' : 'admin');
+  /** Who is acting: the "You are" pick sent by the client (x-actor header), else the login role. */
+  const actorOf = (req: Request): string => {
+    const named = String(req.headers['x-actor'] ?? '').trim().slice(0, 60);
+    if (named) return named;
+    return auth instanceof SharedPasswordAuth ? auth.roleOf(req) ?? 'admin' : 'admin';
+  };
   const isAdminReq = (req: Request): boolean => (auth instanceof SharedPasswordAuth ? auth.roleOf(req) === 'admin' : auth.isAuthenticated(req));
 
   const outreachData = (): OutreachData => ({
@@ -1281,7 +1291,16 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
       sent_query: q.getSetting('outreach_sent_query', ''),
       last_pull_at: q.getSetting('outreach_last_pull_at', '') || null,
       last_pull_error: q.getSetting('outreach_last_pull_error', '') || null,
+      watchlist_sheet_tab: q.getSetting('watchlist_sheet_tab', ''),
+      linkedin_check_days: Number(q.getSetting('linkedin_check_days', '3')) || 3,
     },
+    followups: q.listFollowups(),
+    alerts: q.listAlerts(),
+    watchlist: q.listWatchlist(),
+    tts_contacts: q.listTtsContacts(),
+    activity: q.bdActivity(30),
+    people: q.listPeople(),
+    tldv: { configured: tldv.configured, last_check_at: q.getSetting('tldv_last_check_at', '') || null, last_error: q.getSetting('tldv_last_error', '') || null, auto_draft: q.getSetting('tldv_auto_draft', '1') === '1' },
   });
 
   /** Generate subject + body for one contact, with Claude when configured, else the template. */
@@ -1351,7 +1370,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (!d) throw new HttpError(404, 'Draft not found');
     if (gmail.connected) {
       try {
-        const g = await gmail.createDraft({ to: d.to_email, toName: d.to_name, subject: d.subject, body: d.body });
+        const g = await gmail.createDraft({ to: d.to_email, toName: d.to_name, subject: d.subject, body: d.body, html: bodyToHtml(d.body) });
         const draft = q.updateDraft(d.id, { status: d.status === 'sent' ? 'sent' : 'gmail', gmail_draft_id: g.draft_id, gmail_message_id: g.message_id, gmail_url: g.url });
         q.logOutreach(d.prospect_id, { channel: 'gmail', action: 'note', note: `Draft "${d.subject}" saved to Gmail (${gmail.email})`, contact_name: d.to_name, actor: actorOf(req) });
         liveEvents.emitUpdate({ kind: 'bd' });
@@ -1388,8 +1407,9 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
 
   r.put('/outreach/settings', (req, res) => {
     const b = (req.body ?? {}) as Record<string, unknown>;
-    const keys: Record<string, string> = { sender_name: 'outreach_sender_name', sender_title: 'outreach_sender_title', booking_url: 'outreach_booking_url', pitch: 'outreach_pitch', sent_query: 'outreach_sent_query' };
-    for (const [k, setting] of Object.entries(keys)) if (typeof b[k] === 'string') q.setSetting(setting, String(b[k]).trim());
+    const keys: Record<string, string> = { sender_name: 'outreach_sender_name', sender_title: 'outreach_sender_title', booking_url: 'outreach_booking_url', pitch: 'outreach_pitch', sent_query: 'outreach_sent_query', watchlist_sheet_tab: 'watchlist_sheet_tab', linkedin_check_days: 'linkedin_check_days' };
+    for (const [k, setting] of Object.entries(keys)) if (typeof b[k] === 'string' || typeof b[k] === 'number') q.setSetting(setting, String(b[k]).trim());
+    if (typeof b.tldv_auto_draft === 'boolean') q.setSetting('tldv_auto_draft', b.tldv_auto_draft ? '1' : '0');
     res.json(outreachData());
   });
 
@@ -1462,6 +1482,153 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     liveEvents.emitUpdate({ kind: 'settings' });
     res.json(outreachData());
   });
+
+  // ---- LinkedIn sequence, follow-ups, TikTok Shop contacts, alerts, call follow-ups ----
+
+  r.post('/bd/contacts/:id/linkedin', async (req, res) => {
+    const b = (req.body ?? {}) as { step?: string; note?: string };
+    const step = LINKEDIN_STEPS.find((x) => x === b.step);
+    if (!step) throw new HttpError(400, 'step must be requested, connected or messaged');
+    try {
+      const r = await advanceLinkedin(q, idParam(req), step, { actor: actorOf(req), note: optText(b.note) });
+      liveEvents.emitUpdate({ kind: 'bd' });
+      res.json({ ...r, ...outreachData() });
+    } catch (err) {
+      throw new HttpError(err instanceof Error && /not found/i.test(err.message) ? 404 : 502, (err as Error).message);
+    }
+  });
+
+  r.post('/bd/followups', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const prospect = q.getProspect(Number(b.prospect_id));
+    if (!prospect) throw new HttpError(404, 'Prospect not found');
+    const title = optText(b.title);
+    if (!title) throw new HttpError(400, 'Title is required.');
+    const due = isoDate(b.due_at) ?? new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+    const f = q.addFollowup({ prospect_id: prospect.id, contact_id: b.contact_id ? Number(b.contact_id) : null, kind: 'custom', title, due_at: `${due}T09:00:00.000Z`, note: optText(b.note), created_by: actorOf(req) });
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.status(201).json({ followup: f, ...outreachData() });
+  });
+
+  r.post('/bd/followups/:id/done', (req, res) => {
+    const f = q.completeFollowup(idParam(req), optText((req.body as { note?: unknown } | undefined)?.note));
+    if (!f) throw new HttpError(404, 'Follow-up not found');
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json({ followup: f, ...outreachData() });
+  });
+
+  r.post('/bd/followups/:id/snooze', (req, res) => {
+    const days = Math.min(30, Math.max(1, Number((req.body as { days?: unknown } | undefined)?.days) || 2));
+    const f = q.snoozeFollowup(idParam(req), new Date(Date.now() + days * 86400000).toISOString());
+    if (!f) throw new HttpError(404, 'Follow-up not found');
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json({ followup: f, ...outreachData() });
+  });
+
+  r.get('/bd/prospects/:id/tts-contact', (req, res) => {
+    const p = q.getProspect(idParam(req));
+    if (!p) throw new HttpError(404, 'Prospect not found');
+    res.json(suggestTtsContact(q.listTtsContacts(), p));
+  });
+
+  r.put('/bd/tts-contacts', (req, res) => {
+    const b = (req.body ?? {}) as Partial<TtsContact>;
+    const market = optText(b.market)?.toUpperCase();
+    const name = optText(b.name);
+    if (!market || !name) throw new HttpError(400, 'Market and name are required.');
+    const saved = q.saveTtsContact({ id: b.id ? Number(b.id) : undefined, market, name, category: optText(b.category), role: optText(b.role), lark: optText(b.lark), email: optText(b.email), notes: optText(b.notes), is_agency_manager: Boolean(b.is_agency_manager) });
+    res.json({ contact: saved, ...outreachData() });
+  });
+
+  r.delete('/bd/tts-contacts/:id', (req, res) => {
+    if (!q.deleteTtsContact(idParam(req))) throw new HttpError(404, 'Contact not found');
+    res.json(outreachData());
+  });
+
+  r.post('/bd/watchlist', (req, res) => {
+    const names = String((req.body as { names?: unknown } | undefined)?.names ?? (req.body as { name?: unknown } | undefined)?.name ?? '').split(/[\n,;]+/).map((x) => x.trim()).filter((x) => x.length >= 2);
+    if (!names.length) throw new HttpError(400, 'Give at least one name.');
+    let added = 0;
+    for (const n of names) if (q.addWatchlist(n, 'manual')) added += 1;
+    const scan = scanEnterpriseAlerts(q);
+    res.status(201).json({ added, ...scan, ...outreachData() });
+  });
+
+  r.put('/bd/watchlist/:id', (req, res) => {
+    const enabled = (req.body as { enabled?: unknown } | undefined)?.enabled;
+    if (typeof enabled !== 'boolean' || !q.setWatchlist(idParam(req), enabled)) throw new HttpError(400, 'Send { enabled: true|false }');
+    res.json(outreachData());
+  });
+
+  r.delete('/bd/watchlist/:id', (req, res) => {
+    if (!q.deleteWatchlist(idParam(req))) throw new HttpError(404, 'Not found');
+    res.json(outreachData());
+  });
+
+  r.post('/bd/watchlist/sync', async (_req, res) => {
+    try {
+      const r = await syncWatchlistFromSheet(q);
+      const scan = scanEnterpriseAlerts(q);
+      res.json({ ...r, ...scan, ...outreachData() });
+    } catch (err) {
+      throw new HttpError(400, (err as Error).message);
+    }
+  });
+
+  r.post('/bd/alerts/scan', (_req, res) => {
+    const r = scanEnterpriseAlerts(q);
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json({ ...r, ...outreachData() });
+  });
+
+  r.post('/bd/alerts/:id/dismiss', (req, res) => {
+    if (!q.dismissAlert(idParam(req))) throw new HttpError(404, 'Alert not found');
+    res.json(outreachData());
+  });
+
+  r.get('/bd/activity', (req, res) => {
+    const days = Math.min(365, Math.max(1, Number(req.query.days) || 30));
+    res.json(q.bdActivity(days));
+  });
+
+  /** Check tl;dv for calls since the last run and draft follow-ups (Claude + Gmail draft when connected). */
+  r.post('/outreach/calls/check', async (_req, res) => {
+    if (!tldv.configured) throw new HttpError(400, 'Set TLDV_API_KEY in .env first.');
+    if (!config.anthropicApiKey) throw new HttpError(400, 'Set ANTHROPIC_API_KEY in .env first; call follow-ups are written by Claude.');
+    const r = await draftCallFollowups(q, { gmail });
+    res.json({ ...r, ...outreachData() });
+  });
+
+  // ---- Account monitor ----
+
+  r.get('/monitor', (_req, res) => res.json(monitor.data()));
+
+  r.post('/monitor/scan', async (_req, res) => {
+    const r = await monitor.scan();
+    res.json({ ...r, ...monitor.data() });
+  });
+
+  r.put('/monitor/rules/:code', (req, res) => {
+    const enabled = (req.body as { enabled?: unknown } | undefined)?.enabled;
+    if (typeof enabled !== 'boolean') throw new HttpError(400, 'Send { enabled: true|false }');
+    monitor.setRule(String(req.params.code), enabled);
+    res.json(monitor.data());
+  });
+
+  r.put('/monitor/settings', (req, res) => {
+    const b = (req.body ?? {}) as { interval_minutes?: unknown; enabled?: unknown };
+    if (b.interval_minutes !== undefined) q.setSetting('monitor_interval_minutes', String(Math.max(5, Number(b.interval_minutes) || 15)));
+    if (typeof b.enabled === 'boolean') q.setSetting('monitor_enabled', b.enabled ? '1' : '0');
+    monitor.start();
+    res.json(monitor.data());
+  });
+
+  r.post('/monitor/flags/:id/ack', (req, res) => {
+    if (!q.acknowledgeFlag(idParam(req))) throw new HttpError(404, 'Flag not found');
+    res.json(monitor.data());
+  });
+
+  r.post('/bd/followups/remind', async (_req, res) => res.json({ ...(await scheduler.remindFollowups()), ...outreachData() }));
 
   // ---- CS & affiliate inbox, context library, auto-reply ----
 

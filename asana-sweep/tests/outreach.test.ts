@@ -18,12 +18,13 @@ const contact = { name: 'Ann Smith', title: 'Founder', email: 'ann@displayz.fr' 
 describe('outreach drafting', () => {
   it('turns FastMoss numbers into facts and a tailored opener', () => {
     const facts = prospectFacts(prospect());
-    expect(facts[0]).toBe('Shop: Displayz on TikTok Shop France');
+    expect(facts[0]).toContain('Company / brand: Displayz');
+    expect(facts[0]).toContain('on TikTok Shop France');
     expect(facts).toContain('GMV last 7 days: €237,925 (243 units)');
     expect(facts.some((f) => f.startsWith('Momentum: surging'))).toBe(true);
     expect(facts.some((f) => f.includes('Sales only started in roughly the last 22 days'))).toBe(true);
-    expect(tailoredOpener(prospect())).toContain('only just started selling on TikTok Shop France');
-    expect(tailoredOpener(prospect({ gmv_started_30d: false, new_shop_30d: true }))).toContain('live for less than a month');
+    expect(tailoredOpener(prospect())).toContain('Displayz only just started selling on TikTok Shop France');
+    expect(tailoredOpener(prospect({ gmv_started_30d: false, new_shop_30d: true }))).toContain('for under a month');
     expect(tailoredOpener(prospect({ gmv_started_30d: false, rise_score: 0.2 }))).toContain('fastest-rising shops');
     expect(tailoredOpener(prospect({ gmv_started_30d: false, rise_score: 0.01, currency: 'GBP', market: 'UK' }))).toContain('TikTok Shop UK');
   });
@@ -34,8 +35,10 @@ describe('outreach drafting', () => {
     expect(system).toContain('### WPP x Brightform (cold, to wpp.com)');
     expect(system).toContain('#1 TikTok Shop Partner in the EU');
     expect(system).toContain('Output JSON only');
+    expect(system).toContain('Call the company "Displayz"');
+    expect(system).toContain('No markdown, no asterisks');
     expect(system).toContain('Write the email in English');
-    expect(system).toContain('Style requested: short note');
+    expect(system).toContain('Shape requested: short note');
     expect(user).toContain('Ann Smith, Founder <ann@displayz.fr>');
     expect(user).toContain('- LinkedIn: contacted on 2026-09-10');
     expect(user).toContain('"Old one" (sent)');
@@ -53,13 +56,14 @@ describe('outreach drafting', () => {
   it('template draft follows the intro structure with a tailored opener and booking link', () => {
     const short = templateDraft({ prospect: prospect(), contact, language: 'en', style: 'short', ...inputs });
     expect(short.subject).toBe('Displayz x TikTok Shop France');
-    expect(short.body.startsWith('Hi Ann,\n\nDisplayz has only just started selling')).toBe(true);
+    expect(short.body.startsWith('Hi Ann,\n\nDisplayz only just started selling')).toBe(true);
     expect(short.body).toContain(inputs.bookingUrl);
     expect(short.body.endsWith('Very best,\nIsaac')).toBe(true);
-    expect(short.body).not.toContain('*Credentials*');
+    expect(short.body).not.toContain('*');
     const intro = templateDraft({ prospect: prospect({ brand: 'Displayz Toys' }), contact, language: 'en', style: 'intro', ...inputs });
     expect(intro.subject).toBe('Displayz Toys x TikTok Shop France');
-    expect(intro.body).toContain('To give you an introduction to Brightform:\n\n*Credentials*');
+    expect(intro.body).toContain('Why us:\n- ');
+    expect(intro.body).not.toContain('*');
   });
 });
 
@@ -141,7 +145,9 @@ describe('email drafts and voice examples', () => {
     expect(ex.length).toBe(6);
     expect(ex.every((e) => e.source === 'seed' && e.enabled)).toBe(true);
     expect(ex.map((e) => e.kind).sort()).toEqual(['cold', 'cold', 'cold', 'intro', 'intro', 'reply']);
-    expect(q.getSetting('outreach_pitch')).toContain('*Credentials*');
+    expect(q.getSetting('outreach_pitch')).toContain('Credentials:');
+    expect(q.getSetting('outreach_pitch')).not.toContain('*');
+    expect(ex.every((e) => !e.body.includes('*Who we are*'))).toBe(true);
     expect(q.getSetting('outreach_sender_name')).toBe('Isaac Sinclair');
     expect(q.addExample({ subject: 'x', body: 'y', gmail_id: 'g1', source: 'gmail' })).not.toBeNull();
     expect(q.addExample({ subject: 'x', body: 'y', gmail_id: 'g1', source: 'gmail' })).toBeNull();

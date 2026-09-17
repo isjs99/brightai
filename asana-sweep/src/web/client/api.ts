@@ -8,6 +8,12 @@ import type {
   BdData,
   BdEmailDraft,
   OutreachData,
+  BdContact as BdContactT,
+  BdProspect as BdProspectT,
+  BdFollowup,
+  TtsContact,
+  BdActivity,
+  MonitorData,
   BdProspect,
   BdProspectInput,
   BdProspectPatch,
@@ -121,10 +127,19 @@ export class ApiError extends Error {
   }
 }
 
+/** Who is using the shared login right now, for the BD activity tracker. Stored per browser. */
+export function currentActor(): string {
+  try { return localStorage.getItem('actor') ?? ''; } catch { return ''; }
+}
+export function setCurrentActor(name: string): void {
+  try { if (name) localStorage.setItem('actor', name); else localStorage.removeItem('actor'); } catch { /* ignore */ }
+}
+
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const actor = currentActor();
   const res = await fetch(`/api${path}`, {
     method,
-    headers: body !== undefined ? { 'Content-Type': 'application/json' } : undefined,
+    headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(actor ? { 'x-actor': actor } : {}) },
     body: body !== undefined ? JSON.stringify(body) : undefined,
     credentials: 'same-origin',
   });
@@ -249,12 +264,35 @@ export const api = {
   draftToGmail: (id: number) => call<OutreachData & { draft: BdEmailDraft; mode: 'gmail' | 'compose'; url: string }>('POST', `/outreach/drafts/${id}/gmail`),
   markDraftSent: (id: number) => call<OutreachData & { draft: BdEmailDraft }>('POST', `/outreach/drafts/${id}/sent`),
   deleteDraft: (id: number) => call<OutreachData>('DELETE', `/outreach/drafts/${id}`),
-  saveOutreachSettings: (s: Partial<{ sender_name: string; sender_title: string; booking_url: string; pitch: string; sent_query: string }>) => call<OutreachData>('PUT', '/outreach/settings', s),
+  saveOutreachSettings: (s: Partial<{ sender_name: string; sender_title: string; booking_url: string; pitch: string; sent_query: string; watchlist_sheet_tab: string; linkedin_check_days: number; tldv_auto_draft: boolean }>) => call<OutreachData>('PUT', '/outreach/settings', s),
   addExample: (e: { subject: string; body: string; kind: string }) => call<OutreachData>('POST', '/outreach/examples', e),
   setExample: (id: number, enabled: boolean) => call<OutreachData>('PUT', `/outreach/examples/${id}`, { enabled }),
   deleteExample: (id: number) => call<OutreachData>('DELETE', `/outreach/examples/${id}`),
   pullExamples: () => call<OutreachData & { pulled: number; added: number }>('POST', '/outreach/examples/pull'),
   gmailDisconnect: () => call<OutreachData>('POST', '/gmail/disconnect'),
+  // LinkedIn sequence, follow-ups, TTS contacts, alerts, activity, calls
+  linkedinStep: (contactId: number, step: 'requested' | 'connected' | 'messaged', note?: string) => call<OutreachData & { contact: BdContactT; prospect: BdProspectT; followup: BdFollowup | null; message: { text: string; generator: string } | null }>('POST', `/bd/contacts/${contactId}/linkedin`, { step, note }),
+  addFollowup: (f: { prospect_id: number; contact_id?: number | null; title: string; due_at?: string; note?: string }) => call<OutreachData & { followup: BdFollowup }>('POST', '/bd/followups', f),
+  completeFollowup: (id: number, note?: string) => call<OutreachData & { followup: BdFollowup }>('POST', `/bd/followups/${id}/done`, { note }),
+  snoozeFollowup: (id: number, days: number) => call<OutreachData & { followup: BdFollowup }>('POST', `/bd/followups/${id}/snooze`, { days }),
+  remindFollowups: () => call<OutreachData & { sent: number }>('POST', '/bd/followups/remind'),
+  ttsContactFor: (prospectId: number) => call<{ contact: TtsContact | null; fallback: TtsContact | null; reason: string }>('GET', `/bd/prospects/${prospectId}/tts-contact`),
+  saveTtsContact: (c: Partial<TtsContact> & { market: string; name: string }) => call<OutreachData & { contact: TtsContact }>('PUT', '/bd/tts-contacts', c),
+  deleteTtsContact: (id: number) => call<OutreachData>('DELETE', `/bd/tts-contacts/${id}`),
+  addWatchlist: (names: string) => call<OutreachData & { added: number; new_alerts: number }>('POST', '/bd/watchlist', { names }),
+  setWatchlist: (id: number, enabled: boolean) => call<OutreachData>('PUT', `/bd/watchlist/${id}`, { enabled }),
+  deleteWatchlist: (id: number) => call<OutreachData>('DELETE', `/bd/watchlist/${id}`),
+  syncWatchlist: () => call<OutreachData & { added: number; total: number; new_alerts: number }>('POST', '/bd/watchlist/sync'),
+  scanAlerts: () => call<OutreachData & { checked: number; new_alerts: number }>('POST', '/bd/alerts/scan'),
+  dismissAlert: (id: number) => call<OutreachData>('POST', `/bd/alerts/${id}/dismiss`),
+  bdActivity: (days: number) => call<BdActivity>('GET', `/bd/activity?days=${days}`),
+  checkCalls: () => call<OutreachData & { checked: number; drafted: number; errors: string[] }>('POST', '/outreach/calls/check'),
+  // Account monitor
+  monitor: () => call<MonitorData>('GET', '/monitor'),
+  monitorScan: () => call<MonitorData & { opened: number; resolved: number; found: number }>('POST', '/monitor/scan'),
+  monitorRule: (code: string, enabled: boolean) => call<MonitorData>('PUT', `/monitor/rules/${code}`, { enabled }),
+  monitorSettings: (s: { interval_minutes?: number; enabled?: boolean }) => call<MonitorData>('PUT', '/monitor/settings', s),
+  ackFlag: (id: number) => call<MonitorData>('POST', `/monitor/flags/${id}/ack`),
   deleteProspect: (id: number) => call<BdData>('DELETE', `/bd/prospects/${id}`),
   addContact: (prospectId: number, c: { name: string; title?: string; email?: string; linkedin_url?: string; phone?: string; notes?: string }) => call<BdData & { prospect: BdProspect }>('POST', `/bd/prospects/${prospectId}/contacts`, c),
   deleteContact: (id: number) => call<BdData>('DELETE', `/bd/contacts/${id}`),

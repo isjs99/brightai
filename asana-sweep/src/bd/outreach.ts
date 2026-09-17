@@ -27,6 +27,18 @@ export interface DraftRequest {
 
 export const firstName = (name: string): string => name.trim().split(/\s+/)[0] ?? name;
 
+const NAME_SUFFIXES = /\b(uk|de|fr|it|es|eu|shop|store|official|oficial|deutschland|germany|france|italia|italy|españa|espana|spain|europe|ltd|srl|s\.r\.l|gmbh|sas|sl|onlineshop|online|tts|direct)\b/gi;
+
+/** The name we use for the company in copy: the brand when set, else the shop name cleaned of handle-style dots and market suffixes ("ulefone.fr" -> "Ulefone"). */
+export function brandDisplayName(p: Pick<BdProspect, 'shop_name' | 'brand'>): string {
+  const raw = (p.brand?.trim() || p.shop_name).trim();
+  let s = raw.replace(/[._]+/g, ' ').replace(NAME_SUFFIXES, '').replace(/[-–]+$/g, '').replace(/\s+/g, ' ').trim();
+  if (s.length < 3) s = raw;
+  // Handle-style shop names (all lower case, e.g. "ulefone.fr") read badly in an email; title-case them. A brand set explicitly keeps its casing ("medicube", "VEVOR").
+  if (!p.brand?.trim() && s === s.toLowerCase()) s = s.replace(/\b\w/g, (c) => c.toUpperCase());
+  return s;
+}
+
 export function money(n: number | null | undefined, currency: string): string {
   if (n === null || n === undefined) return 'n/a';
   const sym = currency === 'GBP' ? '£' : currency === 'EUR' ? '€' : `${currency} `;
@@ -36,7 +48,8 @@ export function money(n: number | null | undefined, currency: string): string {
 /** The facts the writer may use about the shop, in prose bullets. */
 export function prospectFacts(p: BdProspect): string[] {
   const facts: string[] = [];
-  facts.push(`Shop: ${p.shop_name}${p.brand && p.brand.toLowerCase() !== p.shop_name.toLowerCase() ? ` (brand: ${p.brand})` : ''} on TikTok Shop ${MARKET_NAMES[p.market] ?? p.market}${p.shop_type === 'cross_border' ? ', selling cross-border' : ''}`);
+  const brand = brandDisplayName(p);
+  facts.push(`Company / brand: ${brand} (TikTok Shop name "${p.shop_name}"; refer to them as ${brand}, never by the shop handle) on TikTok Shop ${MARKET_NAMES[p.market] ?? p.market}${p.shop_type === 'cross_border' ? ', selling cross-border' : ''}`);
   if (p.category) facts.push(`Category: ${p.category}`);
   if (p.gmv_7d !== null) facts.push(`GMV last 7 days: ${money(p.gmv_7d, p.currency)}${p.units_7d ? ` (${p.units_7d.toLocaleString('en-GB')} units)` : ''}`);
   if (p.gmv_total !== null) facts.push(`GMV lifetime: ${money(p.gmv_total, p.currency)}`);
@@ -63,18 +76,21 @@ export function outreachHistory(p: BdProspect): string[] {
 
 export function renderOutreachPrompt(r: DraftRequest): { system: string; user: string } {
   const lang = LANGUAGES[r.language] ?? r.language;
+  const brand = brandDisplayName(r.prospect);
   const sys: string[] = [];
   sys.push(`You draft outreach emails on behalf of ${r.senderName}, ${r.senderTitle}, a TikTok Shop Partner agency. You write exactly as he writes; the examples below are emails he actually sent.`);
-  sys.push('Voice: warm but direct, short sentences, British English, no hype words, no exclamation marks, no "I hope this finds you well" fluff beyond his usual one-line opener. Opens "Hi <first name>," and signs off "Very best,\\n' + firstName(r.senderName) + '". He uses *Who we are* / *Credentials* / *What we do* headers with "- " bullets when giving a full introduction, and a plain three-to-five sentence note when the ask is small.');
-  sys.push('Tailor the first lines to the prospect: name the shop, the market and what the numbers show (momentum, a recent launch, category). Numbers about the prospect must come from the facts given; never invent them. Claims about Brightform must come from the pitch block; never invent awards, clients or numbers.');
+  sys.push('Voice: warm but direct, short sentences, British English, no hype words, no exclamation marks. Opens "Hi <first name>," and signs off "Very best,\\n' + firstName(r.senderName) + '".');
+  sys.push('Impact first. The first sentence is about them, with the one number or signal that matters most (momentum, a fresh launch, a category they lead). Then the two or three Brightform facts most relevant to that shop, nothing else. Then one clear ask for a call. Cut everything that does not earn its place: no throat-clearing, no "I hope you are well", no restating what they already know.');
+  sys.push(`Call the company "${brand}". Never use the TikTok Shop handle or shop name in the subject or body. Numbers about the prospect must come from the facts given; never invent them. Claims about Brightform must come from the pitch block; never invent awards, clients or numbers.`);
   sys.push('Do not reuse dated specifics from the examples (travel dates, city visits, names). Do not mention FastMoss or that the data was pulled from a tool; phrase it as "we track" or "we noticed".');
-  sys.push(`Write the email in ${lang}. Keep the subject under 60 characters; his subjects are plain, e.g. "<Brand> x TikTok Shop <Market>" or a concrete hook.`);
-  sys.push(r.style === 'intro' ? 'Style requested: full introduction. After the tailored opener, include the *Who we are* / *Credentials* / *What we do* blocks from the pitch (you may trim bullets that do not fit the prospect), then one clear call to action offering a call.' : 'Style requested: short note. 90 to 160 words, no bullet blocks; pick the two or three pitch facts that matter most for this shop and end with one clear call to action offering a quick call.');
-  if (r.bookingUrl) sys.push(`When offering a call you may include his booking link once: ${r.bookingUrl}`);
-  sys.push('Output JSON only, no prose around it: {"subject": "...", "body": "..."}. The body is plain text: blank lines between paragraphs, bullets as "- ", headers wrapped in single asterisks like *Credentials*.');
-  sys.push('', '## Pitch block (the only source of Brightform claims)', r.pitch);
+  sys.push(`Write the email in ${lang}. Subject under 50 characters, plain, e.g. "${brand} x TikTok Shop <Market>" or a concrete hook.`);
+  sys.push(r.style === 'intro' ? 'Shape requested: introduction. Under 140 words. After the opener, at most three short bullet points with the strongest proof (each bullet one line), then the ask. A bullet block may have a heading line that ends with a colon, e.g. "Why Brightform:".' : 'Shape requested: short note. 60 to 100 words, no bullets, three or four sentences plus the ask.');
+  if (r.bookingUrl) sys.push(`When offering a call you may include his booking link once, on its own line: ${r.bookingUrl}`);
+  sys.push('Formatting: plain text only. No markdown, no asterisks, no underscores, no hashes. Bullets start with "- ". A heading is a short line ending with a colon. Blank line between paragraphs. The email is rendered with real bold for headings when it reaches Gmail.');
+  sys.push('Output JSON only, no prose around it: {"subject": "...", "body": "..."}.');
+  sys.push('', '## Pitch block (the only source of Brightform claims; pick the few that fit this shop)', r.pitch);
   if (r.examples.length) {
-    sys.push('', '## Emails he sent before (voice samples)');
+    sys.push('', '## Emails he sent before (voice samples; match the tone, not the length)');
     for (const e of r.examples.slice(0, 8)) sys.push(`### ${e.subject} (${e.kind}${e.to_domain ? `, to ${e.to_domain}` : ''})\n${e.body}`);
   }
 
@@ -92,7 +108,7 @@ export function renderOutreachPrompt(r: DraftRequest): { system: string; user: s
     for (const d of r.previousDrafts.slice(0, 5)) u.push(`- ${d.created_at.slice(0, 10)} "${d.subject}" (${d.status})`);
   }
   if (r.instructions?.trim()) u.push('', '## Extra instructions from Isaac', r.instructions.trim());
-  u.push('', `Write the ${r.style === 'intro' ? 'full introduction' : 'short note'} now as JSON.`);
+  u.push('', `Write the ${r.style === 'intro' ? 'introduction' : 'short note'} to ${brand} now as JSON.`);
   return { system: sys.join('\n'), user: u.join('\n') };
 }
 
@@ -119,29 +135,63 @@ export function parseDraftJson(text: string): { subject: string; body: string } 
 /** One tailored opener sentence from the FastMoss facts, in Isaac's register. */
 export function tailoredOpener(p: BdProspect): string {
   const market = MARKET_NAMES[p.market] ?? p.market;
+  const brand = brandDisplayName(p);
   const band = riseBand(p.rise_score);
-  if (p.new_shop_30d) return `We track every TikTok Shop launch in ${market}, and ${p.shop_name} caught my eye: live for less than a month and already at ${money(p.gmv_7d, p.currency)} a week${p.category ? ` in ${p.category}` : ''}.`;
-  if (p.gmv_started_30d) return `${p.shop_name} has only just started selling on TikTok Shop ${market} and is already doing ${money(p.gmv_7d, p.currency)} a week${p.category ? ` in ${p.category}` : ''}, which is a strong start.`;
-  if (band === 'surging') return `${p.shop_name} is one of the fastest-rising shops on TikTok Shop ${market} right now: ${money(p.gmv_7d, p.currency)} in the last seven days, about ${Math.round((p.rise_score ?? 0) * 100)}% of everything the shop has sold to date.`;
-  if (band === 'rising') return `${p.shop_name} is climbing on TikTok Shop ${market}, with ${money(p.gmv_7d, p.currency)} in the last seven days${p.category ? ` in ${p.category}` : ''}.`;
-  return `We work with a number of ${p.category ? `${p.category.toLowerCase()} ` : ''}brands on TikTok Shop ${market}, and ${p.shop_name}${p.gmv_7d ? ` (around ${money(p.gmv_7d, p.currency)} a week)` : ''} looks like a shop we could grow.`;
+  if (p.new_shop_30d) return `${brand} has been live on TikTok Shop ${market} for under a month and is already at ${money(p.gmv_7d, p.currency)} a week${p.category ? ` in ${p.category}` : ''}. That is a strong start.`;
+  if (p.gmv_started_30d) return `${brand} only just started selling on TikTok Shop ${market} and is already doing ${money(p.gmv_7d, p.currency)} a week${p.category ? ` in ${p.category}` : ''}.`;
+  if (band === 'surging') return `${brand} is one of the fastest-rising shops on TikTok Shop ${market} right now: ${money(p.gmv_7d, p.currency)} in the last seven days, about ${Math.round((p.rise_score ?? 0) * 100)}% of everything the shop has sold to date.`;
+  if (band === 'rising') return `${brand} is climbing on TikTok Shop ${market}: ${money(p.gmv_7d, p.currency)} in the last seven days${p.category ? ` in ${p.category}` : ''}.`;
+  return `We run a number of ${p.category ? `${p.category.toLowerCase()} ` : ''}brands on TikTok Shop ${market} and ${brand}${p.gmv_7d ? ` (around ${money(p.gmv_7d, p.currency)} a week)` : ''} looks like a shop we could grow.`;
 }
 
-/** No-model fallback: Isaac's intro structure with a tailored opener. */
+/** The three proof points that matter most for a shop, from the pitch block's known facts. */
+export function proofPoints(p: BdProspect): string[] {
+  const out = ['#1 TikTok Shop Partner in Germany and the EU by GMV for 6 consecutive months, 42 shops under management'];
+  out.push(p.shop_type === 'cross_border' ? 'Merchant of Record for brands without a local entity: logistics, invoicing and VAT handled by us' : 'Affiliate and creator programmes at scale, plus live commerce from our own studio');
+  out.push(/beauty|personal care|health|food|beverage|fmcg/i.test(p.category ?? '') ? '2 of 3 FMCG ACE Awards and 1 of 3 Beauty ACE Awards, Q2 Germany' : "TikTok's Best GMV Max Campaign award and FastMoss Agency of the Year 2025");
+  return out;
+}
+
+/** No-model fallback: a condensed note in Isaac's structure with a tailored opener. */
 export function templateDraft(r: DraftRequest): { subject: string; body: string } {
   const p = r.prospect;
   const market = MARKET_NAMES[p.market] ?? p.market;
-  const brand = p.brand && p.brand.toLowerCase() !== p.shop_name.toLowerCase() ? p.brand : p.shop_name;
+  const brand = brandDisplayName(p);
   const subject = `${brand} x TikTok Shop ${market}`;
-  const cta = r.bookingUrl ? `Would you be open to a quick call to see whether there's a fit? Grab a slot here: ${r.bookingUrl}` : `Let me know if you'd like to hop on a quick call to see whether there's a fit.`;
+  const cta = r.bookingUrl ? `Worth 20 minutes on a call? Grab a slot here:\n${r.bookingUrl}` : `Worth 20 minutes on a call to see whether there is a fit?`;
   const parts = [`Hi ${firstName(r.contact.name)},`, '', tailoredOpener(p), ''];
   if (r.style === 'intro') {
-    parts.push('To give you an introduction to Brightform:', '', r.pitch.trim(), '');
+    parts.push(`I run Brightform, a TikTok Shop Partner agency across DE, UK, FR, IT and ES. Why us:`, ...proofPoints(p).map((x) => `- ${x}`), '');
   } else {
-    parts.push(`I run Brightform, the #1 TikTok Shop Partner in Germany and the EU by GMV, with 42 shops under management across DE, FR, IT, ES and the UK. We run affiliate and creator programmes at scale, live commerce from our own studio and GMV Max, and act as Merchant of Record for brands without a local entity.`, '');
+    parts.push(`I run Brightform, the #1 TikTok Shop Partner in Germany and the EU by GMV, with 42 shops under management. We take shops like ${brand} from a good start to a scaled affiliate, live and GMV Max engine.`, '');
   }
   parts.push(cta, '', 'Very best,', firstName(r.senderName));
   return { subject, body: parts.join('\n') };
+}
+
+/** Plain-text email body -> HTML for Gmail: paragraphs, "- " bullets, short "Heading:" lines in bold, links clickable. */
+export function bodyToHtml(body: string): string {
+  const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const linkify = (t: string) => esc(t).replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1">$1</a>');
+  const isHeading = (line: string) => /^[^.!?]{2,48}:$/.test(line.trim());
+  const blocks = body.replace(/\r\n/g, '\n').trim().split(/\n{2,}/);
+  const html: string[] = [];
+  for (const block of blocks) {
+    const lines = block.split('\n');
+    let i = 0;
+    while (i < lines.length) {
+      if (/^\s*[-•]\s+/.test(lines[i])) {
+        const items: string[] = [];
+        while (i < lines.length && /^\s*[-•]\s+/.test(lines[i])) items.push(`<li>${linkify(lines[i].replace(/^\s*[-•]\s+/, ''))}</li>`), i += 1;
+        html.push(`<ul style="margin:0 0 12px 20px;padding:0">${items.join('')}</ul>`);
+        continue;
+      }
+      const para: string[] = [];
+      while (i < lines.length && !/^\s*[-•]\s+/.test(lines[i])) para.push(isHeading(lines[i]) ? `<b>${esc(lines[i].trim())}</b>` : linkify(lines[i])), i += 1;
+      html.push(`<p style="margin:0 0 12px">${para.join('<br>')}</p>`);
+    }
+  }
+  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;line-height:1.45;color:#111">${html.join('')}</div>`;
 }
 
 /** Settings and examples needed for a draft, read from the database. */

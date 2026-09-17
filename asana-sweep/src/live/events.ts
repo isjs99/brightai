@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 
 export interface LiveEvent {
-  kind: 'check' | 'run' | 'tick' | 'settings' | 'leads' | 'bd' | 'inbox';
+  kind: 'check' | 'run' | 'tick' | 'settings' | 'leads' | 'bd' | 'inbox' | 'monitor';
   account_id?: number;
   rule_id?: number;
 }

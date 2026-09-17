@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
-import type { BdContact, BdData, BdOutreachEvent, BdProspect, BdProspectPatch, BdStatus } from '../../../sweep/types';
+import type { BdContact, BdData, BdOutreachEvent, BdProspect, BdProspectPatch, BdStatus, TtsContact } from '../../../sweep/types';
 import { api, fmtMoney, fmtPct, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
 import { useNavigate } from 'react-router-dom';
@@ -34,6 +34,9 @@ export default function BdPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [open, setOpen] = useState<number | null>(null);
+  const [liMsg, setLiMsg] = useState<{ contact: BdContact; text: string; generator: string } | null>(null);
+  const [ttsPoc, setTtsPoc] = useState<Record<number, { contact: TtsContact | null; fallback: TtsContact | null; reason: string }>>({});
+  useEffect(() => { if (open !== null && !ttsPoc[open]) api.ttsContactFor(open).then((r) => setTtsPoc((m) => ({ ...m, [open]: r }))).catch(() => undefined); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   const [f, setF] = useState({ market: '', status: '', category: '', owner: '', rise: '', type: '', launch: '', contact: '', q: '', sort: 'rise' as 'rise' | 'gmv' | 'name' | 'updated' | 'launched', hideDone: false, hideClients: true });
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -100,6 +103,18 @@ export default function BdPage() {
   };
 
   const reveal = (c: BdContact) => run(`c${c.id}`, () => api.revealContact(c.id), `${c.name} revealed.`);
+  const linkedin = async (c: BdContact, step: 'requested' | 'connected' | 'messaged') => {
+    if (step === 'requested' && c.linkedin_url) window.open(c.linkedin_url, '_blank', 'noopener');
+    setBusy(`l${c.id}`);
+    setError(null);
+    try {
+      const r = await api.linkedinStep(c.id, step, step === 'messaged' && liMsg?.contact.id === c.id ? liMsg.text : undefined);
+      await load();
+      if (step === 'requested') setNotice(`Logged the LinkedIn request to ${c.name}. Reminder to check back in ${r.followup ? fmtRelative(r.followup.due_at) : 'a few days'}.`);
+      if (step === 'connected' && r.message) { setLiMsg({ contact: r.contact, text: r.message.text, generator: r.message.generator }); setNotice('Connected. Copy the message below, send it on LinkedIn, then click "Message sent".'); }
+      if (step === 'messaged') { setLiMsg(null); setNotice(`Logged the LinkedIn message to ${c.name}. A chase reminder is set for 5 days.`); }
+    } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
+  };
   const draftEmail = async (c: BdContact, style: 'short' | 'intro') => {
     setBusy(`d${c.id}`);
     setError(null);
@@ -140,9 +155,12 @@ export default function BdPage() {
       <td>{c.title ?? <span className="sub">–</span>}</td>
       <td>{c.email ? <a href={`mailto:${c.email}`}>{c.email}</a> : <span className="sub">{c.enriched ? 'no email' : 'hidden'}</span>}</td>
       <td>{c.linkedin_url ? <a href={c.linkedin_url} target="_blank" rel="noreferrer">LinkedIn</a> : <span className="sub">–</span>}</td>
-      <td className="sub">{c.phone ?? ''}</td>
+      <td className="sub">{c.phone ?? ''}{c.linkedin_status !== 'none' && <div><span className={`badge ${c.linkedin_status === 'messaged' ? 'good' : c.linkedin_status === 'connected' ? 'accent' : 'muted'}`}>{c.linkedin_status === 'requested' ? `LinkedIn requested ${c.linkedin_requested_at ? fmtRelative(c.linkedin_requested_at) : ''}` : c.linkedin_status === 'connected' ? 'LinkedIn connected' : 'LinkedIn messaged'}</span></div>}</td>
       <td>
         <div className="actions">
+          {isAdmin && c.linkedin_url && c.linkedin_status === 'none' && <button className="small" onClick={() => linkedin(c, 'requested')} disabled={busy === `l${c.id}`} title="Opens their profile so you can send the request, logs it, and reminds you to check back">Connect on LinkedIn</button>}
+          {isAdmin && c.linkedin_status === 'requested' && <button className="small primary" onClick={() => linkedin(c, 'connected')} disabled={busy === `l${c.id}`} title="They accepted: get the short follow-up message">They accepted</button>}
+          {isAdmin && c.linkedin_status === 'connected' && <button className="small primary" onClick={() => (liMsg?.contact.id === c.id ? linkedin(c, 'messaged') : linkedin(c, 'connected'))} disabled={busy === `l${c.id}`}>{liMsg?.contact.id === c.id ? 'Message sent' : 'Show message'}</button>}
           {isAdmin && c.email && <button className="small primary" onClick={() => draftEmail(c, 'short')} disabled={busy === `d${c.id}`} title="Draft a short note in Isaac's voice, tailored to this shop, then review it under Growth > Outreach emails and send from Gmail">{busy === `d${c.id}` ? 'Drafting…' : 'Draft email'}</button>}
           {isAdmin && c.email && <button className="small" onClick={() => draftEmail(c, 'intro')} disabled={busy === `d${c.id}`} title="Full introduction with the Who we are / Credentials / What we do blocks">Draft intro</button>}
           {isAdmin && !c.enriched && data.apollo_configured && <button className="small" onClick={() => reveal(c)} disabled={busy === `c${c.id}`}>Reveal</button>}
@@ -181,6 +199,27 @@ export default function BdPage() {
             {p.fastmoss_url && <a className="button" href={p.fastmoss_url} target="_blank" rel="noreferrer">FastMoss shop page</a>}
           </div>
 
+          {ttsPoc[p.id] && (
+            <p className="sub" style={{ margin: '0 0 8px' }}>
+              <b>TikTok Shop POC:</b>{' '}
+              {ttsPoc[p.id].contact
+                ? <>{ttsPoc[p.id].contact!.name}{ttsPoc[p.id].contact!.role ? ` (${ttsPoc[p.id].contact!.role})` : ''}{ttsPoc[p.id].contact!.lark ? ` · Lark: ${ttsPoc[p.id].contact!.lark}` : ''}{ttsPoc[p.id].contact!.email ? ` · ${ttsPoc[p.id].contact!.email}` : ''} <span className="sub">({ttsPoc[p.id].reason})</span></>
+                : ttsPoc[p.id].fallback
+                  ? <>{ttsPoc[p.id].reason}: <b>{ttsPoc[p.id].fallback!.name}</b>{ttsPoc[p.id].fallback!.lark ? ` (Lark: ${ttsPoc[p.id].fallback!.lark})` : ''}</>
+                  : <>{ttsPoc[p.id].reason}. Add the org chart under Outreach emails › Voice, Gmail &amp; contacts.</>}
+            </p>
+          )}
+          {liMsg && p.contacts.some((c) => c.id === liMsg.contact.id) && (
+            <div className="card" style={{ background: 'var(--surface-2)', marginBottom: 10 }}>
+              <div className="page-head" style={{ marginBottom: 6 }}><b>LinkedIn message for {liMsg.contact.name}</b> <span className="sub">{liMsg.generator === 'claude' ? 'Claude, in Isaac\'s voice' : 'template'} · {liMsg.text.length} chars</span></div>
+              <textarea rows={4} style={{ width: '100%', fontFamily: 'inherit' }} value={liMsg.text} onChange={(e) => setLiMsg({ ...liMsg, text: e.target.value })} />
+              <div className="actions" style={{ marginTop: 6 }}>
+                <button className="primary" onClick={async () => { try { await navigator.clipboard.writeText(liMsg.text); setNotice('Message copied. Paste it into LinkedIn.'); } catch { setNotice('Copy failed; select the text by hand.'); } if (liMsg.contact.linkedin_url) window.open(liMsg.contact.linkedin_url, '_blank', 'noopener'); }}>Copy &amp; open LinkedIn</button>
+                <button onClick={() => linkedin(liMsg.contact, 'messaged')} disabled={busy === `l${liMsg.contact.id}`}>Message sent</button>
+                <button onClick={() => setLiMsg(null)}>Close</button>
+              </div>
+            </div>
+          )}
           <h3 style={{ margin: '6px 0' }}>Decision makers</h3>
           {p.contacts.length === 0 ? <p className="sub">No contacts yet.</p> : (
             <table><thead><tr><th>Name</th><th>Title</th><th>Email</th><th>LinkedIn</th><th>Phone</th><th></th></tr></thead><tbody>{p.contacts.map(contactRow)}</tbody></table>

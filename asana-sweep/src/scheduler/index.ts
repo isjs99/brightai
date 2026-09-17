@@ -9,6 +9,11 @@ import { LeadsWatcher } from '../leads/sync.js';
 import { InboxWatcher } from '../inbox/sync.js';
 import { importPullFiles } from '../bd/import.js';
 import { EnrichJob } from '../bd/enrich.js';
+import { AccountMonitor } from '../monitor/index.js';
+import { draftCallFollowups, tldv } from '../bd/tldv.js';
+import { scanEnterpriseAlerts } from '../bd/alerts.js';
+import { GmailClient } from '../bd/gmail.js';
+import { slackBot } from '../notify/slackbot.js';
 import { apollo } from '../bd/apollo.js';
 import type { Rule } from '../sweep/types.js';
 import { nextRun } from './describe.js';
@@ -28,11 +33,17 @@ export class Scheduler {
   readonly leads: LeadsWatcher;
   readonly inbox: InboxWatcher;
   readonly enrich: EnrichJob;
+  readonly monitor: AccountMonitor;
+  readonly gmail: GmailClient;
+  private tldvTask: ScheduledTask | null = null;
+  private followupTask: ScheduledTask | null = null;
 
   constructor(private q: Queries) {
     this.leads = new LeadsWatcher(q);
     this.inbox = new InboxWatcher(q);
     this.enrich = new EnrichJob(q);
+    this.monitor = new AccountMonitor(q);
+    this.gmail = new GmailClient(q);
   }
 
   start(): void {
@@ -52,7 +63,15 @@ export class Scheduler {
     importPullFiles(this.q);
     this.q.markExistingClients();
     this.autoEnrich();
-    this.pullsTask = cron.schedule('0 6 * * *', () => { importPullFiles(this.q); this.q.markExistingClients(); this.autoEnrich(); }, { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
+    scanEnterpriseAlerts(this.q);
+    this.pullsTask = cron.schedule('0 6 * * *', () => { importPullFiles(this.q); this.q.markExistingClients(); this.autoEnrich(); scanEnterpriseAlerts(this.q); }, { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
+    // Account monitor: rolling scan of every account for the flags the team otherwise catches by hand.
+    this.monitor.start();
+    // tl;dv: every 30 minutes, draft follow-ups for calls that just ended.
+    this.tldvTask = cron.schedule('*/30 * * * *', () => this.checkCalls());
+    setTimeout(() => this.checkCalls(), 30000);
+    // Follow-up reminders: 09:00 on workdays, a Slack DM per person with what is due.
+    this.followupTask = cron.schedule('0 9 * * 1-5', () => void this.remindFollowups(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     log.info(`Scheduler started with ${this.tasks.size} active rule(s)`);
   }
 
@@ -63,6 +82,37 @@ export class Scheduler {
     if (!n) return;
     log.info(`Auto-enriching ${n} prospect(s) without contacts via Apollo`);
     this.enrich.start();
+  }
+
+  /** tl;dv call follow-ups, when the key is set, Claude is configured and the switch is on. */
+  checkCalls(): void {
+    if (!tldv.configured || !config.anthropicApiKey || this.q.getSetting('tldv_auto_draft', '1') !== '1') return;
+    void draftCallFollowups(this.q, { gmail: this.gmail }).catch((err) => log.error(`tl;dv check failed: ${(err as Error).message}`));
+  }
+
+  /** DM each person their due BD follow-ups (matched by the actor name on the follow-up); the rest go to the admin channel if configured. */
+  async remindFollowups(): Promise<{ sent: number }> {
+    const due = this.q.listFollowups().filter((f) => Date.parse(f.due_at) <= Date.now() + 12 * 3600000);
+    if (!due.length) return { sent: 0 };
+    const people = this.q.listPeople();
+    const byActor = new Map<string, typeof due>();
+    for (const f of due) {
+      const key = (f.created_by ?? '').toLowerCase();
+      byActor.set(key, [...(byActor.get(key) ?? []), f]);
+    }
+    let sent = 0;
+    for (const [actor, items] of byActor) {
+      const person = people.find((p) => p.name.toLowerCase() === actor || actor.startsWith(p.name.toLowerCase()));
+      if (!person?.slack_user_id) continue;
+      const lines = items.slice(0, 15).map((f) => `• ${f.title}${f.linkedin_url ? ` (${f.linkedin_url})` : ''}${f.overdue ? ' — overdue' : ''}`);
+      try {
+        await slackBot.dm(person.slack_user_id, `BD follow-ups due today (${items.length}):\n${lines.join('\n')}\n${config.publicUrl}/outreach?tab=followups`);
+        sent += 1;
+      } catch (err) {
+        log.warn(`Follow-up reminder to ${person.name} failed: ${(err as Error).message}`);
+      }
+    }
+    return { sent };
   }
 
   /** (Re)register the daily checklist completion check from settings. */

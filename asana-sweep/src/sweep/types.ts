@@ -618,6 +618,10 @@ export interface BdContact {
   apollo_id: string | null;
   enriched: boolean;
   notes: string | null;
+  linkedin_status: 'none' | 'requested' | 'connected' | 'messaged';
+  linkedin_requested_at: string | null;
+  linkedin_connected_at: string | null;
+  linkedin_messaged_at: string | null;
   created_at: string;
 }
 
@@ -696,6 +700,9 @@ export interface BdEmailDraft {
   style: 'short' | 'intro';
   status: BdDraftStatus;
   generator: 'claude' | 'template';
+  kind: 'cold' | 'followup';
+  meeting_id: string | null;
+  meeting_title: string | null;
   gmail_draft_id: string | null;
   gmail_message_id: string | null;
   gmail_url: string | null;
@@ -729,12 +736,134 @@ export interface OutreachSettings {
   sent_query: string;
   last_pull_at: string | null;
   last_pull_error: string | null;
+  watchlist_sheet_tab: string;
+  linkedin_check_days: number;
 }
 
 export interface OutreachData {
   drafts: BdEmailDraft[];
   examples: OutreachExample[];
   settings: OutreachSettings;
+  followups: BdFollowup[];
+  alerts: BdAlert[];
+  watchlist: WatchlistEntry[];
+  tts_contacts: TtsContact[];
+  activity: BdActivity;
+  people: Person[];
+  tldv: { configured: boolean; last_check_at: string | null; last_error: string | null; auto_draft: boolean };
+}
+
+/** A reminder in the BD sequence: check whether a LinkedIn request was accepted, send the follow-up message, chase an email. */
+export interface BdFollowup {
+  id: number;
+  prospect_id: number;
+  contact_id: number | null;
+  shop_name: string;
+  contact_name: string | null;
+  linkedin_url: string | null;
+  kind: 'linkedin_check' | 'linkedin_message' | 'email_chase' | 'custom';
+  title: string;
+  due_at: string;
+  done_at: string | null;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+  overdue: boolean;
+}
+
+/** Who at TikTok Shop to loop in for a prospect (per market, optionally per category). */
+export interface TtsContact {
+  id: number;
+  market: string;
+  category: string | null;
+  name: string;
+  role: string | null;
+  lark: string | null;
+  email: string | null;
+  notes: string | null;
+  is_agency_manager: boolean;
+}
+
+export interface WatchlistEntry {
+  id: number;
+  name: string;
+  source: 'seed' | 'sheet' | 'manual';
+  enabled: boolean;
+}
+
+export interface BdAlert {
+  id: number;
+  prospect_id: number;
+  shop_name: string;
+  market: string;
+  kind: 'enterprise_launch';
+  watch_name: string | null;
+  message: string;
+  created_at: string;
+  dismissed_at: string | null;
+  launched_at: string | null;
+  gmv_7d: number | null;
+  currency: string;
+}
+
+/** Per-person BD activity for the tracker. */
+export interface BdActivityRow {
+  actor: string;
+  contacted: number;
+  tts_am: number;
+  gmail: number;
+  linkedin: number;
+  notes: number;
+  drafts: number;
+  emails_sent: number;
+  linkedin_requests: number;
+  linkedin_connected: number;
+  replies: number;
+  meetings: number;
+  prospects_touched: number;
+  last_active_at: string | null;
+}
+
+export interface BdActivity {
+  days: number;
+  rows: BdActivityRow[];
+  weekly: { week: string; contacted: number; emails_sent: number; linkedin_requests: number; replies: number }[];
+  totals: { contacted: number; emails_sent: number; linkedin_requests: number; replies: number; meetings: number };
+}
+
+export interface MonitorFlag {
+  id: number;
+  account_id: number | null;
+  account_name: string | null;
+  shop_id: string | null;
+  code: string;
+  severity: 'crit' | 'warn' | 'info';
+  message: string;
+  detail: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  resolved_at: string | null;
+  acknowledged_at: string | null;
+}
+
+export interface MonitorRule {
+  code: string;
+  title: string;
+  description: string;
+  severity: 'crit' | 'warn' | 'info';
+  source: 'tts' | 'dashboard' | 'cruva' | 'asana';
+  enabled: boolean;
+}
+
+export interface MonitorData {
+  flags: MonitorFlag[];
+  rules: MonitorRule[];
+  accounts: { id: number; name: string; open: number; crit: number; warn: number }[];
+  last_scan_at: string | null;
+  last_scan_error: string | null;
+  scanning: boolean;
+  interval_minutes: number;
+  tts_configured: boolean;
 }
 
 export interface BdCountryRow {

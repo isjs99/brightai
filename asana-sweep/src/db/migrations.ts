@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { SEED_CONTACTS, SEED_DOMAINS, SEED_PULLED_AT, SEED_SHOPS } from '../bd/seed.js';
 import { SEED_ENRICHED } from '../bd/seed-enriched.js';
+import { SEED_WATCHLIST } from '../bd/watchlist.js';
 import { SEED_BOOKING_URL, SEED_EXAMPLES, SEED_PITCH, SEED_SENDER_NAME, SEED_SENDER_TITLE, SEED_SENT_QUERY } from '../bd/voice.js';
 
 interface Migration {
@@ -803,6 +804,89 @@ const migrations: Migration[] = [
           else ins.run(c.name, c.title, c.email, c.linkedin_url, c.apollo_id, enriched, c.note, s.seller_id);
         }
       }
+    },
+  },
+  {
+    version: 17,
+    name: 'bd sequences: linkedin steps, follow-ups, tts contacts, enterprise watchlist and alerts, call follow-ups, account monitor',
+    up(db) {
+      // Voice samples and the pitch block: headings as "Heading:" lines instead of *Heading* (asterisks leaked into Gmail).
+      for (const h of ['Who we are', 'Credentials', 'What we do']) {
+        db.prepare(`UPDATE outreach_examples SET body = replace(body, ?, ?)`).run(`*${h}*`, `${h}:`);
+        db.prepare(`UPDATE settings SET value = replace(value, ?, ?) WHERE key = 'outreach_pitch'`).run(`*${h}*`, `${h}:`);
+      }
+      db.exec(`
+        ALTER TABLE bd_contacts ADD COLUMN linkedin_status TEXT NOT NULL DEFAULT 'none';
+        ALTER TABLE bd_contacts ADD COLUMN linkedin_requested_at TEXT;
+        ALTER TABLE bd_contacts ADD COLUMN linkedin_connected_at TEXT;
+        ALTER TABLE bd_contacts ADD COLUMN linkedin_messaged_at TEXT;
+
+        ALTER TABLE bd_email_drafts ADD COLUMN kind TEXT NOT NULL DEFAULT 'cold';
+        ALTER TABLE bd_email_drafts ADD COLUMN meeting_id TEXT;
+        ALTER TABLE bd_email_drafts ADD COLUMN meeting_title TEXT;
+
+        CREATE TABLE bd_followups (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          prospect_id INTEGER NOT NULL REFERENCES bd_prospects(id) ON DELETE CASCADE,
+          contact_id INTEGER REFERENCES bd_contacts(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL,
+          title TEXT NOT NULL,
+          due_at TEXT NOT NULL,
+          done_at TEXT,
+          note TEXT,
+          created_by TEXT,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+        CREATE INDEX bd_followups_due ON bd_followups(done_at, due_at);
+
+        CREATE TABLE tts_contacts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          market TEXT NOT NULL,
+          category TEXT,
+          name TEXT NOT NULL,
+          role TEXT,
+          lark TEXT,
+          email TEXT,
+          notes TEXT,
+          is_agency_manager INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE TABLE bd_watchlist (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+          source TEXT NOT NULL DEFAULT 'manual',
+          enabled INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+
+        CREATE TABLE bd_alerts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          prospect_id INTEGER NOT NULL REFERENCES bd_prospects(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL,
+          watch_name TEXT,
+          message TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          dismissed_at TEXT,
+          UNIQUE(prospect_id, kind, watch_name)
+        );
+
+        CREATE TABLE monitor_flags (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+          shop_id TEXT,
+          code TEXT NOT NULL,
+          severity TEXT NOT NULL,
+          message TEXT NOT NULL,
+          detail TEXT,
+          first_seen_at TEXT NOT NULL,
+          last_seen_at TEXT NOT NULL,
+          resolved_at TEXT,
+          acknowledged_at TEXT
+        );
+        CREATE INDEX monitor_flags_open ON monitor_flags(resolved_at, account_id, code);
+      `);
+      const wl = db.prepare(`INSERT OR IGNORE INTO bd_watchlist (name, source) VALUES (?, 'seed')`);
+      for (const n of SEED_WATCHLIST) wl.run(n);
     },
   },
 ];

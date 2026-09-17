@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
-import { api, type Status } from './api';
+import { api, currentActor, setCurrentActor, type Status } from './api';
 import { SessionContext, type Role } from './session';
+import type { Person } from '../../sweep/types';
 import RulesList from './pages/RulesList';
 import RuleEditor from './pages/RuleEditor';
 import RunHistory from './pages/RunHistory';
@@ -17,6 +18,7 @@ import LeadsPage from './pages/Leads';
 import BdPage from './pages/Bd';
 import InboxPage from './pages/Inbox';
 import OutreachPage from './pages/Outreach';
+import MonitorPage from './pages/Monitor';
 
 type Theme = 'system' | 'light' | 'dark';
 
@@ -126,6 +128,7 @@ const NAV: { section: string; items: { to: string; label: string; end?: boolean 
       { to: '/promotions', label: 'Promotions' },
       { to: '/gmv-max', label: 'GMV Max' },
       { to: '/inbox', label: 'CS & affiliate inbox' },
+      { to: '/monitor', label: 'Account monitor' },
     ],
   },
   {
@@ -182,6 +185,7 @@ export default function App() {
             <span>AM Ops</span>
           </div>
           <nav>
+            <ActorPicker />
             {status?.asana_user && <span className="sub hide-sm">Asana: {status.asana_user.name}</span>}
             <span className={`badge ${role === 'admin' ? 'accent' : 'muted'}`} title={role === 'admin' ? 'Admin: can change settings' : 'Account manager: view only'}>
               {role === 'admin' ? 'Admin' : 'View only'}
@@ -225,6 +229,7 @@ export default function App() {
               <Route path="/leads" element={<LeadsPage />} />
               <Route path="/bd" element={<BdPage />} />
               <Route path="/outreach" element={<OutreachPage />} />
+              <Route path="/monitor" element={<MonitorPage />} />
               <Route path="/inbox" element={<InboxPage />} />
               <Route path="*" element={<Navigate to="/checklists" replace />} />
             </Routes>
@@ -232,5 +237,20 @@ export default function App() {
         </div>
       </div>
     </SessionContext.Provider>
+  );
+}
+
+
+/** "You are": the shared login has no identity, so each person picks their name once per browser; BD actions are logged under it. */
+function ActorPicker() {
+  const [people, setPeople] = useState<Person[]>([]);
+  const [actor, setActor] = useState(currentActor());
+  useEffect(() => { api.listPeople().then((r) => setPeople(r.people)).catch(() => setPeople([])); }, []);
+  return (
+    <select className="small" value={actor} title="Who is using the dashboard right now (logged on BD outreach)" onChange={(e) => { setActor(e.target.value); setCurrentActor(e.target.value); }} style={{ width: 'auto' }}>
+      <option value="">You are…</option>
+      <option value="Isaac">Isaac</option>
+      {people.filter((p) => p.name !== 'Isaac').map((p) => <option key={p.id} value={p.name}>{p.name}</option>)}
+    </select>
   );
 }
