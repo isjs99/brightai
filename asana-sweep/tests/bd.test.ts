@@ -169,3 +169,28 @@ describe('BD prospects', () => {
     expect(contacts[0]).toMatchObject({ name: 'Ann Smith', title: 'CEO', email: 'ann@x.com', enriched: true });
   });
 });
+
+describe('pull files and the enriched seed', () => {
+  it('imports the deep pull, skips nameless rows and attaches enriched contacts to the new shops', async () => {
+    const { importPullFiles, applyEnrichedSeed } = await import('../src/bd/import');
+    const { mkdtempSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const dir = mkdtempSync(join(tmpdir(), 'pulls-'));
+    writeFileSync(join(dir, '2026-09-17.json'), JSON.stringify({ pulled_at: '2026-09-17', shops: [
+      { seller_id: '7496165336389421767', shop_name: 'DREAM PAIRS EU', region: 'DE', gmv_last_7d: 34779, total_gmv: 132057, currency_code: 'EUR', shop_type_code: 'cross_border_shop' },
+      { seller_id: '1', shop_name: '', region: 'ES', gmv_last_7d: 1, total_gmv: 1 },
+    ] }));
+    process.env.BD_PULLS_DIR = dir;
+    const q = new Queries(openTestDb());
+    const r = importPullFiles(q);
+    expect(r).toMatchObject({ files: ['2026-09-17.json'], added: 1, updated: 0 });
+    const p = q.listProspects().find((x) => x.shop_name === 'DREAM PAIRS EU')!;
+    expect(p.domain).toBe('dreampairs.com');
+    expect(p.contacts.length).toBeGreaterThan(0);
+    expect(p.contacts.some((c) => c.email)).toBe(true);
+    expect(applyEnrichedSeed(q).contacts).toBe(0); // idempotent
+    expect(importPullFiles(q).files).toEqual([]); // each file once
+    delete process.env.BD_PULLS_DIR;
+  });
+});

@@ -5,6 +5,7 @@ import { log } from '../logger.js';
 import { liveEvents } from '../live/events.js';
 import { normaliseDomain } from './score.js';
 import type { BdProspectInput } from '../sweep/types.js';
+import { SEED_ENRICHED } from './seed-enriched.js';
 
 const optText = (v: unknown): string | null => {
   if (v === undefined || v === null) return null;
@@ -74,19 +75,54 @@ export function importPullFiles(q: Queries): { files: string[]; added: number; u
       const raw = JSON.parse(readFileSync(join(dir, f), 'utf8')) as { pulled_at?: string; shops?: Record<string, unknown>[]; prospects?: Record<string, unknown>[] } | Record<string, unknown>[];
       const rows = Array.isArray(raw) ? raw : (raw.shops ?? raw.prospects ?? []);
       const pulledAt = (!Array.isArray(raw) && optText(raw.pulled_at)) || f.replace(/\.json$/, '');
-      const r = q.upsertProspects(rows.map((row) => parseProspectInput({ pulled_at: pulledAt, source: 'fastmoss', ...row })));
+      const parsed: BdProspectInput[] = [];
+      let skipped = 0;
+      for (const row of rows) {
+        try {
+          parsed.push(parseProspectInput({ pulled_at: pulledAt, source: 'fastmoss', ...row }));
+        } catch {
+          skipped += 1; // FastMoss occasionally returns rows with an empty shop name
+        }
+      }
+      const r = q.upsertProspects(parsed);
       result.added += r.added;
       result.updated += r.updated;
       result.files.push(f);
       done.push(f);
-      log.info(`BD pull ${f}: +${r.added} new, ${r.updated} refreshed`);
+      log.info(`BD pull ${f}: +${r.added} new, ${r.updated} refreshed${skipped ? `, ${skipped} row(s) skipped` : ''}`);
     } catch (err) {
       log.error(`BD pull ${f} failed: ${(err as Error).message}`);
     }
   }
   if (result.files.length) {
     q.setSetting('bd_pulls_imported', JSON.stringify(done.slice(-365)));
+    applyEnrichedSeed(q);
     liveEvents.emitUpdate({ kind: 'bd' });
   }
   return result;
+}
+
+/**
+ * Attach the decision makers found in the Apollo enrichment runs (src/bd/seed-enriched.ts) to
+ * whichever of those shops are in the pipeline. Idempotent: contacts dedupe by Apollo id, and
+ * domain / organisation id only fill blanks. Runs from migration 16 and after every pull import,
+ * since pulls can add shops the enrichment already covered.
+ */
+export function applyEnrichedSeed(q: Queries): { shops: number; contacts: number } {
+  let shops = 0;
+  let contacts = 0;
+  const bySeller = new Map(q.listProspects(true).filter((p) => p.seller_id).map((p) => [p.seller_id as string, p]));
+  for (const s of SEED_ENRICHED) {
+    const p = bySeller.get(s.seller_id);
+    if (!p) continue;
+    shops += 1;
+    if ((s.domain && !p.domain) || (s.apollo_org_id && !p.apollo_org_id)) q.patchProspect(p.id, { ...(s.domain && !p.domain ? { domain: s.domain, website: p.website ?? s.domain } : {}), ...(s.apollo_org_id && !p.apollo_org_id ? { apollo_org_id: s.apollo_org_id } : {}) });
+    for (const c of s.contacts) {
+      if (p.contacts.some((x) => x.apollo_id === c.apollo_id)) continue;
+      q.addContact(p.id, { name: c.name, title: c.title, email: c.email, linkedin_url: c.linkedin_url, source: 'apollo', apollo_id: c.apollo_id, enriched: Boolean(c.email || c.linkedin_url), notes: c.note });
+      contacts += 1;
+    }
+  }
+  if (contacts) log.info(`Enriched seed: ${contacts} contact(s) attached across ${shops} shop(s)`);
+  return { shops, contacts };
 }

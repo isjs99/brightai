@@ -338,4 +338,166 @@ export const SEED_ENRICHED: SeedEnrichedShop[] = [
     { apollo_id: "5fcf41c97598bf0001b888ff", name: "Caroline Clark", title: "Global Snr. Director Brand and Product Marketing Remington", email: "caroline.clark@eu.spectrumbrands.com", linkedin_url: "http://www.linkedin.com/in/caroline-clark-33a07912", note: "Global Senior Director Brand & Product Marketing, Remington (UK-based) · email verified" },
     { apollo_id: "602fc288a6e14f0001b98b77", name: "Natalie Carney", title: "Senior Brand Manager", email: "natalie.carney@eu.spectrumbrands.com", linkedin_url: "http://www.linkedin.com/in/nataliecarney", note: "Senior Brand Manager, Personal Care (ex Remington EMEA brand manager) · email verified" },
   ] },
+  { seller_id: "7494177054861001906", company: "Roborock", domain: "roborock.com", apollo_org_id: "5da545ece086f000016c07ca", contacts: [
+    { apollo_id: "55708b567369640ac9610000", name: "Weiwei Shi", title: "Country Manager", email: "shiweiwei@roborock.com", linkedin_url: "http://www.linkedin.com/in/weiwei-shi-01515524", note: "Country Manager Germany (based Willich, DE) · email verified" },
+    { apollo_id: "6318a6ee35714b00018af824", name: "Miguel Zhou", title: "Head of Retail DACH", email: null, linkedin_url: "http://www.linkedin.com/in/miguel-fei-zhou-71705b160", note: "Head of Retail DACH (Duesseldorf)" },
+    { apollo_id: "65d9f98bbe7417000144c8fa", name: "Becky Zhang", title: "Marketing Manager", email: null, linkedin_url: "http://www.linkedin.com/in/becky-zhang-79b46343", note: "Marketing Manager, Germany" },
+    { apollo_id: "60d07990a010690001d903c9", name: "Kai Zantke", title: "Communications Lead Germany", email: "kai@roborock.com", linkedin_url: "http://www.linkedin.com/in/kai-zantke-42403749", note: "Communications Lead Germany · email verified" },
+  ] },
+  { seller_id: "7496140385951254774", company: "Nude Cosmetics", domain: "nudecosmetics.de", apollo_org_id: "699452a60f70c10001fc5b37", contacts: [
+    { apollo_id: "600cd2a7a3fa9d000181edcb", name: "Dmitrii Satunov", title: "CEO of Company Nude Cosmetics", email: null, linkedin_url: "http://www.linkedin.com/in/nude-cosmetics-dmitrii-satunov-638673157", note: "CEO / founder (Apollo lists him in Chisinau, Moldova; org matched by domain nudecosmetics.de; Apollo name field shows 'Nude Satunov')" },
+  ] },
+  { seller_id: "7496122195955124382", company: "the carpet", domain: "thecarpet.com", apollo_org_id: "63c7bf17d7cddd000171772a", contacts: [
+    { apollo_id: "62ead8bfb49f31000134ea36", name: "Omer Aslan", title: "E-Commerce-Manager", email: "o.aslan@thecarpet.com", linkedin_url: "http://www.linkedin.com/in/oemer81", note: "E-Commerce Manager (Troisdorf, DE) · email verified" },
+    { apollo_id: "634a38905d3dfb0001e3adfa", name: "Halenur Kuelak", title: "Senior eCommerce Manager", email: "h.kulak@thecarpet.com", linkedin_url: "http://www.linkedin.com/in/halenur-k%c3%bclak-7a7b61223", note: "Senior E-Commerce Manager (Cologne) · email verified" },
+    { apollo_id: "68d847decb6f9c00015d1202", name: "Tony Rushworth", title: "Head of Sales", email: "t.rushworth@thecarpet.com", linkedin_url: "http://www.linkedin.com/in/tony-rushworth-134314382", note: "Head of Sales · email extrapolated" },
+  ] },
+  { seller_id: "7496114601217984844", company: "Super Ninja", domain: "superninja.eco", apollo_org_id: "5a9e6b83a6da98d97015bee9", contacts: [
+    { apollo_id: "5fb698cb13c2820001a5401f", name: "Joost Van Vollenhoven", title: "Chief Executive Officer", email: "j.vanvollenhoven@superninja.eco", linkedin_url: "http://www.linkedin.com/in/joost-vv", note: "CEO, Super Ninja (Amsterdam; eco cleaning brand) · email verified" },
+  ] },
+  { seller_id: "8649706038233504386", company: "POP MART", domain: "popmart.com", apollo_org_id: "5e57d2090c206a00016dea36", contacts: [
+    { apollo_id: "5c68a939a3ae61abd2d9604c", name: "Zhiwen Xu", title: "Senior Manager, Social E-Commerce Trading - Tiktok Shop UK & EU", email: null, linkedin_url: "http://www.linkedin.com/in/zhiwen-xu", note: "TikTok Shop UK & EU lead (London)" },
+    { apollo_id: "54a4b0c674686938ac7ad55b", name: "Peter Shipman", title: "MD, Head of Europe", email: null, linkedin_url: "http://www.linkedin.com/in/peter-shipman-a3954020", note: "MD, Head of Europe" },
+    { apollo_id: "61012c918c74a10001c49689", name: "Riccardo Orlando", title: "Head of eCommerce", email: null, linkedin_url: "http://www.linkedin.com/in/orlandoriccardo", note: "Head of eCommerce (London)" },
+    { apollo_id: "5e721f893d0cd10001af15b2", name: "Karan Kunal", title: "Ecommerce Manager", email: null, linkedin_url: "http://www.linkedin.com/in/karan-kunal-0b796364", note: "Ecommerce Manager (UK)" },
+  ] },
+  { seller_id: "8647333895514462512", company: "Costway (Goplus brand)", domain: "costway.com", apollo_org_id: "5de9e2a7629b8300e2c98a8b", contacts: [
+    { apollo_id: "651406fa638519000101c62a", name: "Ximena Ying", title: "Director of EU B2B Market", email: "ximena.ying@fdsintl.com", linkedin_url: "http://www.linkedin.com/in/ximena-ying-53b65226a", note: "Director EU market, Costway (based Germany) · email verified" },
+    { apollo_id: "67c069d352b7ef00011b06e7", name: "Philip Liu", title: "Sr. Manager of B2B & Large Order - Global eCommerce", email: "philip.liu@costway.com", linkedin_url: "http://www.linkedin.com/in/philip-liu-a81788228", note: "Sr Manager Global eCommerce (US HQ) · email verified" },
+    { apollo_id: "632ad1938192e8000103b81d", name: "Sherky Chen", title: "Marketing Manager", email: null, linkedin_url: "http://www.linkedin.com/in/sherkychen", note: "Marketing Manager (Ningbo; ex vidaXL French marketing)" },
+  ] },
+  { seller_id: "7494826311035749822", company: "SharkNinja (Shark Beauty)", domain: "sharkninja.com", apollo_org_id: "5da6dea5b07642000121f2df", contacts: [
+    { apollo_id: "5d4d627380f93ebd6baff0b3", name: "Caitlin Maclean", title: "Senior Manager, Social Commerce Affiliates", email: "caitlin.maclean@sharkninja.com", linkedin_url: "http://www.linkedin.com/in/caitlinmaclean", note: "TikTok Shop UK affiliates lead (Glasgow) · email verified" },
+    { apollo_id: "67012a0c222a8100014129d0", name: "Olivia Rostron", title: "Online Marketplace Manager", email: "olivia.rostron@sharkninja.com", linkedin_url: "http://www.linkedin.com/in/olivia-rostron", note: "Online Marketplace Manager UK · email verified" },
+    { apollo_id: "66f287ef159e92000114bce8", name: "Ghalia Wilkinson", title: "Senior Marketing Manager - Shark Beauty", email: "gwilkinson@sharkninja.com", linkedin_url: "http://www.linkedin.com/in/ghalia-wilkinson-2a287255", note: "Senior Marketing Manager, Shark Beauty UK · email verified" },
+    { apollo_id: "5b8da02b324d445a42a0c10a", name: "Katie Burton", title: "Senior Manager, Beauty Social Lead", email: "katie.burton@sharkninja.com", linkedin_url: "http://www.linkedin.com/in/katie-burton-3b3215152", note: "Shark Beauty Social Lead UK (London) · email verified" },
+  ] },
+  { seller_id: "7494983198721149828", company: "Elusa Fragrance", domain: "elusa.de", apollo_org_id: "6967888206c5e1000d8224f3", contacts: [
+    { apollo_id: "63540b4a9568c20001e07db3", name: "Dennis Kleinhans", title: "Influencer Marketing Manager", email: null, linkedin_url: "http://www.linkedin.com/in/dennis-kleinhans-374570233", note: "Influencer Marketing Manager, Elusa Fragrance (Munich) · email unavailable" },
+    { apollo_id: "69f8575c3b9f010001d23a85", name: "Mert Cabuk", title: "Influencer Marketing Manager", email: null, linkedin_url: "http://www.linkedin.com/in/mert-cabuk-102633399", note: "Influencer Marketing Manager, Elusa Fragrance · email unavailable" },
+  ] },
+  { seller_id: "8647333875573955092", company: "ARMONIAS", domain: "armonias.com", apollo_org_id: "5a9f464ea6da98d97e824137", contacts: [
+    { apollo_id: "68c623a43fb0a900012385f0", name: "Duohui Ye", title: "TikTok Shop Channel Operations & Sales Manager — Armonias", email: "duohuiye@armonias.com", linkedin_url: "http://www.linkedin.com/in/duohui-ye-242860259", note: "TikTok Shop Channel Operations & Sales Manager (email extrapolated) · email extrapolated" },
+    { apollo_id: "6702c7f47924e100010f8c9c", name: "Duoma Ye", title: "Co-Founder", email: "duoma.ye@armonias.com", linkedin_url: "http://www.linkedin.com/in/duoma-ye-b81677114", note: "Co-Founder · email verified" },
+  ] },
+  { seller_id: "7494752128843679469", company: "BSH Home Appliances Group (Bosch Home)", domain: "bsh-group.com", apollo_org_id: "5f59cbb4b1da5900e455a803", contacts: [
+    { apollo_id: "57d74ffca6da985bbf0afa47", name: "Stephanie Raschke", title: "Head of eCommerce Central Europe MDA", email: "stephanie.raschke@bshg.com", linkedin_url: "http://www.linkedin.com/in/stephanie-raschke-b87778b0", note: "Head of eCommerce Central Europe MDA, BSH (Germany) · email verified" },
+    { apollo_id: "622f4c6c323bba00015c74e9", name: "Stephanie Schwager", title: "Head of Global eCommerce & D2C", email: "stephanie.schwager@bshg.com", linkedin_url: "http://www.linkedin.com/in/stephanie-schwager-535107132", note: "Head of Global eCommerce & D2C, BSH · email verified" },
+    { apollo_id: "5ddf088c39800800014c7fd8", name: "David Walter", title: "Key-Account-Manager - E-Commerce Germany", email: "david.walter@bshg.com", linkedin_url: "http://www.linkedin.com/in/david-walter-94aa74183", note: "Key Account Manager E-Commerce Germany, BSH · email verified" },
+    { apollo_id: "614ea5137b00d60001d67c03", name: "Isabella Plutta", title: "Marketing Communication Manager Social Media & Influencer Relations", email: "isabella.plutta@bshg.com", linkedin_url: "http://www.linkedin.com/in/isabella-plutta", note: "Marketing Comms Manager Social Media & Influencer Relations, BSH · email verified" },
+  ] },
+  { seller_id: "8647194276746071649", company: "EMEET", domain: "emeet.com", apollo_org_id: "5a9e77dba6da98d97016060c", contacts: [
+    { apollo_id: "65dd86336c1a6b000183d517", name: "Amy Lyu", title: "Co-Founder & CMO", email: "amy@emeet.com", linkedin_url: "http://www.linkedin.com/in/amy-lyu-55bb96261", note: "Co-Founder & CMO, EMEET · email verified" },
+    { apollo_id: "6410ac4f818a3100013af153", name: "Wyman Chen", title: "Founder", email: "wyman@emeet.com", linkedin_url: "http://www.linkedin.com/in/wyman-chen-1a6b1bb9", note: "Founder, EMEET · email verified" },
+    { apollo_id: "5ad42376a6da986875bb032a", name: "Tony Wu", title: "Sales VP", email: "tony.wu@emeet.com", linkedin_url: "http://www.linkedin.com/in/tony-wu-99476124", note: "Sales VP, EMEET · email verified" },
+    { apollo_id: "614ea521bd06e90001a8764c", name: "Zoen Lin", title: "Business Development Manager", email: "zoen.lin@emeet.com", linkedin_url: "http://www.linkedin.com/in/zoenlin", note: "Business Development Manager, EMEET · email verified" },
+  ] },
+  { seller_id: "7494646038637676518", company: "Groupe Brandt", domain: "groupebrandt.com", apollo_org_id: "5a9d334fa6da98d9466bb62c", contacts: [
+    { apollo_id: "54c1be997468697af77fc340", name: "Karine Montintin", title: "Chef de Marché PEM France et Responsable BtoC E-Commerce", email: "karine.montintin@groupebrandt.com", linkedin_url: "http://www.linkedin.com/in/karine-montintin-389a1972", note: "Chef de Marche PEM France & Responsable BtoC E-Commerce · email verified" },
+    { apollo_id: "6931785ba485e6000144bcb8", name: "David Lauvergne", title: "Country Manager Brandt France", email: "david.lauvergne@groupebrandt.com", linkedin_url: "http://www.linkedin.com/in/davidlauvergne", note: "Country Manager Brandt France · email verified" },
+    { apollo_id: "66fa8a6a8a77e7000136671a", name: "Anthony Heredia", title: "Directeur Marketing France", email: "anthony.heredia@groupebrandt.com", linkedin_url: "http://www.linkedin.com/in/anthony-heredia-49b06b46", note: "Directeur Marketing France · email verified" },
+    { apollo_id: "54a2a2f07468693fda2df631", name: "Eric Brunel", title: "Directeur Commercial Brandt France", email: "eric.brunel@groupebrandt.com", linkedin_url: "http://www.linkedin.com/in/eric-brunel-06923867", note: "Directeur Commercial Brandt France · email verified" },
+  ] },
+  { seller_id: "7494178469651776706", company: "Jeans Industry", domain: "jeans-industry.fr", apollo_org_id: "66e56bba3b116900019d0367", contacts: [
+  ] },
+  { seller_id: "7494574124401853807", company: "Dr.Reju-All (NeoSimplix)", domain: "neosimplix.com", apollo_org_id: "68faf8bafd61cd00016bf98f", contacts: [
+    { apollo_id: "5e769f9307fb0f0001be40eb", name: "Junho Jung", title: "Founder/CEO", email: "junho.jung@neosimplix.com", linkedin_url: "http://www.linkedin.com/in/junho-jung-b14b92136", note: "Founder/CEO, NeoSimplix (Dr.Reju-All), Seoul · email verified" },
+    { apollo_id: "5eee6d96d8edc10001034780", name: "Woojin Jung", title: "CSO/CFO", email: "woojin.jung@neosimplix.com", linkedin_url: "http://www.linkedin.com/in/woojin-jung-54404415b", note: "CSO/CFO, NeoSimplix (Dr.Reju-All) · email verified" },
+    { apollo_id: "69da2185d4dc6a0001efa070", name: "Joy Park", title: "Global Marketing Manager", email: "soyoung.park@neosimplix.com", linkedin_url: "http://www.linkedin.com/in/joy-park-4196923b7", note: "Global Marketing Manager, Dr.Reju-All · email verified" },
+    { apollo_id: "6596377d5bf5e90001f85d8c", name: "Hyunah Choi", title: "Global B2B Sales & Marketing Team Lead", email: null, linkedin_url: "http://www.linkedin.com/in/hyunah-chloe-choi-375111123", note: "Global B2B Sales & Marketing Team Lead, Dr.Reju-All · email unavailable" },
+  ] },
+  { seller_id: "7494506150820152852", company: "Yankee Candle (Newell Brands UK)", domain: "yankeecandle.co.uk", apollo_org_id: "5e57727c5b1a4c0001260418", contacts: [
+    { apollo_id: "57d8d397a6da98727a815299", name: "Remi Ferreira", title: "Ecommerce Sales Manager EMEA", email: "remi.ferreira@newellco.com", linkedin_url: "http://www.linkedin.com/in/ferreiraremi", note: "Ecommerce Sales Manager EMEA, Newell Brands (London) · email verified" },
+    { apollo_id: "61128befaced5f0001a19815", name: "Lawrence Tickner", title: "International eCommerce Leader", email: "lawrence.tickner@newellco.com", linkedin_url: "http://www.linkedin.com/in/lawrence-tickner-791b5768", note: "International eCommerce Leader, Newell Brands (UK) · email verified" },
+    { apollo_id: "606480a6ddfc790001049aff", name: "Elena Sanchez", title: "E-commerce EMEA Associate Sales Manager", email: null, linkedin_url: "http://www.linkedin.com/in/elena-sanchez-b4b86728", note: "E-commerce EMEA Associate Sales Manager, Newell Brands (UK) · email unavailable" },
+    { apollo_id: "54a41b207468693b8cc0bb2c", name: "Chloe Taylor", title: "Brand Manager, Global Brand Management -EMEA & APAC", email: "chloe.taylor@newellco.com", linkedin_url: "http://www.linkedin.com/in/chlo%c3%a9-taylor-42109365", note: "Brand Manager EMEA & APAC, Newell Brands (UK) · email verified" },
+  ] },
+  { seller_id: "7494642494021994303", company: "Silentnight", domain: "silentnight.co.uk", apollo_org_id: "5d0aa4dc80f93e587deecf0c", contacts: [
+    { apollo_id: "64fdacaf6a849f0001ab8fd3", name: "Tom Sloan", title: "Head of E-commerce & Digital", email: "tom.sloan@silentnight.co.uk", linkedin_url: "http://www.linkedin.com/in/tom-sloan-29921718", note: "Head of E-commerce & Digital · email verified" },
+    { apollo_id: "60bf54e71fbf750001a1f5cd", name: "Ian Lambert", title: "Chief Marketing Officer", email: "ian.lambert@silentnight.co.uk", linkedin_url: "http://www.linkedin.com/in/ian-lambert-973224138", note: "Chief Marketing Officer · email verified" },
+    { apollo_id: "68921a69d3f93600018b98bd", name: "Laura Brooker", title: "Head of Channel Marketing", email: "laura.brooker@silentnight.co.uk", linkedin_url: "http://www.linkedin.com/in/laura-brooker-n%c3%a9e-embling-72090342", note: "Head of Channel Marketing · email verified" },
+    { apollo_id: "652fb3d165b4e30001a86e9e", name: "Mel Hancock", title: "Brand Manager", email: "mel.hancock@silentnight.co.uk", linkedin_url: "http://www.linkedin.com/in/melissalouisehancock", note: "Brand Manager · email verified" },
+  ] },
+  { seller_id: "7494490073559106882", company: "Comfrt", domain: "comfrt.com", apollo_org_id: "65f1c5f24ce7c50300b50eb0", contacts: [
+    { apollo_id: "66f574e210496c00017bb1e7", name: "Kritika Pande", title: "Senior Director of Social Commerce & Growth", email: "kritika.pande@comfrt.com", linkedin_url: "http://www.linkedin.com/in/kritikapande", note: "Senior Director of Social Commerce & Growth · email verified" },
+    { apollo_id: "5fcbf724a1be3100011f3d31", name: "Madison Cunningham", title: "Senior Manager of Social Commerce", email: "madison.cunningham@comfrt.com", linkedin_url: "http://www.linkedin.com/in/madison-l-cunningham", note: "Senior Manager of Social Commerce · email verified" },
+    { apollo_id: "66f431b647af530001b883bf", name: "Ryan Groh", title: "Director of Ecommerce", email: "ryan.groh@comfrt.com", linkedin_url: "http://www.linkedin.com/in/ryanjgroh", note: "Director of Ecommerce · email verified" },
+    { apollo_id: "66f3e2c1dd5d050001e6f871", name: "Hudson Leogrande", title: "Founder", email: "hudson@comfrt.com", linkedin_url: "http://www.linkedin.com/in/hudson-leogrande-112891231", note: "Founder · email verified" },
+  ] },
+  { seller_id: "7494325954230322825", company: "Ariete (De'Longhi Group)", domain: "ariete.net", apollo_org_id: "602e27db47feb000e28f449c", contacts: [
+    { apollo_id: "636fbe102b6498000180f1fa", name: "Donato Pucci", title: "General Manager", email: "pucci@ariete.net", linkedin_url: "http://www.linkedin.com/in/donato-pucci-707163155", note: "General Manager, Ariete · email verified" },
+    { apollo_id: "6011c7f8801ca00001dbbeb9", name: "Marco Cavallaro", title: "General Manager eCommerce & Direct-to-Consumer", email: "marco.cavallaro@delonghigroup.com", linkedin_url: "http://www.linkedin.com/in/macavallaro", note: "General Manager eCommerce & D2C, De'Longhi Group (Italy) · email verified" },
+    { apollo_id: "60b7627939c9f20001384726", name: "Martina Gris", title: "Group Social Media Manager", email: "martina.gris@delonghigroup.com", linkedin_url: "http://www.linkedin.com/in/martinagris", note: "Group Social Media Manager, De'Longhi Group (Italy) · email verified" },
+  ] },
+  { seller_id: "7494721308337669456", company: "LYORA GmbH", domain: "lyora.de", apollo_org_id: "69ba1e295c4d0a000176cf00", contacts: [
+    { apollo_id: "62ecc9f2b363df0001130177", name: "Mirijam Hofstaetter", title: "Head of Product Management", email: "mirijam@lyora.de", linkedin_url: "http://www.linkedin.com/in/mirijam-hofst%c3%a4tter-463499100", note: "Head of Product (ex-Börlind, LVMH cosmetics); small DE online retail brand founded 2024 · email verified" },
+    { apollo_id: "57d947b6a6da9872729bc0cf", name: "Tamo Voelkner", title: "Managing Director", email: null, linkedin_url: "http://www.linkedin.com/in/tamo-v%c3%b6lkner-35179abb", note: "Managing Director / Geschäftsführer, Hamburg · email unavailable" },
+  ] },
+  { seller_id: "8649782425489348817", company: "Meroda Cosmetics", domain: "merodacosmetics.com", apollo_org_id: "609b8eafbc8a2400e1444b84", contacts: [
+    { apollo_id: "66f291e5e6526a0001a606c6", name: "Micha Medendorp", title: "CEO", email: "micha@merodacosmetics.com", linkedin_url: "http://www.linkedin.com/in/mmedendorp", note: "CEO since Jan 2026 (ex-Rituals CMO), NL-based cosmetics brand ~40 staff · email verified" },
+    { apollo_id: "66f3a246d3eba20001b53c13", name: "Andy Kazandjian", title: "Chief Growth Officer", email: "andy@merodacosmetics.com", linkedin_url: "http://www.linkedin.com/in/andykazandjian", note: "Chief Growth Officer, growth/e-commerce lead · email verified" },
+    { apollo_id: "606a9e3e1fe05d000152389d", name: "Ross McGilchrist", title: "eCommerce Lead", email: "ross@merodacosmetics.com", linkedin_url: "http://www.linkedin.com/in/rossmcgilchrist", note: "eCommerce Lead (ex-Mars D2C) · email verified" },
+    { apollo_id: "609d2b047b608400013a6cda", name: "Melvin Van Bueren", title: "Founder & CMO", email: "melvin@merodacosmetics.com", linkedin_url: "http://www.linkedin.com/in/melvin-van-bueren-709b1b166", note: "Founder & CMO · email verified" },
+  ] },
+  { seller_id: "7494606340183066476", company: "Ottocast (OttocastVIP)", domain: "ottocastvip.com", apollo_org_id: "6800a0c72dceb600109282b8", contacts: [
+    { apollo_id: "6a7999c0e88ae40001c891ec", name: "Johnson Liu", title: "Localized Marketing & PR Specialist", email: "johnson@ottocast.com", linkedin_url: "http://www.linkedin.com/in/johnson-liu-533147299", note: "Localized marketing & PR for global markets, Shenzhen (title taken from headline) · email verified" },
+    { apollo_id: "6800a0c07fc8190001169587", name: "Rachel Zou", title: "Key Account Manager-Ottocast", email: null, linkedin_url: "http://www.linkedin.com/in/rachel-zou-522036355", note: "Key Account Manager, Guangdong · email unavailable" },
+    { apollo_id: "5d5ffe47a3ae6159b622b42b", name: "Leo Tu", title: "Key Account Manager", email: null, linkedin_url: "http://www.linkedin.com/in/leonard-tu", note: "Key Account Manager, Shenzhen · email unavailable" },
+  ] },
+  { seller_id: "7496104963168963418", company: "FOOTKORNER", domain: "footkorner.com", apollo_org_id: "6049a528c30dcb0001454482", contacts: [
+    { apollo_id: "54a468ae7468693442fd2345", name: "Kevin Payen", title: "Commercial Director and Executive Committee Member", email: "kevin.payen@footkorner.com", linkedin_url: "http://www.linkedin.com/in/kevin-payen-645738a6", note: "Commercial Director, ExCo member · email verified" },
+    { apollo_id: "5dd66f035646cd00015c453b", name: "Alexandre Coo", title: "DGA Finance Performance Développement", email: "alexandre.c@footkorner.com", linkedin_url: "http://www.linkedin.com/in/alexandre-coo-14004910", note: "Deputy Director General (finance/performance/development) · email verified" },
+    { apollo_id: "5dcda4bd93df5100019b6543", name: "Diana Rodrigues", title: "Responsable Service Client & E-merchandising", email: "diana.rodrigues@footkorner.com", linkedin_url: "http://www.linkedin.com/in/diana-rodrigues-623340150", note: "CRM & E-Commerce executive · email verified" },
+  ] },
+  { seller_id: "8647766554088741119", company: "FeelinGirl Inc", domain: "feelingirl.com", apollo_org_id: "68b1e1e97554f2000d0085c2", contacts: [
+    { apollo_id: "67358f57dbf7fb0001b8cf76", name: "Courtney Rudy", title: "Digital Operations Manager", email: null, linkedin_url: "http://www.linkedin.com/in/courtney-rudy-301583293", note: "Digital ops / TikTok Live operations manager, US (Apollo only had an extrapolated email at a previous employer, discarded)" },
+    { apollo_id: "6a253be1da402a00012723e4", name: "Danica Vasquez", title: "Social Media Content Creator", email: null, linkedin_url: "http://www.linkedin.com/in/danicavasquez", note: "Social media / content marketing, US (only other person listed; small US-registered team of a Chinese shapewear brand) · email unavailable" },
+  ] },
+  { seller_id: "7494767581289415792", company: "Procter & Gamble (Olay)", domain: "pg.com", apollo_org_id: "54a1218a69702d94a403bf02", contacts: [
+    { apollo_id: "61a7ab1b4aee09000110b7b8", name: "Joy Fraser", title: "Senior Brand Manager, OLAY UK&I", email: "fraser.j@pg.com", linkedin_url: "http://www.linkedin.com/in/joy-fraser-6269a9206", note: "Olay Brand Manager UK&I · email verified" },
+    { apollo_id: "5e7e29c61d8e5e00012746d4", name: "Amber Delaney", title: "Senior Brand Manager, OLAY UK&I", email: "delaney.a@pg.com", linkedin_url: "http://www.linkedin.com/in/amber-delaney-214532137", note: "Senior Brand Manager Olay UK&I · email verified" },
+    { apollo_id: "61b447e75ee007000108be0b", name: "Olivia McAdam", title: "Senior E-Commerce Manager", email: "mcadam.o@pg.com", linkedin_url: "http://www.linkedin.com/in/olivia-mcadam-284087106", note: "Senior E-Commerce Manager, P&G UK · email verified" },
+    { apollo_id: "57dd6ca2a6da987aec20bed6", name: "Zoe Silkstone", title: "Senior Ecommerce Manager, High Street Channel", email: "silkstone.zn@pg.com", linkedin_url: "http://www.linkedin.com/in/zoe-silkstone", note: "Senior E-commerce Manager, High Street channel, P&G UK · email verified" },
+  ] },
+  { seller_id: "7496165336389421767", company: "Miracle Miles Group Inc. (Dream Pairs)", domain: "dreampairs.com", apollo_org_id: "635021693bfa5200a3818a6e", contacts: [
+    { apollo_id: "66ee938114f1ee0001351bb7", name: "Calvin Lin", title: "Co-Founder, CEO", email: "calvin@mirmiles.com", linkedin_url: "http://www.linkedin.com/in/calvin-mmt", note: "Co-founder/CEO of Miracle Miles Group, parent of Dream Pairs · email verified" },
+    { apollo_id: "54a73aac746869730a7e0821", name: "Shea Daspin", title: "Affiliate Marketing Supervisor", email: "shead@dreampairs.com", linkedin_url: "http://www.linkedin.com/in/sheadaspin", note: "Affiliate marketing lead at Dream Pairs (creator/affiliate relevant) · email verified" },
+    { apollo_id: "67b2b897448d030001f34111", name: "Claire Liang", title: "Affiliate and Deals Manager", email: "claire.liang@dreampairs.com", linkedin_url: "http://www.linkedin.com/in/claire-liang-156736186", note: "Affiliate and deals manager at Dream Pairs · email verified" },
+    { apollo_id: "54a7564574686965d9004b2b", name: "Dustin Poteet", title: "Social Media Director", email: "dustin@mirmiles.com", linkedin_url: "http://www.linkedin.com/in/dpoteet", note: "Social Media Director, Miracle Miles Group (Dream Pairs parent), US-based · email verified" },
+  ] },
+  { seller_id: "8647486227232824032", company: "deAO Toys", domain: "deaotoys.co.uk", apollo_org_id: "6612942bb853570007d821ce", contacts: [
+    { apollo_id: "64284768048609000100a5d4", name: "Yancy Lau", title: "Digital Designer | Digital Marketing Specialist", email: "yancy@deaotoys.co.uk", linkedin_url: "http://www.linkedin.com/in/yancylau", note: "Only marketing contact listed at deAO Toys (UK HQ); no founder/director with real name in Apollo · email verified" },
+  ] },
+  { seller_id: "7494616873716385177", company: "Upstreman", domain: "upstreman-home.com", apollo_org_id: "66a5ca12be320d00011226cb", contacts: [
+  ] },
+  { seller_id: "7494749635295479800", company: "MOVA TECH (Dreame sub-brand)", domain: "mova-tech.com", apollo_org_id: "66d2d1b74eec860001334925", contacts: [
+    { apollo_id: "61d7e3772cefe60001325d6e", name: "Christophe Wu", title: "DE, AT, BNL Country Manager", email: "wuchristophe@mova-tech.com", linkedin_url: "http://www.linkedin.com/in/christophe-wu-416478116", note: "Country Manager DE/AT/BNL, ex-Dreame GTM Director · email extrapolated" },
+    { apollo_id: "5b89f22d324d4430571d165f", name: "Can Begtoran", title: "E-Commerce Manager", email: "canbegtoran@mova-tech.com", linkedin_url: "http://www.linkedin.com/in/canbegtoran", note: "E-Commerce Manager · email verified" },
+    { apollo_id: "5d6c55f480f93ee72530c4a0", name: "Christina Shan", title: "WEU Marketing Manager", email: null, linkedin_url: "http://www.linkedin.com/in/christina-shan-2018", note: "Western Europe Marketing Manager (LinkedIn only) · email unavailable" },
+    { apollo_id: "67587d21ff9d3c00010152df", name: "Stirling Fang", title: "Global Brand Manager", email: "fangstirling@mova-tech.com", linkedin_url: "http://www.linkedin.com/in/stirling-fang-9a2a66220", note: "Global Brand Manager · email extrapolated" },
+  ] },
+  { seller_id: "7494391239278298950", company: "Philibert", domain: "philibertnet.com", apollo_org_id: "5a9d90d6a6da98d98c6ba72e", contacts: [
+    { apollo_id: "669633b61f8bdd0001de9acf", name: "Manuel Duhail", title: "Business Development Manager", email: "manuel.duhail@philibertnet.com", linkedin_url: "http://www.linkedin.com/in/manuel-duhail-0aab452aa", note: "Responsable developpement commercial, Philibert (board game retailer, Strasbourg) · email verified" },
+    { apollo_id: "5d50f3a5f6512552fbb8f6b6", name: "Sylvain Michel", title: "Charge de communication / Community Manager", email: "sylvain.michel@philibertnet.com", linkedin_url: "http://www.linkedin.com/in/sylvain-michel1", note: "Communication / community manager (social channels); profile lists several concurrent roles · email extrapolated" },
+  ] },
+  { seller_id: "7494314678985262098", company: "Thermos UK", domain: "thermos.co.uk", apollo_org_id: "60b0a6b1d158f90001b7f194", contacts: [
+    { apollo_id: "5e8fcc4e34c6730001dd4516", name: "James Sheldon", title: "Head of Product & Marketing", email: "james.sheldon@thermos.co.uk", linkedin_url: "http://www.linkedin.com/in/james-sheldon-a8967a131", note: "Head of Product & Marketing, Thermos UK · email verified" },
+    { apollo_id: "671bf7003e59ae0001f5df00", name: "Clive Barstow", title: "Sales & Commercial Director", email: "clive.barstow@thermos.co.uk", linkedin_url: "http://www.linkedin.com/in/clive-barstow2011", note: "Sales & Commercial Director, Thermos UK · email verified" },
+    { apollo_id: "57e0ab86a6da981c6dba0401", name: "Adrian Calvert", title: "Head of Sales", email: "adrian.calvert@thermos.co.uk", linkedin_url: "http://www.linkedin.com/in/adrian-calvert", note: "Head of Sales, Thermos UK · email verified" },
+  ] },
+  { seller_id: "7496099372057070584", company: "VERALAB", domain: "veralab.it", apollo_org_id: "5edb85e7a33f1c0001cdc3c2", contacts: [
+    { apollo_id: "605971227c22930001d938de", name: "Moira Lena", title: "Chief Marketing Officer", email: "moira.lena@veralab.it", linkedin_url: "http://www.linkedin.com/in/moira-lena-21a98814", note: "CMO · email verified" },
+    { apollo_id: "57d4491aa6da9853d620f1d1", name: "Elena Cadorini", title: "Commercial Director", email: "elena.cadorini@veralab.it", linkedin_url: "http://www.linkedin.com/in/elena-cadorini-9486bb80", note: "Commercial Director · email verified" },
+    { apollo_id: "60d42d814a5f00000189c401", name: "Luca Villa", title: "Channel Sales Manager", email: "luca.villa@veralab.it", linkedin_url: "http://www.linkedin.com/in/luca-villa-a14aa8123", note: "Channel Sales Manager · email verified" },
+    { apollo_id: "66f94bcff32bc8000180a9b5", name: "Giuseppe Ascione", title: "Ecommerce Specialist", email: "giuseppe.ascione@veralab.it", linkedin_url: "http://www.linkedin.com/in/giuseppe-ascione", note: "E-commerce specialist (only e-commerce titled person) · email verified" },
+  ] },
+  { seller_id: "7494685554530944227", company: "TCG.nl", domain: "tcg.nl", apollo_org_id: "6a666e1cf298c10001a22b0d", contacts: [
+    { apollo_id: "6721556ae829740001f06068", name: "Axel Visser", title: "Co-Founder", email: null, linkedin_url: "http://www.linkedin.com/in/axel-visser-1816802b7", note: "Co-founder (LinkedIn only, no email) · email unavailable" },
+  ] },
+  { seller_id: "8647386409188957115", company: "SHEKO", domain: "sheko.com", apollo_org_id: "6441204c072cf600a357c8d2", contacts: [
+    { apollo_id: "5e67bdebe8b6710129ef429f", name: "Dustin Fleck", title: "Co-Founder", email: "dustin@sheko.com", linkedin_url: "http://www.linkedin.com/in/dustin-fleck-4292551a0", note: "Co-founder · email verified" },
+    { apollo_id: "63d5119509d6ec000166b18a", name: "Michele Graziano", title: "Marketing Manager Italy", email: "michele@sheko.com", linkedin_url: "http://www.linkedin.com/in/michele-graziano-marketing", note: "Marketing Manager Italy (market lead) · email verified" },
+    { apollo_id: "5d65f95c80f93ec45d3c7117", name: "Anna Schiemann", title: "Influencer Marketing Manager", email: "anna.s@sheko.com", linkedin_url: "http://www.linkedin.com/in/anna-schiemann-6bb0b6175", note: "Influencer Marketing Manager · email verified" },
+    { apollo_id: "65f2ce28db1db400073363dc", name: "Kevin Riesebeck", title: "Amazon Performance Marketing Manager", email: "kevin@sheko.com", linkedin_url: "http://www.linkedin.com/in/kevin-riesebeck", note: "Marketplace (Amazon) performance marketing · email verified" },
+  ] },
 ];
