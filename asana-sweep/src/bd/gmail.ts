@@ -197,6 +197,26 @@ export class GmailClient {
 
   // ---- Sent history as voice samples ----
 
+  /** Any messages matching a Gmail query, with sender name and address (read scope). */
+  async searchMessages(query: string, max = 50): Promise<{ id: string; subject: string; body: string; from_email: string | null; from_name: string | null; to: string | null; date: string | null }[]> {
+    const out: { id: string; subject: string; body: string; from_email: string | null; from_name: string | null; to: string | null; date: string | null }[] = [];
+    let pageToken = '';
+    while (out.length < max) {
+      const list = (await this.api('GET', `/messages?q=${encodeURIComponent(query)}&maxResults=${Math.min(max - out.length, 50)}${pageToken ? `&pageToken=${pageToken}` : ''}`)) as { messages?: { id: string }[]; nextPageToken?: string };
+      for (const m of list.messages ?? []) {
+        const full = (await this.api('GET', `/messages/${m.id}?format=full`)) as { id: string; internalDate?: string; payload?: { headers?: { name: string; value: string }[]; mimeType?: string; body?: { data?: string }; parts?: unknown[] } };
+        const header = (n: string) => full.payload?.headers?.find((h) => h.name.toLowerCase() === n.toLowerCase())?.value ?? null;
+        const from = header('From') ?? '';
+        const fm = from.match(/^\s*(?:"?([^"<]*)"?\s*)?<?([^<>\s]+@[^<>\s]+)>?\s*$/);
+        out.push({ id: full.id, subject: header('Subject') ?? '(no subject)', body: extractPlainText(full.payload), from_email: fm?.[2]?.toLowerCase() ?? null, from_name: fm?.[1]?.trim() || null, to: header('To'), date: full.internalDate ? new Date(Number(full.internalDate)).toISOString() : null });
+        if (out.length >= max) break;
+      }
+      pageToken = list.nextPageToken ?? '';
+      if (!pageToken) break;
+    }
+    return out;
+  }
+
   async listSent(query: string, max = 25): Promise<{ id: string; subject: string; body: string; to: string | null; sent_at: string | null }[]> {
     const list = (await this.api('GET', `/messages?q=${encodeURIComponent(query)}&maxResults=${Math.min(max, 50)}`)) as { messages?: { id: string }[] };
     const out: { id: string; subject: string; body: string; to: string | null; sent_at: string | null }[] = [];

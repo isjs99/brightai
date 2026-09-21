@@ -11,6 +11,9 @@ import { pickBestContact, bulkCandidates } from '../src/bd/bulk';
 import { ApolloClient, ApolloCreditsError, isCreditsError } from '../src/bd/apollo';
 import { FastmossClient, FastmossQuotaError, fastmossStatus, pullFastMoss, toolResultJson, unwrapShops } from '../src/bd/fastmoss';
 import { existsSync, rmSync } from 'node:fs';
+import { suggestTtsContact } from '../src/bd/sequence';
+import { guessMarketFromSubject, parseSignature } from '../src/bd/tts-directory';
+import type { TtsContact } from '../src/sweep/types';
 import { apolloStatus, EnrichJob, enrichProspect, markApolloExhausted, personAtCompany, refreshApolloCredits } from '../src/bd/enrich';
 import { dropExclamations, tailoredOpener, templateDraft, renderOutreachPrompt } from '../src/bd/outreach';
 import type { Account, BdContact, BdProspect, StockSku } from '../src/sweep/types';
@@ -411,5 +414,71 @@ describe('fastmoss mcp client and pull', () => {
       delete process.env.BD_PULLS_DIR;
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('tiktok shop AM suggestion and gmail directory', () => {
+  const c = (o: Partial<TtsContact>): TtsContact => ({ id: Math.floor(Math.random() * 1e6), market: 'DE', category: null, name: 'X', role: null, lark: null, email: null, notes: null, is_agency_manager: false, ...o });
+  it('picks the obvious category owner, otherwise the TSP manager, ranked by closeness and seniority', () => {
+    const list = [
+      c({ id: 1, name: 'Marina Kress', category: 'Beauty', role: 'Account Manager Beauty', notes: 'Closeness 7 · gives us active leads' }),
+      c({ id: 2, name: 'Laurie', category: 'FMCG & Beauty', role: 'FMCG / Beauty DE', notes: 'Closeness 10 · gives us active leads' }),
+      c({ id: 3, name: 'Finja Zeyss', category: 'Beauty', role: 'Senior AM Beauty', notes: 'Closeness 6 · No Apollo record: likely moved on' }),
+      c({ id: 4, name: 'Ningxin Wu', role: 'Multi-Category Lead' }),
+      c({ id: 5, name: 'Ali Atahan Demirci', role: 'TSP partner manager DE', is_agency_manager: true, notes: 'No Apollo record' }),
+      c({ id: 6, name: 'Saniah Ahmed', role: 'Head of Agency Partnerships', is_agency_manager: true, notes: 'Primary TSP contact · Closeness 8' }),
+      c({ id: 7, market: 'ES', name: 'Gerard Ferreiro', category: 'FMCG (Food & Beverages)', role: 'FMCG Category Manager' }),
+      c({ id: 8, market: 'ES', name: 'Tingyu L', role: 'Partnerships lead', is_agency_manager: true }),
+      c({ id: 9, market: 'ES', name: 'Wilbur Hu', role: 'TSP manager ES', is_agency_manager: true, notes: 'Primary TSP contact' }),
+    ];
+    const beauty = suggestTtsContact(list, { market: 'DE', category: 'Beauty & Personal Care' });
+    expect(beauty.tier).toBe('category');
+    expect(beauty.contact?.name).toBe('Laurie');
+    expect(beauty.fallback?.name).toBe('Saniah Ahmed');
+    const phones = suggestTtsContact(list, { market: 'DE', category: 'Phones & Electronics' });
+    expect(phones.tier).toBe('tsp_manager');
+    expect(phones.contact).toBeNull();
+    expect(phones.fallback?.name).toBe('Saniah Ahmed');
+    const esFood = suggestTtsContact(list, { market: 'ES', category: 'Food & Beverages' });
+    expect(esFood.contact?.name).toBe('Gerard Ferreiro');
+    const esToys = suggestTtsContact(list, { market: 'ES', category: 'Toys' });
+    expect(esToys.tier).toBe('tsp_manager');
+    expect(esToys.fallback?.name).toBe('Wilbur Hu');
+    const fr = suggestTtsContact(list, { market: 'FR', category: 'Beauty' });
+    expect(fr.tier).toBe('tsp_manager');
+    expect(fr.fallback?.name).toBe('Saniah Ahmed');
+  });
+  it('reads role, Lark link and market from a signature', () => {
+    const sig = parseSignature('Ningxin Wu', 'Hi Deb,\n\nHerewith, let me introduce you to Isaac.\n\nBest regards,\nNingxin\n\nNingxin Wu\nMulti-Category Lead\n +4915222933667 <http://tel:+4915222933667>\n ningxin.wu@tiktok.com\nClick here to add me on Lark\n<https://www.larkoffice.com/invitation/page/add_contact/?token=abc&amp;unique_id=SHw==>\nTikTok - Munich');
+    expect(sig.role).toBe('Multi-Category Lead');
+    expect(sig.lark).toBe('https://www.larkoffice.com/invitation/page/add_contact/?token=abc&unique_id=SHw==');
+    expect(sig.marketHint).toBe('DE');
+    const es = parseSignature('Gerard Ferreiro', 'Thanks,\n--\n*Gerard Ferreiro*\nFMCG Category Manager\nPaseo de la Castellana 81, Piso 13\nMadrid 28046\nTel: +34 626 35 86 68\ngerard.ferreiro@tiktok.com');
+    expect(es.role).toBe('FMCG Category Manager');
+    expect(es.categoryHint).toBe('Food & Beverages');
+    expect(es.marketHint).toBe('ES');
+    const inline = parseSignature('Saniah Ahmed', 'Best,\nSaniah\n\n*Saniah Ahmed **|* *TikTok Global E-Commerce Partnership Development*\nEmail: saniah.ahmed@tiktok.com');
+    expect(inline.role).toContain('Partnership Development');
+    expect(guessMarketFromSubject('Accepted: Brightform Spain x TikTok Shop Spain')).toBe('ES');
+    expect(parseSignature('Joshua Gerstendorf', "joshua.gerstendorf@tiktok.com 's invitation\nBrightform x TikTok - Weekly").role).toBeNull();
+  });
+  it('the counterpart map is seeded and drives the suggestion', () => {
+    const q = new Queries(openTestDb());
+    const all = q.listTtsContacts();
+    expect(all.length).toBeGreaterThanOrEqual(170);
+    expect(all.some((x) => x.name === 'Joshua Gerstendorf' && x.is_agency_manager && x.market === 'DE')).toBe(true);
+    expect(all.some((x) => x.name === 'Gerard Ferreiro' && x.market === 'ES' && /FMCG/.test(x.category ?? ''))).toBe(true);
+    expect(all.filter((x) => x.market === 'ES').length).toBe(46);
+    expect(suggestTtsContact(all, { market: 'DE', category: 'Beauty & Personal Care' }).contact?.name).toBe('Laurie');
+    expect(suggestTtsContact(all, { market: 'DE', category: 'Phones & Electronics' }).contact?.name).toBe('Niklas Brunn');
+    expect(suggestTtsContact(all, { market: 'DE', category: 'Home Supplies' }).contact?.name).toBe('Giulia');
+    const deToys = suggestTtsContact(all, { market: 'DE', category: 'Toys & Hobbies' });
+    expect(deToys.tier).toBe('tsp_manager');
+    expect(deToys.fallback?.name).toBe('Saniah Ahmed');
+    expect(suggestTtsContact(all, { market: 'ES', category: 'Beauty & Personal Care' }).fallback?.name).toBe('Wilbur Hu');
+    expect(suggestTtsContact(all, { market: 'UK', category: 'Sports & Outdoor' }).contact?.name).toBe('Massimo Rocchelli');
+    expect(suggestTtsContact(all, { market: 'IT', category: 'Fashion' }).fallback?.name).toBe('Vincenzo Santillo');
+    expect(suggestTtsContact(all, { market: 'FR', category: 'Fashion' }).fallback?.name).toBe('Alexandre Giraudeau');
+    expect(suggestTtsContact(all, { market: 'NL', category: 'Fashion' }).fallback?.name).toBe('Jiayue Ren');
   });
 });

@@ -117,8 +117,12 @@ describe('LinkedIn sequence and follow-ups', () => {
     const r = suggestTtsContact(contacts, { market: 'DE', category: 'Furniture' });
     expect(r.contact).toBeNull();
     expect(r.fallback?.name).toBe('Anna');
-    expect(r.reason).toContain('agency manager');
-    expect(suggestTtsContact(contacts, { market: 'FR', category: 'Beauty' }).reason).toContain('No TikTok Shop contacts');
+    expect(r.reason).toContain('TSP manager');
+    // No French contacts at all: the nearest agency manager is still offered rather than nothing.
+    const fr = suggestTtsContact(contacts, { market: 'FR', category: 'Beauty' });
+    expect(fr.tier).toBe('tsp_manager');
+    expect(fr.fallback?.name).toBe('Anna');
+    expect(suggestTtsContact([], { market: 'FR', category: 'Beauty' }).reason).toContain('No TikTok Shop contacts');
   });
 });
 

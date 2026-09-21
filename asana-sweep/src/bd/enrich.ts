@@ -9,7 +9,7 @@ import { log } from '../logger.js';
  * Decision-maker enrichment for one prospect: resolve the company in Apollo (id + domain +
  * company details), search its people twice (the TikTok / e-commerce / marketing title list, then
  * everyone senior when that is thin), prefer people based in the market, keep the best-ranked
- * ones as contacts and reveal the top few for a verified work email (one credit each; standing
+ * ones as contacts and reveal only the two most senior relevant people for a verified work email (one credit each; standing
  * authorisation, no confirmation). When Apollo runs out of credits the job stops and the
  * dashboard says so; nothing retries until the balance is back.
  */
@@ -55,13 +55,13 @@ export function personAtCompany(p: ApolloPerson, query: string, orgId?: string |
 }
 
 export function revealSetting(q: Queries): number {
-  const n = Number(q.getSetting('apollo_reveal_per_prospect', '5'));
-  return Number.isFinite(n) && n >= 0 ? Math.min(n, 20) : 5;
+  const n = Number(q.getSetting('apollo_reveal_per_prospect', '2'));
+  return Number.isFinite(n) && n >= 0 ? Math.min(n, 20) : 2;
 }
 
 export function keepSetting(q: Queries): number {
-  const n = Number(q.getSetting('apollo_keep_per_prospect', '10'));
-  return Number.isFinite(n) && n >= 1 ? Math.min(n, 30) : 10;
+  const n = Number(q.getSetting('apollo_keep_per_prospect', '8'));
+  return Number.isFinite(n) && n >= 1 ? Math.min(n, 30) : 8;
 }
 
 export async function enrichProspect(q: Queries, prospectId: number, opts: EnrichOptions = {}, apollo: ApolloClient = defaultApollo): Promise<EnrichResult> {

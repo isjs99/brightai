@@ -20,6 +20,14 @@ export function pickBestContact(p: Pick<BdProspect, 'market' | 'contacts'>, opts
   return [...withEmail].sort((a, b) => score(b) - score(a) || a.id - b.id)[0] ?? null;
 }
 
+/** The contact to connect with on LinkedIn: highest title score among those with a profile URL, people already in the sequence last. */
+export function pickBestLinkedin(p: Pick<BdProspect, 'market' | 'contacts'>): BdContact | null {
+  const withUrl = p.contacts.filter((c) => c.linkedin_url && /linkedin\.com\//i.test(c.linkedin_url));
+  if (!withUrl.length) return null;
+  const score = (c: BdContact) => titleScore(c.title, p.market) + (c.linkedin_status !== 'none' ? -100 : 0) + (c.email ? 2 : 0);
+  return [...withUrl].sort((a, b) => score(b) - score(a) || a.id - b.id)[0] ?? null;
+}
+
 export interface BulkDraftSelection {
   ids?: number[];
   market?: string | null;

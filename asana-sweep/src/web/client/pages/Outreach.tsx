@@ -14,7 +14,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: 'settings', label: 'Voice, Gmail & contacts' },
 ];
 const DRAFT_LANGS: Record<string, string> = { en: 'English', de: 'German', fr: 'French', it: 'Italian', es: 'Spanish' };
-const MARKETS = ['DE', 'UK', 'FR', 'IT', 'ES', 'IE', 'NL', 'BE', 'PL', 'AT', 'SE'];
+const MARKETS = ['DE', 'UK', 'FR', 'IT', 'ES', 'IE', 'NL', 'BE', 'PL', 'AT', 'SE', 'EU'];
 
 /** Same rendering rules as the server's bodyToHtml: paragraphs, "- " bullets, short "Heading:" lines in bold, links clickable. */
 function renderBody(body: string) {
@@ -341,7 +341,7 @@ function Settings({ data, isAdmin, busy, run, onNotice }: Ctx) {
   const s = data.settings;
   const [settings, setSettings] = useState({ sender_name: s.sender_name, sender_title: s.sender_title, booking_url: s.booking_url, pitch: s.pitch, sent_query: s.sent_query, watchlist_sheet_tab: s.watchlist_sheet_tab, linkedin_check_days: s.linkedin_check_days });
   const [newExample, setNewExample] = useState<{ subject: string; body: string; kind: string } | null>(null);
-  const [tc, setTc] = useState<Partial<TtsContact> & { market: string; name: string }>({ market: 'DE', name: '', category: '', role: '', lark: '', email: '', is_agency_manager: false });
+  const [tc, setTc] = useState<Partial<TtsContact> & { market: string; name: string }>({ market: 'DE', name: '', category: '', role: '', lark: '', email: '', notes: '', is_agency_manager: false });
   return (
     <>
       <div className="card" style={{ marginBottom: 14 }}>
@@ -357,11 +357,12 @@ function Settings({ data, isAdmin, busy, run, onNotice }: Ctx) {
 
       <div className="card" style={{ marginBottom: 14 }}>
         <h3 style={{ marginTop: 0 }}>TikTok Shop contacts <span className="sub">(who to loop in per market)</span></h3>
-        <p className="sub">The prospect detail suggests a TikTok Shop POC: the category contact for the market first, otherwise the market's agency manager to ask in Lark. Add the org chart here.</p>
+        <p className="sub">The prospect detail suggests the TikTok Shop AM to loop in: the category owner for the market when there is an obvious one, otherwise the TSP manager (tick "TSP manager" on the partnerships people; "Primary TSP contact" in the notes wins the tie). Seeded from the TikTok Shop counterpart map (172 people across EU5, UK, Benelux and the cross-market units, EU = cross-market) plus the people in Isaac's Gmail; the notes carry the map's closeness score, who gives us leads and who Apollo no longer finds. "Import from Gmail" adds emails, roles and Lark links from signatures and invites when Gmail is connected.</p>
+        {isAdmin && <div className="actions" style={{ marginBottom: 8 }}><button className="small" disabled={busy === 'ttsimp' || !data.settings.gmail_connected} title={data.settings.gmail_connected ? 'Scan emails from tiktok.com and bytedance.com for people, roles and Lark links' : 'Connect Gmail first'} onClick={() => run('ttsimp', api.importTtsContactsFromGmail, (r) => onNotice(`${r.found} TikTok people found in Gmail: ${r.added} added, ${r.updated} updated.`))}>{busy === 'ttsimp' ? 'Scanning Gmail…' : 'Import from Gmail'}</button></div>}
         {data.tts_contacts.length > 0 && (
-          <div className="grid-wrap"><table><thead><tr><th>Market</th><th>Category</th><th>Name</th><th>Role</th><th>Lark</th><th>Email</th><th></th></tr></thead><tbody>
+          <div className="grid-wrap"><table><thead><tr><th>Market</th><th>Category</th><th>Name</th><th>Role</th><th className="hide-sm">Notes</th><th>Lark</th><th>Email</th><th></th></tr></thead><tbody>
             {data.tts_contacts.map((c) => (
-              <tr key={c.id}><td>{c.market}</td><td className="sub">{c.is_agency_manager ? <span className="badge accent">Agency manager</span> : c.category ?? 'Any'}</td><td><b>{c.name}</b></td><td className="sub">{c.role ?? ''}</td><td className="sub">{c.lark ?? ''}</td><td className="sub">{c.email ?? ''}</td><td>{isAdmin && <div className="actions"><button className="small" onClick={() => setTc({ ...c, category: c.category ?? '', role: c.role ?? '', lark: c.lark ?? '', email: c.email ?? '' })}>Edit</button><button className="small danger" onClick={() => run(`t${c.id}`, () => api.deleteTtsContact(c.id))}>×</button></div>}</td></tr>
+              <tr key={c.id}><td>{c.market}</td><td className="sub">{c.is_agency_manager ? <span className="badge accent">TSP manager</span> : c.category ?? 'Any'}</td><td><b>{c.name}</b></td><td className="sub">{c.role ?? ''}</td><td className="sub hide-sm" title={c.notes ?? ''}>{c.notes ? (c.notes.length > 60 ? `${c.notes.slice(0, 57)}…` : c.notes) : ''}</td><td className="sub">{c.lark ? /^https?:/.test(c.lark) ? <a href={c.lark} target="_blank" rel="noreferrer">Lark ↗</a> : c.lark : ''}</td><td className="sub">{c.email ?? ''}</td><td>{isAdmin && <div className="actions"><button className="small" onClick={() => setTc({ ...c, category: c.category ?? '', role: c.role ?? '', lark: c.lark ?? '', email: c.email ?? '', notes: c.notes ?? '' })}>Edit</button><button className="small danger" onClick={() => run(`t${c.id}`, () => api.deleteTtsContact(c.id))}>×</button></div>}</td></tr>
             ))}
           </tbody></table></div>
         )}
@@ -373,9 +374,10 @@ function Settings({ data, isAdmin, busy, run, onNotice }: Ctx) {
             <label className="field" style={{ minWidth: 160 }}><span className="lbl">Role</span><input type="text" value={tc.role ?? ''} onChange={(e) => setTc({ ...tc, role: e.target.value })} placeholder="Category manager" /></label>
             <label className="field" style={{ minWidth: 140 }}><span className="lbl">Lark</span><input type="text" value={tc.lark ?? ''} onChange={(e) => setTc({ ...tc, lark: e.target.value })} /></label>
             <label className="field" style={{ minWidth: 180 }}><span className="lbl">Email</span><input type="text" value={tc.email ?? ''} onChange={(e) => setTc({ ...tc, email: e.target.value })} /></label>
-            <label className="field check"><input type="checkbox" checked={Boolean(tc.is_agency_manager)} onChange={(e) => setTc({ ...tc, is_agency_manager: e.target.checked })} /> Agency manager (fallback)</label>
-            <button className="primary" disabled={!tc.name.trim() || busy === 'tc'} onClick={() => run('tc', () => api.saveTtsContact({ ...tc, category: tc.category || null }), () => { setTc({ market: tc.market, name: '', category: '', role: '', lark: '', email: '', is_agency_manager: false }); onNotice('TikTok Shop contact saved.'); })}>{tc.id ? 'Save changes' : '+ Add contact'}</button>
-            {tc.id && <button onClick={() => setTc({ market: 'DE', name: '', category: '', role: '', lark: '', email: '', is_agency_manager: false })}>Cancel</button>}
+            <label className="field" style={{ minWidth: 200 }}><span className="lbl">Notes</span><input type="text" value={tc.notes ?? ''} onChange={(e) => setTc({ ...tc, notes: e.target.value })} placeholder='e.g. "Primary TSP contact", "Closeness 8"' /></label>
+            <label className="field check"><input type="checkbox" checked={Boolean(tc.is_agency_manager)} onChange={(e) => setTc({ ...tc, is_agency_manager: e.target.checked })} /> TSP manager (fallback)</label>
+            <button className="primary" disabled={!tc.name.trim() || busy === 'tc'} onClick={() => run('tc', () => api.saveTtsContact({ ...tc, category: tc.category || null, notes: tc.notes || null }), () => { setTc({ market: tc.market, name: '', category: '', role: '', lark: '', email: '', notes: '', is_agency_manager: false }); onNotice('TikTok Shop contact saved.'); })}>{tc.id ? 'Save changes' : '+ Add contact'}</button>
+            {tc.id && <button onClick={() => setTc({ market: 'DE', name: '', category: '', role: '', lark: '', email: '', notes: '', is_agency_manager: false })}>Cancel</button>}
           </div>
         )}
       </div>

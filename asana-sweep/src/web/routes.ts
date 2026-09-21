@@ -26,8 +26,9 @@ import { isCreditsError } from '../bd/apollo.js';
 import { fastmoss, fastmossStatus, isQuotaError } from '../bd/fastmoss.js';
 import { advanceLinkedin, LINKEDIN_STEPS, suggestTtsContact } from '../bd/sequence.js';
 import { scanEnterpriseAlerts, syncWatchlistFromSheet } from '../bd/alerts.js';
+import { mineTiktokContacts } from '../bd/tts-directory.js';
 import { draftCallFollowups, tldv } from '../bd/tldv.js';
-import type { BdFollowup, TtsContact } from '../sweep/types.js';
+import type { BdContact, BdFollowup, TtsContact } from '../sweep/types.js';
 import { autoReplyBlocker, inboxSettings, sendReply, syncInbox } from '../inbox/sync.js';
 import { buildContext, renderPrompt } from '../inbox/context.js';
 import { draftWithClaude } from '../inbox/llm.js';
@@ -38,7 +39,7 @@ import { importPullFiles, isoDate, parseProspectInput } from '../bd/import.js';
 import { GmailClient, gmailComposeUrl } from '../bd/gmail.js';
 import { bodyToHtml, LANGUAGES as OUTREACH_LANGUAGES, outreachInputs } from '../bd/outreach.js';
 import { generateDraft as generateOutreachDraft } from '../bd/draft.js';
-import { bulkCandidates } from '../bd/bulk.js';
+import { bulkCandidates, pickBestLinkedin } from '../bd/bulk.js';
 import { projectionCsv } from '../stock/index.js';
 import { periodBounds } from '../reports/client.js';
 import type { PlaybookKind, PlaybookSetupCell } from '../sweep/types.js';
@@ -1452,6 +1453,33 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     res.status(202).json({ state, ...bdData() });
   });
 
+  /** Bulk LinkedIn: the best profile per selected prospect; with log=true each is logged as "connection requested" (reminder to check back). */
+  r.post('/bd/linkedin/bulk', async (req, res) => {
+    const b = (req.body ?? {}) as { ids?: unknown; log?: unknown; include_started?: unknown };
+    const ids = Array.isArray(b.ids) ? (b.ids as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n > 0) : [];
+    if (!ids.length) throw new HttpError(400, 'Select at least one prospect.');
+    const includeStarted = bool(b.include_started, false);
+    const items: { prospect_id: number; shop_name: string; brand: string | null; contact_id: number; contact_name: string; contact_title: string | null; linkedin_url: string; status: BdContact['linkedin_status'] }[] = [];
+    const skipped: { prospect_id: number; shop_name: string; reason: string }[] = [];
+    for (const id of ids) {
+      const p = q.getProspect(id);
+      if (!p) continue;
+      const c = pickBestLinkedin(p);
+      if (!c) { skipped.push({ prospect_id: p.id, shop_name: p.shop_name, reason: 'no LinkedIn profile on any contact' }); continue; }
+      if (c.linkedin_status !== 'none' && !includeStarted) { skipped.push({ prospect_id: p.id, shop_name: p.shop_name, reason: `${c.name} already ${c.linkedin_status}` }); continue; }
+      items.push({ prospect_id: p.id, shop_name: p.shop_name, brand: p.brand, contact_id: c.id, contact_name: c.name, contact_title: c.title, linkedin_url: c.linkedin_url!, status: c.linkedin_status });
+    }
+    let logged = 0;
+    if (bool(b.log, false)) {
+      for (const it of items) {
+        if (it.status !== 'none') continue;
+        try { await advanceLinkedin(q, it.contact_id, 'requested', { actor: actorOf(req), note: 'bulk' }); logged += 1; } catch (err) { log.warn(`Bulk LinkedIn log for ${it.contact_name}: ${(err as Error).message}`); }
+      }
+      liveEvents.emitUpdate({ kind: 'bd' });
+    }
+    res.json({ items, skipped, logged, ...bdData() });
+  });
+
   r.post('/bd/drafts/bulk/stop', (_req, res) => {
     scheduler.bulkDrafts.stop();
     res.json(bdData());
@@ -1676,6 +1704,17 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (!market || !name) throw new HttpError(400, 'Market and name are required.');
     const saved = q.saveTtsContact({ id: b.id ? Number(b.id) : undefined, market, name, category: optText(b.category), role: optText(b.role), lark: optText(b.lark), email: optText(b.email), notes: optText(b.notes), is_agency_manager: Boolean(b.is_agency_manager) });
     res.json({ contact: saved, ...outreachData() });
+  });
+
+  /** Build the TikTok Shop directory from Gmail signatures and invites (needs Gmail connected). */
+  r.post('/bd/tts-contacts/import-gmail', async (_req, res) => {
+    try {
+      const r2 = await mineTiktokContacts(q, gmail);
+      liveEvents.emitUpdate({ kind: 'bd' });
+      res.json({ found: r2.found, added: r2.added, updated: r2.updated, ...outreachData() });
+    } catch (err) {
+      throw new HttpError(502, (err as Error).message);
+    }
   });
 
   r.delete('/bd/tts-contacts/:id', (req, res) => {

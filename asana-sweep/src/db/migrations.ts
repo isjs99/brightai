@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
 import { SEED_CONTACTS, SEED_DOMAINS, SEED_PULLED_AT, SEED_SHOPS } from '../bd/seed.js';
 import { SEED_ENRICHED } from '../bd/seed-enriched.js';
+import { SEED_TTS_CONTACTS } from '../bd/seed-tts.js';
 import { SEED_WATCHLIST } from '../bd/watchlist.js';
 import { SEED_BOOKING_URL, SEED_EXAMPLES, SEED_PITCH, SEED_SENDER_NAME, SEED_SENDER_TITLE, SEED_SENT_QUERY } from '../bd/voice.js';
 
@@ -1052,6 +1053,20 @@ const migrations: Migration[] = [
         ALTER TABLE bd_prospects ADD COLUMN enriched_at TEXT;
         ALTER TABLE bd_prospects ADD COLUMN enrich_note TEXT;
       `);
+    },
+  },
+  {
+    version: 20,
+    name: 'tiktok shop counterpart map seeded',
+    up(db) {
+      // One row per person and market; a person already added by hand (same name or email in that market) is left as is.
+      const byName = db.prepare('SELECT 1 FROM tts_contacts WHERE lower(name) = lower(?) AND market = ?');
+      const byEmail = db.prepare('SELECT 1 FROM tts_contacts WHERE email IS NOT NULL AND lower(email) = lower(?) AND market = ?');
+      const ins = db.prepare('INSERT INTO tts_contacts (market, category, name, role, lark, email, notes, is_agency_manager) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+      for (const c of SEED_TTS_CONTACTS) {
+        if (byName.get(c.name, c.market) || (c.email && byEmail.get(c.email, c.market))) continue;
+        ins.run(c.market, c.category, c.name, c.role, c.lark, c.email, c.notes, c.is_agency_manager ? 1 : 0);
+      }
     },
   },
 ];

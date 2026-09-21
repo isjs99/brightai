@@ -37,14 +37,16 @@ export default function BdPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [open, setOpen] = useState<number | null>(null);
   const [liMsg, setLiMsg] = useState<{ contact: BdContact; text: string; generator: string } | null>(null);
-  const [ttsPoc, setTtsPoc] = useState<Record<number, { contact: TtsContact | null; fallback: TtsContact | null; reason: string }>>({});
+  const [ttsPoc, setTtsPoc] = useState<Record<number, { contact: TtsContact | null; fallback: TtsContact | null; reason: string; tier: 'category' | 'tsp_manager' | 'none' }>>({});
   useEffect(() => { if (open !== null && !ttsPoc[open]) api.ttsContactFor(open).then((r) => setTtsPoc((m) => ({ ...m, [open]: r }))).catch(() => undefined); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   const [f, setF] = useState({ market: '', status: '', category: '', owner: '', rise: '', type: '', launch: '', contact: '', q: '', sort: 'rise' as 'rise' | 'gmv' | 'name' | 'updated' | 'launched' | 'found', found: '', hideDone: false, hideClients: true });
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
+  const [liBulk, setLiBulk] = useState<{ items: { prospect_id: number; shop_name: string; brand: string | null; contact_id: number; contact_name: string; contact_title: string | null; linkedin_url: string; status: string }[]; skipped: { prospect_id: number; shop_name: string; reason: string }[]; logged: number } | null>(null);
   const [bulk, setBulk] = useState({ style: 'short' as 'short' | 'intro', language: 'en', limit: 25, to_gmail: true, include_drafted: false, instructions: '' });
+  const [selPreview, setSelPreview] = useState<{ prospect_id: number; contact_name: string; contact_title: string | null; contact_email: string | null }[]>([]);
   const [bulkPreview, setBulkPreview] = useState<{ count: number; items: { prospect_id: number; shop_name: string; brand: string | null; market: string; contact_name: string; contact_title: string | null; contact_email: string | null }[] } | null>(null);
   const [add, setAdd] = useState({ shop_name: '', market: 'DE', brand: '', category: '', website: '', tiktok_handle: '', notes: '' });
   const [importText, setImportText] = useState('');
@@ -130,6 +132,11 @@ export default function BdPage() {
     } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   };
 
+  useEffect(() => {
+    if (selected.size === 0) { setSelPreview([]); return; }
+    const t = setTimeout(() => api.bulkPreview({ ids: [...selected], include_drafted: bulk.include_drafted }).then((r) => setSelPreview(r.items)).catch(() => setSelPreview([])), 250);
+    return () => clearTimeout(t);
+  }, [selected, bulk.include_drafted, data?.bulk_draft.finished_at, data?.enrich?.finished_at]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (showBulk) api.bulkPreview({ market: f.market, include_drafted: bulk.include_drafted }).then(setBulkPreview).catch((e) => setError((e as Error).message)); }, [showBulk, f.market, bulk.include_drafted, data?.bulk_draft.finished_at]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!data) return <p>{error ?? 'Loading…'}</p>;
@@ -209,16 +216,27 @@ export default function BdPage() {
             {p.fastmoss_url && <a className="button" href={p.fastmoss_url} target="_blank" rel="noreferrer">FastMoss shop page</a>}
           </div>
 
-          {ttsPoc[p.id] && (
-            <p className="sub" style={{ margin: '0 0 8px' }}>
-              <b>TikTok Shop POC:</b>{' '}
-              {ttsPoc[p.id].contact
-                ? <>{ttsPoc[p.id].contact!.name}{ttsPoc[p.id].contact!.role ? ` (${ttsPoc[p.id].contact!.role})` : ''}{ttsPoc[p.id].contact!.lark ? ` · Lark: ${ttsPoc[p.id].contact!.lark}` : ''}{ttsPoc[p.id].contact!.email ? ` · ${ttsPoc[p.id].contact!.email}` : ''} <span className="sub">({ttsPoc[p.id].reason})</span></>
-                : ttsPoc[p.id].fallback
-                  ? <>{ttsPoc[p.id].reason}: <b>{ttsPoc[p.id].fallback!.name}</b>{ttsPoc[p.id].fallback!.lark ? ` (Lark: ${ttsPoc[p.id].fallback!.lark})` : ''}</>
-                  : <>{ttsPoc[p.id].reason}. Add the org chart under Outreach emails › Voice, Gmail &amp; contacts.</>}
-            </p>
-          )}
+          {ttsPoc[p.id] && (() => {
+            const poc = ttsPoc[p.id];
+            const person = (c: TtsContact, label: string) => (
+              <span>
+                <span className={`badge ${label === 'TSP manager' ? 'accent' : 'good'}`} style={{ marginRight: 6 }}>{label}</span>
+                <b>{c.name}</b>{c.role ? <span className="sub"> · {c.role}</span> : null}
+                {c.lark && <> · {/^https?:/.test(c.lark) ? <a href={c.lark} target="_blank" rel="noreferrer">Open in Lark</a> : <span>Lark: {c.lark}</span>}</>}
+                {c.email && <> · <a href={`mailto:${c.email}`}>{c.email}</a></>}
+              </span>
+            );
+            return (
+              <p className="sub" style={{ margin: '0 0 8px' }}>
+                <b>TikTok Shop AM to loop in:</b>{' '}
+                {poc.contact
+                  ? <>{person(poc.contact, 'Category owner')} <span className="sub">({poc.reason})</span>{poc.fallback && poc.fallback.id !== poc.contact.id && <> · else {person(poc.fallback, 'TSP manager')}</>}</>
+                  : poc.fallback
+                    ? <>{person(poc.fallback, 'TSP manager')} <span className="sub">({poc.reason})</span></>
+                    : <>{poc.reason}. Add contacts under Outreach emails › Voice, Gmail &amp; contacts, or import them from Gmail there.</>}
+              </p>
+            );
+          })()}
           {liMsg && p.contacts.some((c) => c.id === liMsg.contact.id) && (
             <div className="card" style={{ background: 'var(--surface-2)', marginBottom: 10 }}>
               <div className="page-head" style={{ marginBottom: 6 }}><b>LinkedIn message for {liMsg.contact.name}</b> <span className="sub">{liMsg.generator === 'claude' ? 'Claude, in Isaac\'s voice' : 'template'} · {liMsg.text.length} chars</span></div>
@@ -359,19 +377,53 @@ export default function BdPage() {
         const ready = chosen.filter((p) => p.contacts.some((c) => c.email));
         const fresh = ready.filter((p) => !data.draft_state[p.id]);
         const n = bulk.include_drafted ? ready.length : fresh.length;
+        const li = chosen.filter((p) => p.contacts.some((c) => c.linkedin_url)).length;
+        const who = new Map(selPreview.map((i) => [i.prospect_id, i]));
         return (
-          <div className="card inline-form" style={{ marginBottom: 12, alignItems: 'center', position: 'sticky', top: 8, zIndex: 2 }}>
+          <div className="card" style={{ marginBottom: 12, position: 'sticky', top: 8, zIndex: 2 }}>
+          <div className="inline-form" style={{ alignItems: 'center' }}>
             <b>{selected.size} selected</b>
             <span className="sub">{ready.length} with an email contact{ready.length - fresh.length ? `, ${ready.length - fresh.length} already drafted or emailed` : ''}{chosen.length - ready.length ? `, ${chosen.length - ready.length} without an email (find decision makers first)` : ''}</span>
             <label className="field" style={{ minWidth: 110 }}><span className="lbl">Shape</span><select value={bulk.style} onChange={(e) => setBulk({ ...bulk, style: e.target.value as 'short' | 'intro' })}><option value="short">Short note</option><option value="intro">Introduction</option></select></label>
             <label className="field" style={{ minWidth: 110 }}><span className="lbl">Language</span><select value={bulk.language} onChange={(e) => setBulk({ ...bulk, language: e.target.value })}>{Object.entries(LANGS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
             <label className="field check" title="Also redo the ones that already have a draft or an email out"><input type="checkbox" checked={bulk.include_drafted} onChange={(e) => setBulk({ ...bulk, include_drafted: e.target.checked })} /> Include already drafted</label>
-            <button className="primary" disabled={busy === 'bulk' || data.bulk_draft.running || n === 0} onClick={() => run('bulk', () => api.bulkDraft({ ids: [...selected], limit: 200, language: bulk.language, style: bulk.style, to_gmail: true, include_drafted: bulk.include_drafted }), `Drafting ${n} email(s) to the most senior contact of each shop${data.gmail_connected ? ' and saving them to your Gmail drafts' : ' (connect Gmail in Outreach emails > Settings to have them land in Gmail)'}. Send them from Gmail, then mark each as sent under Outreach emails.`)} title={data.gmail_connected ? 'One email per selected shop, straight into your Gmail Drafts folder' : 'Gmail is not connected: drafts stay under Outreach emails'}>{busy === 'bulk' ? 'Starting…' : `Draft ${n} to Gmail`}</button>
+            <button className="primary" disabled={busy === 'bulk' || data.bulk_draft.running || n === 0} onClick={() => run('bulk', () => api.bulkDraft({ ids: [...selected], limit: 200, language: bulk.language, style: bulk.style, to_gmail: true, include_drafted: bulk.include_drafted }), `Drafting ${n} email(s) to the most senior contact of each shop${data.gmail_connected ? ' and saving them to your Gmail drafts' : ' (connect Gmail in Outreach emails > Settings to have them land in Gmail)'}. Send them from Gmail, then mark each as sent under Outreach emails.`)} title={data.gmail_connected ? 'One email per selected shop, straight into your Gmail Drafts folder' : 'Gmail is not connected: drafts stay under Outreach emails'}>{busy === 'bulk' ? 'Starting…' : `Bulk draft emails (${n})`}</button>
             {!data.gmail_connected && <Link className="button small" to="/outreach?tab=settings">Connect Gmail</Link>}
+            <button disabled={busy === 'li'} onClick={() => run('li', async () => { const r = await api.linkedinBulk([...selected], { log: false }); setLiBulk(r); setNotice(r.items.length ? `${r.items.length} LinkedIn profile(s) ready below${r.skipped.length ? `, ${r.skipped.length} skipped` : ''}. Click "Open all" (allow pop-ups for this site if only one tab opens).` : 'None of the selected shops has a contact with a LinkedIn profile yet.'); return r; })} title="One profile per selected shop (most senior contact with a LinkedIn URL), opened in tabs so you can send the connection requests by hand">{busy === 'li' ? 'Loading…' : `Bulk connect on LinkedIn (${li})`}</button>
             <button className="small" onClick={() => setSelected(new Set())}>Clear</button>
+          </div>
+          {selPreview.length > 0 && (
+            <details style={{ marginTop: 6 }}>
+              <summary className="sub">Who gets the email: {selPreview.slice(0, 4).map((i) => i.contact_name).join(', ')}{selPreview.length > 4 ? ` and ${selPreview.length - 4} more` : ''}</summary>
+              <ul className="sub" style={{ margin: '6px 0 0', paddingLeft: 18 }}>
+                {chosen.map((p) => { const w = who.get(p.id); return <li key={p.id}><b>{p.brand ?? p.shop_name}</b>: {w ? <>{w.contact_name}{w.contact_title ? ` · ${w.contact_title}` : ''}{w.contact_email ? ` · ${w.contact_email}` : ''}</> : data.draft_state[p.id] && !bulk.include_drafted ? 'already drafted or emailed (tick "Include already drafted" to redo)' : 'no contact with an email yet'}</li>; })}
+              </ul>
+            </details>
+          )}
           </div>
         );
       })()}
+      {isAdmin && liBulk && (
+        <div className="card" style={{ marginBottom: 12 }}>
+          <div className="page-head" style={{ marginBottom: 6 }}>
+            <div>
+              <h3 style={{ margin: 0 }}>LinkedIn: {liBulk.items.length} profile(s) to connect with</h3>
+              <p className="sub" style={{ margin: 0 }}>Open them all, send the connection request on each, then "Log all as requested" sets the reminders to check back in {data.prospects.length ? 3 : 3} days and moves the shops to contacted. {liBulk.skipped.length ? `Skipped: ${liBulk.skipped.slice(0, 6).map((x) => `${x.shop_name} (${x.reason})`).join(' · ')}${liBulk.skipped.length > 6 ? ` and ${liBulk.skipped.length - 6} more` : ''}.` : ''}</p>
+            </div>
+            <div className="actions">
+              <button className="primary" disabled={!liBulk.items.length} onClick={() => { let opened = 0; for (const it of liBulk.items) { const w = window.open(it.linkedin_url, '_blank', 'noopener'); if (w) opened += 1; } setNotice(opened === liBulk.items.length ? `Opened ${opened} tab(s).` : `Opened ${opened} of ${liBulk.items.length}: your browser blocked the rest. Allow pop-ups for this site (icon in the address bar) and click again, or use the links below.`); }}>Open all in tabs</button>
+              <button className="small" onClick={() => navigator.clipboard.writeText(liBulk.items.map((it) => it.linkedin_url).join('\n')).then(() => setNotice('Profile links copied.'))}>Copy links</button>
+              <button disabled={busy === 'lilog' || !liBulk.items.some((it) => it.status === 'none')} onClick={() => run('lilog', async () => { const r = await api.linkedinBulk(liBulk.items.map((it) => it.prospect_id), { log: true }); setLiBulk(null); setNotice(`Logged ${r.logged} connection request(s); reminders set under Outreach emails > Follow-ups.`); return r; })} title="Mark every profile above as connection requested and set the check-back reminders">{busy === 'lilog' ? 'Logging…' : 'Log all as requested'}</button>
+              <button className="small" onClick={() => setLiBulk(null)}>Close</button>
+            </div>
+          </div>
+          <div style={{ maxHeight: 260, overflow: 'auto' }}>
+            <table className="compact"><thead><tr><th>Brand</th><th>Contact</th><th>Title</th><th>Profile</th><th>Status</th></tr></thead><tbody>
+              {liBulk.items.map((it) => <tr key={it.contact_id}><td>{it.brand ?? it.shop_name}</td><td>{it.contact_name}</td><td className="sub">{it.contact_title ?? ''}</td><td><a href={it.linkedin_url} target="_blank" rel="noreferrer">Open ↗</a></td><td className="sub">{it.status === 'none' ? 'not yet' : it.status}</td></tr>)}
+            </tbody></table>
+          </div>
+        </div>
+      )}
       {isAdmin && showBulk && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="page-head" style={{ marginBottom: 6 }}>

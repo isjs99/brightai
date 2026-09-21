@@ -80,15 +80,42 @@ export async function advanceLinkedin(q: Queries, contactId: number, step: (type
   return { contact: q.getContact(contact.id)!, prospect: q.getProspect(prospect.id)!, followup, message };
 }
 
-/** Who at TikTok Shop to loop in: a category-specific contact for the market first, then the market's agency manager. */
-export function suggestTtsContact(contacts: TtsContact[], prospect: Pick<BdProspect, 'market' | 'category'>): { contact: TtsContact | null; fallback: TtsContact | null; reason: string } {
+/**
+ * Who at TikTok Shop to loop in for a prospect, from the org chart under Outreach emails: the category
+ * owner for the market when it is obvious, else the market's multi-category / key account lead, else the
+ * TSP manager for the market (the partnerships person who runs the Brightform relationship), else any
+ * TSP manager. `tier` says which rule fired so the UI can say why.
+ */
+/** How likely a counterpart is the right person to loop in: the map's closeness score, seniority, who gives us leads, and a penalty for people Apollo no longer finds. */
+export function ttsContactScore(c: TtsContact): number {
+  const role = c.role ?? '';
+  const n = c.notes ?? '';
+  let s = Number(/closeness (\d+)/i.exec(n)?.[1] ?? 0) * 2;
+  if (/primary (tsp )?contact/i.test(n)) s += 20;
+  if (/gives us (active )?leads/i.test(n)) s += 4;
+  if (/\b(head|leiter|director|lead|leader)\b/i.test(role)) s += 9;
+  else if (/senior|key account|category manager|owns/i.test(role)) s += 6;
+  else if (/junior|graduate|intern|bench/i.test(role)) s += 0;
+  else s += 3;
+  if (/no apollo record|left tiktok|leaver/i.test(n)) s -= 15;
+  return s;
+}
+
+const best = (list: TtsContact[]): TtsContact | null => list.reduce<TtsContact | null>((a, b) => (a === null || ttsContactScore(b) > ttsContactScore(a) ? b : a), null);
+
+/**
+ * The TikTok Shop AM to loop in for a prospect: the category owner in that market when there is an obvious one,
+ * otherwise the TSP (agency partnerships) manager for the market. Never a guess at a random AM.
+ */
+export function suggestTtsContact(contacts: TtsContact[], prospect: Pick<BdProspect, 'market' | 'category'>): { contact: TtsContact | null; fallback: TtsContact | null; reason: string; tier: 'category' | 'tsp_manager' | 'none' } {
+  const market = MARKET_NAMES[prospect.market] ?? prospect.market;
   const inMarket = contacts.filter((c) => c.market === prospect.market);
   const cat = (prospect.category ?? '').toLowerCase();
-  const specific = inMarket.find((c) => c.category && cat && (cat.includes(c.category.toLowerCase()) || c.category.toLowerCase().includes(cat)) && !c.is_agency_manager) ?? null;
-  const manager = inMarket.find((c) => c.is_agency_manager) ?? null;
-  const general = inMarket.find((c) => !c.category && !c.is_agency_manager) ?? null;
-  if (specific) return { contact: specific, fallback: manager, reason: `${prospect.category} contact for ${MARKET_NAMES[prospect.market] ?? prospect.market}` };
-  if (general) return { contact: general, fallback: manager, reason: `General TikTok Shop contact for ${MARKET_NAMES[prospect.market] ?? prospect.market}` };
-  if (manager) return { contact: null, fallback: manager, reason: `No category contact on file for ${prospect.category ?? 'this category'} in ${MARKET_NAMES[prospect.market] ?? prospect.market}: ask the agency manager in Lark` };
-  return { contact: null, fallback: null, reason: `No TikTok Shop contacts on file for ${MARKET_NAMES[prospect.market] ?? prospect.market} yet` };
+  const catWords = cat.split(/[^a-z]+/).filter((w) => w.length > 3);
+  const catMatch = (c: TtsContact) => { const cc = (c.category ?? '').toLowerCase(); return Boolean(cc && cat && (cat.includes(cc) || cc.includes(cat) || catWords.some((w) => cc.includes(w)) || (/\b(food|beverage|grocer|fmcg|drink|snack|health|supplement)/.test(cat) && /fmcg|food|beverage/.test(cc)))); };
+  const owner = best(inMarket.filter((c) => catMatch(c) && !c.is_agency_manager)) ?? best(inMarket.filter(catMatch));
+  const manager = best(inMarket.filter((c) => c.is_agency_manager)) ?? best(contacts.filter((c) => c.is_agency_manager && /partnership|TSP|matchmaking/i.test(c.role ?? ''))) ?? best(contacts.filter((c) => c.is_agency_manager));
+  if (owner) return { contact: owner, fallback: manager, reason: `${owner.category} owner for ${market}`, tier: 'category' };
+  if (manager) return { contact: null, fallback: manager, reason: `No obvious ${prospect.category ?? 'category'} owner in ${market}: go through the TSP manager in Lark`, tier: 'tsp_manager' };
+  return { contact: null, fallback: null, reason: `No TikTok Shop contacts on file for ${market} yet`, tier: 'none' };
 }
