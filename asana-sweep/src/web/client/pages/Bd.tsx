@@ -43,6 +43,7 @@ export default function BdPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
+  const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulk, setBulk] = useState({ style: 'short' as 'short' | 'intro', language: 'en', limit: 25, to_gmail: true, include_drafted: false, instructions: '' });
   const [bulkPreview, setBulkPreview] = useState<{ count: number; items: { prospect_id: number; shop_name: string; brand: string | null; market: string; contact_name: string; contact_title: string | null; contact_email: string | null }[] } | null>(null);
   const [add, setAdd] = useState({ shop_name: '', market: 'DE', brand: '', category: '', website: '', tiktok_handle: '', notes: '' });
@@ -181,7 +182,7 @@ export default function BdPage() {
 
   const details = (p: BdProspect): ReactElement => (
     <tr className="detail-row" key={`${p.id}-d`}>
-      <td colSpan={9}>
+      <td colSpan={isAdmin ? 11 : 10}>
         <div className="card" style={{ margin: '4px 0 10px' }}>
           <div className="stats">
             <div className="stat"><span className="v">{fmtMoney(p.gmv_7d, p.currency)}</span><span className="k">GMV last 7 days</span></div>
@@ -353,6 +354,24 @@ export default function BdPage() {
           <button className="primary" onClick={createProspect} disabled={!add.shop_name.trim() || busy === 'add'}>Add</button>
         </div>
       )}
+      {isAdmin && selected.size > 0 && (() => {
+        const chosen = data.prospects.filter((p) => selected.has(p.id));
+        const ready = chosen.filter((p) => p.contacts.some((c) => c.email));
+        const fresh = ready.filter((p) => !data.draft_state[p.id]);
+        const n = bulk.include_drafted ? ready.length : fresh.length;
+        return (
+          <div className="card inline-form" style={{ marginBottom: 12, alignItems: 'center', position: 'sticky', top: 8, zIndex: 2 }}>
+            <b>{selected.size} selected</b>
+            <span className="sub">{ready.length} with an email contact{ready.length - fresh.length ? `, ${ready.length - fresh.length} already drafted or emailed` : ''}{chosen.length - ready.length ? `, ${chosen.length - ready.length} without an email (find decision makers first)` : ''}</span>
+            <label className="field" style={{ minWidth: 110 }}><span className="lbl">Shape</span><select value={bulk.style} onChange={(e) => setBulk({ ...bulk, style: e.target.value as 'short' | 'intro' })}><option value="short">Short note</option><option value="intro">Introduction</option></select></label>
+            <label className="field" style={{ minWidth: 110 }}><span className="lbl">Language</span><select value={bulk.language} onChange={(e) => setBulk({ ...bulk, language: e.target.value })}>{Object.entries(LANGS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
+            <label className="field check" title="Also redo the ones that already have a draft or an email out"><input type="checkbox" checked={bulk.include_drafted} onChange={(e) => setBulk({ ...bulk, include_drafted: e.target.checked })} /> Include already drafted</label>
+            <button className="primary" disabled={busy === 'bulk' || data.bulk_draft.running || n === 0} onClick={() => run('bulk', () => api.bulkDraft({ ids: [...selected], limit: 200, language: bulk.language, style: bulk.style, to_gmail: true, include_drafted: bulk.include_drafted }), `Drafting ${n} email(s) to the most senior contact of each shop${data.gmail_connected ? ' and saving them to your Gmail drafts' : ' (connect Gmail in Outreach emails > Settings to have them land in Gmail)'}. Send them from Gmail, then mark each as sent under Outreach emails.`)} title={data.gmail_connected ? 'One email per selected shop, straight into your Gmail Drafts folder' : 'Gmail is not connected: drafts stay under Outreach emails'}>{busy === 'bulk' ? 'Starting…' : `Draft ${n} to Gmail`}</button>
+            {!data.gmail_connected && <Link className="button small" to="/outreach?tab=settings">Connect Gmail</Link>}
+            <button className="small" onClick={() => setSelected(new Set())}>Clear</button>
+          </div>
+        );
+      })()}
       {isAdmin && showBulk && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="page-head" style={{ marginBottom: 6 }}>
@@ -440,23 +459,26 @@ export default function BdPage() {
         <select value={f.found} onChange={(e) => setF({ ...f, found: e.target.value })} title="When the lead was first found by a pull or added by hand"><option value="">Found any time</option><option value="today">Found in last 24h</option><option value="week">Found in last 7 days</option><option value="month">Found in last 30 days</option></select>
         <label className="field check"><input type="checkbox" checked={f.hideDone} onChange={(e) => setF({ ...f, hideDone: e.target.checked })} /> Hide complete / closed</label>
         <label className="field check"><input type="checkbox" checked={f.hideClients} onChange={(e) => setF({ ...f, hideClients: e.target.checked })} /> Hide existing clients</label>
+        {isAdmin && <button className="small" onClick={() => setSelected(selected.size === rows.length && rows.length ? new Set() : new Set(rows.map((p) => p.id)))}>{selected.size === rows.length && rows.length ? 'Untick all' : `Tick all ${rows.length} shown`}</button>}
+        {isAdmin && <button className="small" onClick={() => setSelected(new Set(rows.filter((p) => p.contacts.some((c) => c.email) && !data.draft_state[p.id]).map((p) => p.id)))} title="Select the shown prospects that have an email contact and no draft or email yet">Tick ready to email</button>}
         <span className="sub">{rows.length} of {data.prospects.length}</span>
       </div>
 
       {rows.length === 0 ? <div className="empty">No prospects match.</div> : (
         <table>
-          <thead><tr><th></th><th>Shop</th><th>Country</th><th className="hide-sm">Category</th><th className="num">7d GMV</th><th>Momentum</th><th>Found</th><th>Status</th><th>Owner</th><th>Outreach</th></tr></thead>
+          <thead><tr>{isAdmin && <th><input type="checkbox" aria-label="Select all shown" checked={rows.length > 0 && rows.every((p) => selected.has(p.id))} onChange={(e) => setSelected(e.target.checked ? new Set([...selected, ...rows.map((p) => p.id)]) : new Set([...selected].filter((id) => !rows.some((p) => p.id === id))))} /></th>}<th></th><th>Shop</th><th>Country</th><th className="hide-sm">Category</th><th className="num">7d GMV</th><th>Momentum</th><th>Found</th><th>Status</th><th>Owner</th><th>Outreach</th></tr></thead>
           <tbody>
             {rows.flatMap((p) => {
               const b = band(p.rise_score);
               const main = (
                 <tr key={p.id} className={open === p.id ? 'open' : ''}>
+                  {isAdmin && <td><input type="checkbox" checked={selected.has(p.id)} onChange={(e) => { const n = new Set(selected); if (e.target.checked) n.add(p.id); else n.delete(p.id); setSelected(n); }} aria-label={`Select ${p.shop_name}`} /></td>}
                   <td><button className="small" onClick={() => setOpen(open === p.id ? null : p.id)} aria-label="Details">{open === p.id ? '−' : '+'}</button></td>
                   <td>
                     <b>{p.shop_name}</b>{p.brand && p.brand !== p.shop_name && <span className="sub"> · {p.brand}</span>}
                     {p.fastmoss_url && <> <a href={p.fastmoss_url} target="_blank" rel="noreferrer" className="sub" title="Open on FastMoss">FastMoss ↗</a></>}
                     {p.is_client && <> <span className="badge muted">client</span></>}
-                    <div className="sub">{p.contacts.length ? `${p.contacts.length} contact${p.contacts.length === 1 ? '' : 's'}` : 'no contacts'}{p.contacts.some((c) => c.email) ? ' · email' : ''}{p.outreach_log.length ? ` · ${p.outreach_log.length} in history` : ''}</div>
+                    <div className="sub">{p.contacts.length ? `${p.contacts.length} contact${p.contacts.length === 1 ? '' : 's'}` : 'no contacts'}{p.contacts.some((c) => c.email) ? ' · email' : ''}{p.outreach_log.length ? ` · ${p.outreach_log.length} in history` : ''}{data.draft_state[p.id] && <> · <Link to={`/outreach`} className={`badge ${data.draft_state[p.id] === 'sent' ? 'good' : data.draft_state[p.id] === 'gmail' ? 'accent' : 'muted'}`} title="Open in Outreach emails">{data.draft_state[p.id] === 'sent' ? 'Email sent' : data.draft_state[p.id] === 'gmail' ? 'In Gmail drafts' : 'Drafted'}</Link></>}</div>
                   </td>
                   <td>{p.market}</td>
                   <td className="hide-sm sub">{p.category ?? ''}</td>

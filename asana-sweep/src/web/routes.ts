@@ -1141,6 +1141,16 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
       apollo: apolloStatus(q),
       fastmoss: fastmossStatus(q),
       bulk_draft: scheduler.bulkDrafts.state,
+      draft_state: (() => {
+        const rank = { draft: 1, gmail: 2, sent: 3 } as const;
+        const out: Record<number, 'draft' | 'gmail' | 'sent'> = {};
+        for (const d of q.listDrafts({})) {
+          if (d.kind !== 'cold' || !(d.status in rank)) continue;
+          const st = d.status as keyof typeof rank;
+          if (!out[d.prospect_id] || rank[st] > rank[out[d.prospect_id]]) out[d.prospect_id] = st;
+        }
+        return out;
+      })(),
       auto_enrich: q.getSetting('apollo_auto_enrich', '1') === '1',
     };
   };

@@ -911,6 +911,8 @@ export interface BdData {
   /** Enrich new prospects with Apollo automatically after every pull or import. */
   auto_enrich: boolean;
   bulk_draft: BulkDraftStatus;
+  /** Cold email state per prospect id: draft (in the dashboard), gmail (saved to Gmail drafts), sent. */
+  draft_state: Record<number, 'draft' | 'gmail' | 'sent'>;
 }
 
 /** Progress of a bulk "draft an email to the best contact of every prospect" run. */
