@@ -1273,6 +1273,13 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     res.json({ healthy, health_error: healthError, ...bdData(), apollo: status });
   });
 
+  /** Run the daily sweep now: git pull, import new pull files, enrich, alerts. */
+  r.post('/bd/sweep', async (_req, res) => {
+    const r2 = await scheduler.dailyPull();
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json({ ...r2, ...bdData() });
+  });
+
   r.post('/bd/apollo/refresh', async (_req, res) => {
     const status = await refreshApolloCredits(q);
     res.json({ ...bdData(), apollo: status });

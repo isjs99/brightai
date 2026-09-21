@@ -360,6 +360,7 @@ export const api = {
   enrichAll: (opts: { reveal?: number; ids?: number[]; mode?: 'new' | 'no_email' | 'all' } = {}) => call<BdData & { candidates: number }>('POST', '/bd/enrich-all', opts),
   apolloTest: () => call<BdData & { healthy: boolean; health_error: string | null }>('POST', '/bd/apollo/test'),
   apolloRefresh: () => call<BdData>('POST', '/bd/apollo/refresh'),
+  bdSweep: () => call<BdData & { pulled: boolean; imported: { files: string[]; added: number; updated: number } }>('POST', '/bd/sweep'),
   stopEnrich: () => call<BdData>('POST', '/bd/enrich-all/stop'),
   saveBdSettings: (s: { auto_enrich?: boolean; reveal_per_prospect?: number; keep_per_prospect?: number }) => call<BdData>('PUT', '/bd/settings', s),
   revealContact: (id: number) => call<BdData & { contact: BdContact; prospect: BdProspect }>('POST', `/bd/contacts/${id}/reveal`),

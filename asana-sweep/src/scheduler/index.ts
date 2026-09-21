@@ -1,4 +1,7 @@
 import cron, { type ScheduledTask } from 'node-cron';
+import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { Queries } from '../db/queries.js';
 import { log } from '../logger.js';
 import { config } from '../config.js';
@@ -32,6 +35,7 @@ export class Scheduler {
   private tasks = new Map<number, ScheduledTask>();
   private pruneTask: ScheduledTask | null = null;
   private pullsTask: ScheduledTask | null = null;
+  private pullsLateTask: ScheduledTask | null = null;
   private checkTask: ScheduledTask | null = null;
   private reminderTask: ScheduledTask | null = null;
   private gmvTask: ScheduledTask | null = null;
@@ -87,7 +91,9 @@ export class Scheduler {
     scanEnterpriseAlerts(this.q);
     // Apollo credits: refresh every 10 minutes so the BD page shows a live balance and enrichment resumes when credits return.
     this.apolloTask = cron.schedule('*/10 * * * *', () => this.refreshApollo());
-    this.pullsTask = cron.schedule('0 6 * * *', () => { importPullFiles(this.q); this.q.markExistingClients(); this.autoEnrich(); scanEnterpriseAlerts(this.q); }, { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
+    this.pullsTask = cron.schedule('0 6 * * *', () => void this.dailyPull(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
+    // A second pass late morning in case the FastMoss routine ran late.
+    this.pullsLateTask = cron.schedule('0 11 * * *', () => void this.dailyPull(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Account monitor: rolling scan of every account for the flags the team otherwise catches by hand.
     this.monitor.start();
     // Stock countdown (products + 30 days of orders per shop), Cruva playbook library, client question copilot.
@@ -100,6 +106,35 @@ export class Scheduler {
     // Follow-up reminders: 09:00 on workdays, a Slack DM per person with what is due.
     this.followupTask = cron.schedule('0 9 * * 1-5', () => void this.remindFollowups(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     log.info(`Scheduler started with ${this.tasks.size} active rule(s)`);
+  }
+
+  /**
+   * The daily sweep: pull the repo (so the FastMoss routine's committed pull file is on disk), import new
+   * pull files, mark existing clients, enrich with Apollo, scan enterprise alerts. Also runs on demand.
+   */
+  async dailyPull(): Promise<{ pulled: boolean; imported: ReturnType<typeof importPullFiles> }> {
+    const pulled = await this.gitPull();
+    const imported = importPullFiles(this.q);
+    this.q.markExistingClients();
+    this.autoEnrich();
+    scanEnterpriseAlerts(this.q);
+    this.q.setSetting('bd_last_sweep_at', new Date().toISOString());
+    return { pulled, imported };
+  }
+
+  /** git pull --ff-only in the repo the server runs from (off with BD_GIT_PULL=0 or when there is no .git). */
+  private gitPull(): Promise<boolean> {
+    if (process.env.BD_GIT_PULL === '0') return Promise.resolve(false);
+    const root = resolve(process.cwd());
+    if (!existsSync(resolve(root, '.git')) && !existsSync(resolve(root, '..', '.git'))) return Promise.resolve(false);
+    return new Promise((done) => {
+      execFile('git', ['pull', '--ff-only'], { cwd: root, timeout: 60000 }, (err, stdout, stderr) => {
+        if (err) { log.warn(`Daily sweep: git pull failed: ${(stderr || err.message).trim().slice(0, 200)}`); done(false); return; }
+        const out = String(stdout).trim();
+        if (!/Already up to date/i.test(out)) log.info(`Daily sweep: git pull: ${out.split('\n').pop()}`);
+        done(true);
+      });
+    });
   }
 
   /** Apollo decision makers for every prospect that has none (and a deeper pass on those with no email yet), with no one clicking: needs APOLLO_API_KEY and the switch on. Pauses while Apollo is out of credits. */
@@ -226,6 +261,8 @@ export class Scheduler {
     this.monitor.stop();
     this.pullsTask?.destroy();
     this.pullsTask = null;
+    this.pullsLateTask?.destroy();
+    this.pullsLateTask = null;
     for (const [id, task] of this.tasks) {
       task.destroy();
       this.tasks.delete(id);

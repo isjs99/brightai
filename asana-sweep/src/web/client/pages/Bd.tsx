@@ -276,7 +276,8 @@ export default function BdPage() {
           <p className="hint" style={{ margin: 0 }}>Fast-rising TikTok Shops per EU market from FastMoss, the decision makers behind them, and where we have reached out. Outreach counts as complete only when TTS AM, Gmail and LinkedIn are all ticked.</p>
         </div>
         <div className="actions">
-          <span className="badge muted" title="Most recent FastMoss pull">{data.last_pull_at ? `Pulled ${fmtRelative(data.last_pull_at)}` : 'No pull yet'}</span>
+          <span className="badge muted" title="Most recent FastMoss pull. The Claude routine commits a pull file every morning at 05:30 UTC; the server pulls the repo and imports it at 06:00 and 11:00, then enriches the new shops with Apollo.">{data.last_pull_at ? `Pulled ${fmtRelative(data.last_pull_at)}` : 'No pull yet'}</span>
+          {isAdmin && <button className="small" disabled={busy === 'sweep'} onClick={() => run('sweep', async () => { const r = await api.bdSweep(); setNotice(`Sweep done: ${r.pulled ? 'repo pulled, ' : ''}${r.imported.files.length} new pull file(s), ${r.imported.added} prospects added, ${r.imported.updated} refreshed${data.apollo.configured ? ', enrichment queued' : ''}.`); return r; })} title="Run the daily sweep now: git pull, import new pull files, enrich with Apollo, scan alerts">{busy === 'sweep' ? 'Sweeping…' : 'Sweep now'}</button>}
           {!data.apollo.configured
             ? <span className="badge muted" title="Add APOLLO_API_KEY to .env and restart">Apollo not connected</span>
             : data.apollo.exhausted
