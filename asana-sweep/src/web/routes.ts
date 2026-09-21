@@ -23,6 +23,7 @@ import { amSummary } from '../leads/points.js';
 import { apollo } from '../bd/apollo.js';
 import { apolloStatus, enrichProspect, markApolloExhausted, refreshApolloCredits } from '../bd/enrich.js';
 import { isCreditsError } from '../bd/apollo.js';
+import { fastmoss, fastmossPaths, fastmossStatus, isQuotaError, pullFastMoss } from '../bd/fastmoss.js';
 import { advanceLinkedin, LINKEDIN_STEPS, suggestTtsContact } from '../bd/sequence.js';
 import { scanEnterpriseAlerts, syncWatchlistFromSheet } from '../bd/alerts.js';
 import { draftCallFollowups, tldv } from '../bd/tldv.js';
@@ -1135,6 +1136,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
       },
       enrich: enrichJob.state,
       apollo: apolloStatus(q),
+      fastmoss: fastmossStatus(q),
       bulk_draft: scheduler.bulkDrafts.state,
       auto_enrich: q.getSetting('apollo_auto_enrich', '1') === '1',
     };
@@ -1273,9 +1275,55 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     res.json({ healthy, health_error: healthError, ...bdData(), apollo: status });
   });
 
+  /** Check the FastMoss credentials: find the token path, run a one-row shop search, read the balance when available. */
+  r.post('/bd/fastmoss/test', async (_req, res) => {
+    if (!fastmoss.configured) throw new HttpError(400, 'Set FASTMOSS_CLIENT_ID and FASTMOSS_CLIENT_SECRET in .env first.');
+    fastmoss.setPaths(fastmossPaths(q));
+    const out: { token_path: string | null; shop_search_path: string | null; rows: number; error: string | null; credits: unknown } = { token_path: null, shop_search_path: null, rows: 0, error: null, credits: null };
+    try {
+      out.token_path = await fastmoss.discoverTokenPath();
+      if (!out.token_path) throw new Error(`No token path answered (tried ${['configured path', 'oauth/token', 'oauth/v1/token', 'api/oauth/token', 'auth/token'].join(', ')}). Check the client id / secret, and set the token path from developers.fastmoss.com in the FastMoss settings below.`);
+      const s2 = await fastmoss.discoverShopSearchPath('DE');
+      if (!s2) throw new Error('Token works but no shop search path answered. Set the shop endpoint path from developers.fastmoss.com in the FastMoss settings below.');
+      out.shop_search_path = s2.path;
+      out.rows = s2.rows;
+      const paths = fastmossPaths(q);
+      q.setSetting('fastmoss_paths', JSON.stringify({ ...paths, token: out.token_path, shop_search: out.shop_search_path }));
+      const c = await fastmoss.credits();
+      if (c) q.setSetting('fastmoss_credits_json', JSON.stringify({ ...c, checked_at: new Date().toISOString() }));
+      out.credits = c;
+      q.setSetting('fastmoss_last_test', `ok ${new Date().toISOString()}: token ${out.token_path}, shops ${out.shop_search_path} (${out.rows} row)`);
+      q.setSetting('fastmoss_last_error', '');
+    } catch (err) {
+      out.error = (err as Error).message;
+      q.setSetting('fastmoss_last_test', `failed ${new Date().toISOString()}: ${out.error}`);
+      if (isQuotaError(err)) q.setSetting('fastmoss_quota_hit_at', new Date().toISOString());
+    }
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json({ ...out, ...bdData() });
+  });
+
+  /** Pull the fast risers from FastMoss now (in-process), then import, enrich and scan. */
+  r.post('/bd/fastmoss/pull', async (_req, res) => {
+    if (!fastmoss.configured) throw new HttpError(400, 'Set FASTMOSS_CLIENT_ID and FASTMOSS_CLIENT_SECRET in .env first.');
+    const r2 = await scheduler.dailyPull({ fastmoss: true });
+    res.json({ ...r2, ...bdData() });
+  });
+
+  r.put('/bd/fastmoss/settings', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    if (b.paths !== undefined) { const t = String(b.paths ?? '').trim(); if (t) { try { JSON.parse(t); } catch { throw new HttpError(400, 'Paths must be JSON like {"token": "/oauth/token", "shop_search": "/shop/v1/search"}.'); } } q.setSetting('fastmoss_paths', t); fastmoss.setPaths(fastmossPaths(q)); }
+    if (b.markets !== undefined) q.setSetting('fastmoss_pull_markets', String(b.markets ?? '').toUpperCase().split(/[,\s]+/).filter(Boolean).join(','));
+    if (b.pages !== undefined) { const n = Number(b.pages); if (!Number.isInteger(n) || n < 1 || n > 30) throw new HttpError(400, 'Pages must be 1 to 30.'); q.setSetting('fastmoss_pull_pages', String(n)); }
+    if (b.enabled !== undefined) q.setSetting('fastmoss_pull_enabled', bool(b.enabled, true) ? '1' : '0');
+    if (b.cron !== undefined) { const c = String(b.cron ?? '').trim(); const cronErr = validateCron(c); if (cronErr) throw new HttpError(400, cronErr); q.setSetting('fastmoss_pull_cron', c); scheduler.reloadFastmossSchedule(); }
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json(bdData());
+  });
+
   /** Run the daily sweep now: git pull, import new pull files, enrich, alerts. */
   r.post('/bd/sweep', async (_req, res) => {
-    const r2 = await scheduler.dailyPull();
+    const r2 = await scheduler.dailyPull({ fastmoss: false });
     liveEvents.emitUpdate({ kind: 'bd' });
     res.json({ ...r2, ...bdData() });
   });

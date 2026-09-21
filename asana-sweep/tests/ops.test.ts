@@ -9,6 +9,8 @@ import { SEED_PLAYBOOK } from '../src/playbook/seed';
 import { looksLikeQuestion, searchEvidence, tokens, Copilot } from '../src/copilot/index';
 import { pickBestContact, bulkCandidates } from '../src/bd/bulk';
 import { ApolloClient, ApolloCreditsError, isCreditsError } from '../src/bd/apollo';
+import { DEFAULT_FASTMOSS_PATHS, FastmossClient, fastmossStatus, pullFastMoss, unwrapShops } from '../src/bd/fastmoss';
+import { existsSync, rmSync } from 'node:fs';
 import { apolloStatus, EnrichJob, enrichProspect, markApolloExhausted, personAtCompany, refreshApolloCredits } from '../src/bd/enrich';
 import { dropExclamations, tailoredOpener, templateDraft, renderOutreachPrompt } from '../src/bd/outreach';
 import type { Account, BdContact, BdProspect, StockSku } from '../src/sweep/types';
@@ -321,5 +323,75 @@ describe('apollo credits and deeper enrichment', () => {
     expect(after.company_location).toBe('Bergamo, Italy');
     expect(after.enrich_note).toContain('2 revealed');
     expect(after.contacts.map((x) => x.email).sort()).toEqual(['p1@beper.com', 'p2@beper.com']);
+  });
+});
+
+describe('fastmoss openapi client and pull', () => {
+  const fake = (opts: { tokenPath?: string; searchPath?: string; rowsFor?: (region: string, page: number) => Record<string, unknown>[]; quotaAfter?: number; envelope?: 'shops' | 'data.list' } = {}) => {
+    const calls: { path: string; body: Record<string, unknown>; auth: string | null }[] = [];
+    let n = 0;
+    const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
+      const path = String(url).replace('https://openapi.fastmoss.com', '');
+      const headers = (init?.headers ?? {}) as Record<string, string>;
+      const ct = headers['content-type'] ?? '';
+      const body = ct.includes('json') ? (JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>) : Object.fromEntries(new URLSearchParams(String(init?.body ?? '')));
+      calls.push({ path, body, auth: headers.authorization ?? null });
+      if (path === (opts.tokenPath ?? '/oauth/token')) return body.client_id === 'id' && body.client_secret === 'secret' ? new Response(JSON.stringify({ code: 0, data: { access_token: 'tok123', expires_in: 3600 } })) : new Response('{"message":"bad client"}', { status: 401 });
+      if (path === (opts.searchPath ?? '/shop/v1/search')) {
+        if (headers.authorization !== 'Bearer tok123') return new Response('{"message":"unauthorized"}', { status: 401 });
+        n += 1;
+        if (opts.quotaAfter && n > opts.quotaAfter) return new Response(JSON.stringify({ code: 40201, message: 'Insufficient credits' }), { status: 402 });
+        const f = (body.filter as { region: string }).region;
+        const rows = opts.rowsFor ? opts.rowsFor(f, Number(body.page)) : [];
+        return new Response(JSON.stringify(opts.envelope === 'data.list' ? { code: 0, data: { list: rows, total: 500 } } : { code: 0, data: { shops: rows } }));
+      }
+      return new Response('{"message":"not found"}', { status: 404 });
+    }) as typeof fetch;
+    return { calls, client: new FastmossClient('id', 'secret', 'https://openapi.fastmoss.com', fetchFn, { ...DEFAULT_FASTMOSS_PATHS }) };
+  };
+  const shop = (region: string, i: number, rise: number) => ({ shop_name: `${region} Shop ${i}`, seller_id: `${region}${i}`, region, gmv_last_7d: 1000 * rise, total_gmv: 1000, units_sold_last_7d: 10, total_units_sold: 100, currency_code: region === 'UK' ? 'GBP' : 'EUR', main_category: { name: 'Beauty' } });
+  it('gets a token, searches shops with the MCP-shaped body, and unwraps both envelopes', async () => {
+    const { calls, client } = fake({ rowsFor: (r, p) => [shop(r, p, 0.2)], envelope: 'data.list' });
+    const rows = await client.shopSearch({ region: 'DE', page: 2 });
+    expect(rows).toHaveLength(1);
+    expect(calls[0].path).toBe('/oauth/token');
+    expect(calls[1]).toMatchObject({ path: '/shop/v1/search', auth: 'Bearer tok123', body: { filter: { region: 'DE' }, orderby: [{ field: 'day7_gmv', order: 'desc' }], page: 2, pagesize: 10 } });
+    await client.shopSearch({ region: 'FR' });
+    expect(calls.filter((c) => c.path === '/oauth/token')).toHaveLength(1); // cached
+    expect(unwrapShops({ data: { shops: [{ shop_name: 'x' }] } })).toHaveLength(1);
+    expect(unwrapShops({ result: { items: [] } })).toEqual([]);
+  });
+  it('discovers the token and shop paths when the defaults are wrong', async () => {
+    const { client } = fake({ tokenPath: '/oauth/v1/token', searchPath: '/shop/v1/list', rowsFor: (r) => [shop(r, 1, 0.1)] });
+    expect(await client.discoverTokenPath()).toBe('/oauth/v1/token');
+    expect(await client.discoverShopSearchPath('DE')).toEqual({ path: '/shop/v1/list', rows: 1 });
+  });
+  it('pulls the risers plus the top three pages, writes the file, upserts, and stops on quota', async () => {
+    const q = new Queries(openTestDb());
+    const dir = `${process.cwd()}/tests/.tmp-pulls-${Date.now()}`;
+    process.env.BD_PULLS_DIR = dir;
+    try {
+      const { client, calls } = fake({ rowsFor: (r, p) => Array.from({ length: 10 }, (_, i) => shop(r, p * 10 + i, p <= 3 ? 0.01 : i === 0 ? 0.3 : 0.01)) });
+      const r = await pullFastMoss(q, client, { markets: ['DE', 'UK'], pages: 5, date: '2026-09-21' });
+      expect(r.markets.map((m) => [m.market, m.pages, m.kept])).toEqual([['DE', 5, 32], ['UK', 5, 32]]);
+      expect(r.added).toBe(64);
+      expect(r.file).toBe('2026-09-21.json');
+      expect(existsSync(`${dir}/2026-09-21.json`)).toBe(true);
+      expect(calls.filter((c) => c.path === '/shop/v1/search')).toHaveLength(10);
+      const p = q.listProspects(false).find((x) => x.shop_name === 'UK Shop 40')!;
+      expect(p).toMatchObject({ market: 'UK', currency: 'GBP', category: 'Beauty', source: 'fastmoss' });
+      expect(JSON.parse(q.getSetting('bd_pulls_imported', '[]'))).toContain('2026-09-21.json');
+      const st = fastmossStatus(q, client);
+      expect(st.last_pull?.added).toBe(64);
+      expect(st.quota_hit_at).toBeNull();
+      const { client: c2 } = fake({ rowsFor: (r, p) => [shop(r, p, 0.5)], quotaAfter: 1 });
+      const r2 = await pullFastMoss(q, c2, { markets: ['DE', 'FR'], pages: 3, date: '2026-09-22' });
+      expect(r2.quota_hit).toBe(true);
+      expect(r2.markets[0].kept).toBe(1);
+      expect(fastmossStatus(q, c2).quota_hit_at).not.toBeNull();
+    } finally {
+      delete process.env.BD_PULLS_DIR;
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

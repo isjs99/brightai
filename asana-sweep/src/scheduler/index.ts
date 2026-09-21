@@ -12,6 +12,7 @@ import { LeadsWatcher } from '../leads/sync.js';
 import { InboxWatcher } from '../inbox/sync.js';
 import { importPullFiles } from '../bd/import.js';
 import { apolloStatus, EnrichJob, refreshApolloCredits } from '../bd/enrich.js';
+import { fastmoss, pullFastMoss } from '../bd/fastmoss.js';
 import { AccountMonitor } from '../monitor/index.js';
 import { draftCallFollowups, tldv } from '../bd/tldv.js';
 import { scanEnterpriseAlerts } from '../bd/alerts.js';
@@ -36,6 +37,7 @@ export class Scheduler {
   private pruneTask: ScheduledTask | null = null;
   private pullsTask: ScheduledTask | null = null;
   private pullsLateTask: ScheduledTask | null = null;
+  private fastmossTask: ScheduledTask | null = null;
   private checkTask: ScheduledTask | null = null;
   private reminderTask: ScheduledTask | null = null;
   private gmvTask: ScheduledTask | null = null;
@@ -91,7 +93,8 @@ export class Scheduler {
     scanEnterpriseAlerts(this.q);
     // Apollo credits: refresh every 10 minutes so the BD page shows a live balance and enrichment resumes when credits return.
     this.apolloTask = cron.schedule('*/10 * * * *', () => this.refreshApollo());
-    this.pullsTask = cron.schedule('0 6 * * *', () => void this.dailyPull(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
+    this.reloadFastmossSchedule();
+    this.pullsTask = cron.schedule('0 6 * * *', () => void this.dailyPull({ fastmoss: false }), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // A second pass late morning in case the FastMoss routine ran late.
     this.pullsLateTask = cron.schedule('0 11 * * *', () => void this.dailyPull(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Account monitor: rolling scan of every account for the flags the team otherwise catches by hand.
@@ -112,14 +115,31 @@ export class Scheduler {
    * The daily sweep: pull the repo (so the FastMoss routine's committed pull file is on disk), import new
    * pull files, mark existing clients, enrich with Apollo, scan enterprise alerts. Also runs on demand.
    */
-  async dailyPull(): Promise<{ pulled: boolean; imported: ReturnType<typeof importPullFiles> }> {
+  async dailyPull(opts: { fastmoss?: boolean } = {}): Promise<{ pulled: boolean; fastmoss: Awaited<ReturnType<typeof pullFastMoss>> | null; fastmoss_error: string | null; imported: ReturnType<typeof importPullFiles> }> {
     const pulled = await this.gitPull();
+    let fm: Awaited<ReturnType<typeof pullFastMoss>> | null = null;
+    let fmError: string | null = null;
+    // With FastMoss API credentials the server pulls the risers itself; otherwise the routine's committed file is used.
+    if ((opts.fastmoss ?? true) && fastmoss.configured && this.q.getSetting('fastmoss_pull_enabled', '1') === '1') {
+      try { fm = await pullFastMoss(this.q, fastmoss); } catch (err) { fmError = (err as Error).message; log.error(`FastMoss pull failed: ${fmError}`); this.q.setSetting('fastmoss_last_error', fmError); }
+    }
     const imported = importPullFiles(this.q);
     this.q.markExistingClients();
     this.autoEnrich();
     scanEnterpriseAlerts(this.q);
     this.q.setSetting('bd_last_sweep_at', new Date().toISOString());
-    return { pulled, imported };
+    return { pulled, fastmoss: fm, fastmoss_error: fmError, imported };
+  }
+
+  /** The in-process FastMoss pull, daily at the configured time (default 05:30 Madrid), followed by import and enrichment. */
+  reloadFastmossSchedule(): void {
+    this.fastmossTask?.destroy();
+    this.fastmossTask = null;
+    if (!fastmoss.configured) return;
+    const expr = this.q.getSetting('fastmoss_pull_cron', '30 5 * * *');
+    if (!cron.validate(expr)) { log.error(`FastMoss pull cron "${expr}" is invalid`); return; }
+    this.fastmossTask = cron.schedule(expr, () => void this.dailyPull({ fastmoss: true }), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid'), name: 'fastmoss-pull' });
+    log.info(`FastMoss pull scheduled: "${expr}" ${this.q.getSetting('check_timezone', 'Europe/Madrid')}`);
   }
 
   /** git pull --ff-only in the repo the server runs from (off with BD_GIT_PULL=0 or when there is no .git). */
@@ -256,6 +276,8 @@ export class Scheduler {
     this.copilot.stop();
     this.apolloTask?.destroy();
     this.apolloTask = null;
+    this.fastmossTask?.destroy();
+    this.fastmossTask = null;
     this.tldvTask?.destroy();
     this.followupTask?.destroy();
     this.monitor.stop();
