@@ -8,6 +8,8 @@ import { brandify, matchesItem, parseMcpListing, PlaybookEngine, shopLanguage } 
 import { SEED_PLAYBOOK } from '../src/playbook/seed';
 import { looksLikeQuestion, searchEvidence, tokens, Copilot } from '../src/copilot/index';
 import { pickBestContact, bulkCandidates } from '../src/bd/bulk';
+import { ApolloClient, ApolloCreditsError, isCreditsError } from '../src/bd/apollo';
+import { apolloStatus, EnrichJob, enrichProspect, markApolloExhausted, personAtCompany, refreshApolloCredits } from '../src/bd/enrich';
 import { dropExclamations, tailoredOpener, templateDraft, renderOutreachPrompt } from '../src/bd/outreach';
 import type { Account, BdContact, BdProspect, StockSku } from '../src/sweep/types';
 
@@ -248,5 +250,76 @@ describe('bulk cold emails', () => {
     const { system } = renderOutreachPrompt({ prospect: p, contact: { name: 'G', title: null, email: 'g@b.it' }, language: 'en', style: 'short', examples: [], pitch: '', senderName: 'Isaac Sinclair', senderTitle: 'CEO', bookingUrl: '' });
     expect(system).toContain('Never use an exclamation mark');
     expect(system).toContain('## Reference email');
+  });
+});
+
+describe('apollo credits and deeper enrichment', () => {
+  const client = (routes: Record<string, (body: Record<string, unknown>) => Response | Promise<Response>>) => new ApolloClient('key', 'https://api.apollo.io/api/v1', (async (url: string | URL | Request, init?: RequestInit) => {
+    const u = new URL(String(url));
+    const body = JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>;
+    const h = routes[u.pathname.replace('/api/v1', '')];
+    return h ? h({ ...body, __query: Object.fromEntries(u.searchParams) }) : new Response('{"error":"nope"}', { status: 404 });
+  }) as typeof fetch);
+  it('reads the balance from the API profile, falls back to usage stats, and flags credit errors', async () => {
+    const c1 = client({ '/users/api_profile': () => new Response(JSON.stringify({ num_credits_remaining: 8510, effective_num_lead_credits: 10010, num_lead_credits_used: 0 })) });
+    expect(await c1.credits()).toMatchObject({ remaining: 8510, limit: 10010, used: 1500, source: 'profile' });
+    const c2 = client({ '/usage_stats/credit_usage_stats': () => new Response(JSON.stringify({ credit_usage_stats: { lead_credit: { limit: 10010, consumed: 1500, left_over: 8510 } }, current_credit_cycle: { start_date: '2026-09-19T12:39:46.000+00:00', end_date: '2026-10-19T12:39:47.000+00:00' } })) });
+    expect(await c2.credits()).toMatchObject({ remaining: 8510, used: 1500, cycle_end: '2026-10-19T12:39:47.000+00:00', source: 'usage_stats' });
+    const c3 = client({ '/people/bulk_match': () => new Response(JSON.stringify({ error: 'Insufficient credits' }), { status: 402 }) });
+    await expect(c3.bulkMatch(['a'])).rejects.toBeInstanceOf(ApolloCreditsError);
+    expect(isCreditsError(new Error('Apollo 403: You do not have enough credits'))).toBe(true);
+    const c4 = client({ '/auth/health': () => new Response(JSON.stringify({ is_logged_in: true })) });
+    expect(await c4.health()).toBe(true);
+  });
+  it('caches the balance, marks exhausted, and the job pauses and resumes with credits', async () => {
+    const q = new Queries(openTestDb());
+    const good = client({ '/users/api_profile': () => new Response(JSON.stringify({ num_credits_remaining: 12, effective_num_lead_credits: 100 })) });
+    const s1 = await refreshApolloCredits(q, good);
+    expect(s1).toMatchObject({ ok: true, remaining: 12, limit: 100, exhausted: false });
+    markApolloExhausted(q);
+    expect(apolloStatus(q, good).exhausted).toBe(true);
+    const job = new EnrichJob(q, good);
+    expect(job.start({ mode: 'new' }).stopped_reason).toBe('credits');
+    const s2 = await refreshApolloCredits(q, good);
+    expect(s2.exhausted).toBe(false);
+    const empty = client({ '/users/api_profile': () => new Response(JSON.stringify({ num_credits_remaining: 0, effective_num_lead_credits: 100 })) });
+    expect((await refreshApolloCredits(q, empty)).exhausted).toBe(true);
+  });
+  it('candidate modes: new, no_email and all', () => {
+    const q = new Queries(openTestDb());
+    const fresh = q.createProspect({ shop_name: 'Fresh Co', market: 'DE' } as never);
+    const noEmail = q.createProspect({ shop_name: 'NoEmail Co', market: 'DE' } as never);
+    q.addContact(noEmail.id, { name: 'A', title: 'CEO', source: 'apollo', apollo_id: 'x' });
+    const withEmail = q.createProspect({ shop_name: 'Email Co', market: 'DE' } as never);
+    q.addContact(withEmail.id, { name: 'B', email: 'b@e.com', source: 'apollo', apollo_id: 'y' });
+    const recent = q.createProspect({ shop_name: 'Recent Co', market: 'DE' } as never);
+    q.addContact(recent.id, { name: 'C', source: 'apollo', apollo_id: 'z' });
+    q.patchProspect(recent.id, { enriched_at: new Date().toISOString() });
+    const job = new EnrichJob(q, client({}));
+    const ids = (m: 'new' | 'no_email' | 'all') => job.candidates(m).filter((p) => [fresh.id, noEmail.id, withEmail.id, recent.id].includes(p.id)).map((p) => p.shop_name).sort();
+    expect(ids('new')).toEqual(['Fresh Co']);
+    expect(ids('no_email')).toEqual(['NoEmail Co']);
+    expect(ids('all')).toEqual(['Fresh Co', 'NoEmail Co']);
+  });
+  it('guards name-only searches by employer and stores company details', async () => {
+    expect(personAtCompany({ id: '1', name: 'A', title: null, email: null, linkedin_url: null, phone: null, organization: 'Beper S.p.A.', email_status: null, city: null, country: null }, 'Beper')).toBe(true);
+    expect(personAtCompany({ id: '1', name: 'A', title: null, email: null, linkedin_url: null, phone: null, organization: 'Deloitte', email_status: null, city: null, country: null }, 'Beper')).toBe(false);
+    expect(personAtCompany({ id: '1', name: 'A', title: null, email: null, linkedin_url: null, phone: null, organization: 'X', email_status: null, city: null, country: null, organization_id: 'o1' }, 'Beper', 'o1')).toBe(true);
+    const q = new Queries(openTestDb());
+    const p = q.createProspect({ shop_name: 'Beper IT', brand: 'Beper', market: 'IT' } as never);
+    const c = client({
+      '/mixed_companies/search': () => new Response(JSON.stringify({ organizations: [{ id: 'o1', name: 'Beper', primary_domain: 'beper.com' }] })),
+      '/organizations/enrich': () => new Response(JSON.stringify({ organization: { id: 'o1', name: 'Beper', primary_domain: 'beper.com', industry: 'consumer goods', estimated_num_employees: 120, linkedin_url: 'https://linkedin.com/company/beper', city: 'Bergamo', country: 'Italy' } })),
+      '/mixed_people/api_search': (b) => new Response(JSON.stringify({ people: b.person_titles ? [{ id: 'p1', name: 'Gianluca Bosetto', title: 'President', organization: { id: 'o1', name: 'Beper' } }] : [{ id: 'p2', name: 'Anna Rossi', title: 'Head of Digital', organization: { id: 'o1', name: 'Beper' } }] })),
+      '/people/bulk_match': (b) => new Response(JSON.stringify({ matches: (b.details as { id: string }[]).map((d) => ({ id: d.id, name: d.id === 'p1' ? 'Gianluca Bosetto' : 'Anna Rossi', email: `${d.id}@beper.com`, email_status: 'verified' })) })),
+    });
+    const r = await enrichProspect(q, p.id, { reveal: 2 }, c);
+    expect(r).toMatchObject({ matched: true, domain: 'beper.com', found: 2, kept: 2, revealed: 2, with_email: 2 });
+    const after = q.getProspect(p.id)!;
+    expect(after.company_industry).toBe('consumer goods');
+    expect(after.company_employees).toBe(120);
+    expect(after.company_location).toBe('Bergamo, Italy');
+    expect(after.enrich_note).toContain('2 revealed');
+    expect(after.contacts.map((x) => x.email).sort()).toEqual(['p1@beper.com', 'p2@beper.com']);
   });
 });

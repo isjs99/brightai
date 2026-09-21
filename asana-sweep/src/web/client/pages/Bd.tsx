@@ -233,12 +233,19 @@ export default function BdPage() {
           )}
           {isAdmin && (
             <div className="actions" style={{ marginTop: 8 }}>
-              <button onClick={() => findContacts(p)} disabled={!data.apollo_configured || busy === `find${p.id}`} title={data.apollo_configured ? 'Resolve the company in Apollo, pull founders, e-commerce, TikTok and marketing leads, reveal the top four (one credit each)' : 'Set APOLLO_API_KEY in .env to search from here'}>
+              <button onClick={() => findContacts(p)} disabled={!data.apollo_configured || data.apollo.exhausted || busy === `find${p.id}`} title={data.apollo.exhausted ? 'Apollo is out of credits' : data.apollo_configured ? `Resolve the company in Apollo, pull founders, e-commerce, TikTok and marketing leads, reveal the top ${data.apollo.reveal_per_prospect} (one credit each)` : 'Set APOLLO_API_KEY in .env to search from here'}>
                 {busy === `find${p.id}` ? 'Searching Apollo…' : 'Find decision makers (Apollo)'}
               </button>
               <AddContact onAdd={(c) => run(`add${p.id}`, () => api.addContact(p.id, c), 'Contact added.')} />
               <button className="danger" onClick={() => window.confirm(`Archive ${p.shop_name}? It disappears from the pipeline but stays in the database.`) && patch(p, { archived: true })}>Archive</button>
             </div>
+          )}
+          {(p.company_industry || p.company_employees || p.company_linkedin || p.company_location || p.enrich_note) && (
+            <p className="sub" style={{ marginTop: 8 }}>
+              {[p.company_industry, p.company_employees ? `${p.company_employees.toLocaleString('en-GB')} employees` : null, p.company_location].filter(Boolean).join(' · ')}
+              {p.company_linkedin && <> · <a href={p.company_linkedin} target="_blank" rel="noreferrer">Company LinkedIn</a></>}
+              {p.enrich_note && <> · Apollo: {p.enrich_note}{p.enriched_at ? ` (${fmtRelative(p.enriched_at)})` : ''}</>}
+            </p>
           )}
           {!data.apollo_configured && isAdmin && <p className="sub" style={{ marginTop: 8 }}>Apollo is not connected: add APOLLO_API_KEY to .env to search and reveal decision makers from here. Contacts can still be added by hand.</p>}
 
@@ -270,13 +277,23 @@ export default function BdPage() {
         </div>
         <div className="actions">
           <span className="badge muted" title="Most recent FastMoss pull">{data.last_pull_at ? `Pulled ${fmtRelative(data.last_pull_at)}` : 'No pull yet'}</span>
-          <span className={`badge ${data.apollo_configured ? 'good' : 'muted'}`}>{data.apollo_configured ? 'Apollo connected' : 'Apollo not connected'}</span>
+          {!data.apollo.configured
+            ? <span className="badge muted" title="Add APOLLO_API_KEY to .env and restart">Apollo not connected</span>
+            : data.apollo.exhausted
+              ? <span className="badge crit" title={data.apollo.error ?? 'Apollo refused a call for lack of credits'}>Apollo: out of credits</span>
+              : data.apollo.ok
+                ? <span className="badge good" title={`${data.apollo.used ?? 0} of ${data.apollo.limit ?? 0} used${data.apollo.cycle_end ? `, cycle resets ${data.apollo.cycle_end.slice(0, 10)}` : ''}. Checked ${fmtRelative(data.apollo.checked_at)}.`}>Apollo: {(data.apollo.remaining ?? 0).toLocaleString('en-GB')} credits left</span>
+                : <span className="badge warn" title={data.apollo.error ?? ''}>Apollo: {data.apollo.checked_at ? 'check failed' : 'checking…'}</span>}
+          {isAdmin && data.apollo.configured && <button className="small" disabled={busy === 'apollo'} onClick={() => run('apollo', async () => { const r = await api.apolloTest(); setNotice(r.healthy ? `Apollo key works. ${r.apollo.remaining?.toLocaleString('en-GB') ?? '?'} credits left${r.apollo.cycle_end ? `, cycle resets ${r.apollo.cycle_end.slice(0, 10)}` : ''}.` : `Apollo key rejected: ${r.health_error ?? r.apollo.error ?? 'unknown error'}`); return r; })} title="Check the key and refresh the credit balance (free)">{busy === 'apollo' ? 'Testing…' : 'Test Apollo'}</button>}
           {data.enrich.running && <span className="badge accent" title={data.enrich.current ?? ''}>Enriching {data.enrich.done}/{data.enrich.total}{data.enrich.current ? ` · ${data.enrich.current}` : ''}</span>}
           {!data.enrich.running && data.enrich.finished_at && <span className="badge muted" title={data.enrich.errors.join('\n')}>Last run: {data.enrich.matched}/{data.enrich.done} matched, {data.enrich.contacts} contacts, {data.enrich.revealed} revealed{data.enrich.errors.length ? `, ${data.enrich.errors.length} errors` : ''}</span>}
           {isAdmin && data.apollo_configured && <label className="field check" title="After every FastMoss pull or import, look up decision makers for the new prospects and reveal the top four, with nobody clicking"><input type="checkbox" checked={data.auto_enrich} onChange={(e) => run('auto', () => api.saveBdSettings({ auto_enrich: e.target.checked }), e.target.checked ? 'Auto-enrich on: new prospects get decision makers after each pull.' : 'Auto-enrich off.')} /> Auto-enrich new prospects</label>}
           {isAdmin && data.apollo_configured && (data.enrich.running
             ? <button onClick={() => run('enrich', api.stopEnrich, 'Stopping after the current prospect.')}>Stop</button>
-            : <button onClick={() => { const n = data.prospects.filter((p) => !p.is_client && p.status !== 'won' && p.status !== 'lost' && p.contacts.length === 0).length; if (n && window.confirm(`Find decision makers for ${n} prospects without contacts? Reveals the top 4 per company (about ${n * 4} Apollo credits at most). Runs in the background.`)) run('enrich', () => api.enrichAll(), `Enrichment started for ${n} prospects.`); }} disabled={busy === 'enrich'} title="Resolve each company in Apollo, pull its decision makers and reveal the top four">Find decision makers for all</button>)}
+            : <>
+              <button onClick={() => { const n = data.prospects.filter((p) => !p.is_client && p.status !== 'won' && p.status !== 'lost' && p.contacts.length === 0).length; if (!n) { setNotice('Every open prospect already has contacts. Use "Enrich deeper" for the ones without an email.'); return; } run('enrich', () => api.enrichAll({ mode: 'new' }), `Enrichment started for ${n} prospects (up to ${data.apollo.reveal_per_prospect} reveals each).`); }} disabled={busy === 'enrich' || data.apollo.exhausted} title={`Resolve each company in Apollo, pull its decision makers and reveal the top ${data.apollo.reveal_per_prospect}. No confirmation, credits are spent as needed.`}>Find decision makers for all</button>
+              <button onClick={() => { const n = data.prospects.filter((p) => !p.is_client && p.status !== 'won' && p.status !== 'lost' && p.contacts.length > 0 && !p.contacts.some((c) => c.email)).length; if (!n) { setNotice('No prospects with contacts but no email.'); return; } run('enrich', () => api.enrichAll({ mode: 'no_email' }), `Deeper pass started for ${n} prospects with no email yet.`); }} disabled={busy === 'enrich' || data.apollo.exhausted} title="Second pass on prospects that have contacts but no email yet: broader title search, local people first, more reveals">Enrich deeper</button>
+            </>)}
           {connected && <span className="badge muted">Live</span>}
           {data.bulk_draft.running && <span className="badge accent" title={data.bulk_draft.current ?? ''}>Drafting {data.bulk_draft.done}/{data.bulk_draft.total}{data.bulk_draft.current ? ` · ${data.bulk_draft.current}` : ''}</span>}
           {isAdmin && <button className={showBulk ? '' : 'primary'} onClick={() => { setShowBulk((s) => !s); setShowAdd(false); setShowImport(false); }} title="Draft one email per prospect to its most senior relevant decision maker and save them all into Gmail drafts">{showBulk ? 'Close' : 'Bulk emails to Gmail'}</button>}
@@ -286,6 +303,16 @@ export default function BdPage() {
       </div>
       {error && <div className="banner crit">{error}</div>}
       {notice && <div className="banner info">{notice}</div>}
+      {data.apollo.configured && data.apollo.exhausted && <div className="banner crit"><b>Apollo has run out of credits.</b> Enrichment and reveals are paused{data.apollo.exhausted_at ? ` since ${fmtRelative(data.apollo.exhausted_at)}` : ''}{data.apollo.cycle_end ? `; the cycle resets on ${data.apollo.cycle_end.slice(0, 10)}` : ''}. Top up in Apollo (Settings &gt; Plans) or wait for the reset; the balance is re-checked every 10 minutes and enrichment resumes on its own.{data.apollo.error ? ` Last error: ${data.apollo.error}` : ''}</div>}
+      {data.apollo.configured && !data.apollo.exhausted && data.apollo.ok && (data.apollo.remaining ?? 0) < 200 && <div className="banner info">Apollo credits are running low: {data.apollo.remaining?.toLocaleString('en-GB')} left{data.apollo.cycle_end ? `, cycle resets ${data.apollo.cycle_end.slice(0, 10)}` : ''}.</div>}
+      {data.enrich.stopped_reason === 'credits' && !data.enrich.running && <div className="banner crit">The last enrichment run stopped because Apollo ran out of credits ({data.enrich.done} of {data.enrich.total} done).</div>}
+      {isAdmin && data.apollo.configured && (
+        <div className="inline-form" style={{ marginBottom: 10 }}>
+          <label className="field" style={{ minWidth: 150 }}><span className="lbl">Reveal per prospect</span><input type="number" min={0} max={20} defaultValue={data.apollo.reveal_per_prospect} onBlur={(e) => Number(e.target.value) !== data.apollo.reveal_per_prospect && run('s', () => api.saveBdSettings({ reveal_per_prospect: Number(e.target.value) }))} /><span className="help">Emails revealed per company (1 credit each)</span></label>
+          <label className="field" style={{ minWidth: 150 }}><span className="lbl">Keep per prospect</span><input type="number" min={1} max={30} defaultValue={data.apollo.keep_per_prospect} onBlur={(e) => Number(e.target.value) !== data.apollo.keep_per_prospect && run('s', () => api.saveBdSettings({ keep_per_prospect: Number(e.target.value) }))} /><span className="help">People stored as contacts (free)</span></label>
+          <span className="sub" style={{ alignSelf: 'flex-end', paddingBottom: 6 }}>Auto-enrich runs after every FastMoss pull: new prospects first, then a deeper pass on prospects with no email. Credits are spent without asking; it pauses by itself when Apollo runs out.</span>
+        </div>
+      )}
 
       {isAdmin && showAdd && (
         <div className="card inline-form" style={{ marginBottom: 16 }}>

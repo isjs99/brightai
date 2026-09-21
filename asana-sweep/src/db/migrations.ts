@@ -1039,6 +1039,21 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 19,
+    name: 'prospect company details and enrichment bookkeeping',
+    up(db) {
+      db.exec(`
+        ALTER TABLE bd_prospects ADD COLUMN company_industry TEXT;
+        ALTER TABLE bd_prospects ADD COLUMN company_employees INTEGER;
+        ALTER TABLE bd_prospects ADD COLUMN company_linkedin TEXT;
+        ALTER TABLE bd_prospects ADD COLUMN company_location TEXT;
+        ALTER TABLE bd_prospects ADD COLUMN company_description TEXT;
+        ALTER TABLE bd_prospects ADD COLUMN enriched_at TEXT;
+        ALTER TABLE bd_prospects ADD COLUMN enrich_note TEXT;
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

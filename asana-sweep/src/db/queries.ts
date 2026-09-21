@@ -1051,6 +1051,13 @@ export class Queries {
       domain: (r.domain as string | null) ?? null,
       website: (r.website as string | null) ?? null,
       apollo_org_id: (r.apollo_org_id as string | null) ?? null,
+      company_industry: (r.company_industry as string | null) ?? null,
+      company_employees: r.company_employees === null || r.company_employees === undefined ? null : Number(r.company_employees),
+      company_linkedin: (r.company_linkedin as string | null) ?? null,
+      company_location: (r.company_location as string | null) ?? null,
+      company_description: (r.company_description as string | null) ?? null,
+      enriched_at: (r.enriched_at as string | null) ?? null,
+      enrich_note: (r.enrich_note as string | null) ?? null,
       status: (r.status as BdProspect['status']) ?? 'new',
       owner_id: (r.owner_id as number | null) ?? null,
       owner_name: (r.owner_name as string | null) ?? null,
@@ -1161,7 +1168,7 @@ export class Queries {
   patchProspect(id: number, patch: BdProspectPatch, actor?: string | null): BdProspect | null {
     const sets: string[] = [];
     const params: Record<string, unknown> = { id, now: new Date().toISOString() };
-    const simple: (keyof BdProspectPatch)[] = ['status', 'owner_id', 'notes', 'domain', 'website', 'launched_at', 'gmv_started_at', 'apollo_org_id'];
+    const simple: (keyof BdProspectPatch)[] = ['status', 'owner_id', 'notes', 'domain', 'website', 'launched_at', 'gmv_started_at', 'apollo_org_id', 'company_industry', 'company_employees', 'company_linkedin', 'company_location', 'company_description', 'enriched_at', 'enrich_note'];
     for (const k of simple) {
       if (patch[k] !== undefined) {
         sets.push(`${k} = @${k}`);

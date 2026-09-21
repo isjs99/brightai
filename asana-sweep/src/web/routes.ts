@@ -21,7 +21,8 @@ import type { LeadsData, PersonInput, ReminderSettings } from '../sweep/types.js
 import { importLeadsCsv, leadsSettings, leadsSyncStatus, syncLeads } from '../leads/sync.js';
 import { amSummary } from '../leads/points.js';
 import { apollo } from '../bd/apollo.js';
-import { enrichProspect } from '../bd/enrich.js';
+import { apolloStatus, enrichProspect, markApolloExhausted, refreshApolloCredits } from '../bd/enrich.js';
+import { isCreditsError } from '../bd/apollo.js';
 import { advanceLinkedin, LINKEDIN_STEPS, suggestTtsContact } from '../bd/sequence.js';
 import { scanEnterpriseAlerts, syncWatchlistFromSheet } from '../bd/alerts.js';
 import { draftCallFollowups, tldv } from '../bd/tldv.js';
@@ -1133,6 +1134,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
         gmv_started_30d: prospects.filter((p) => p.gmv_started_30d).length,
       },
       enrich: enrichJob.state,
+      apollo: apolloStatus(q),
       bulk_draft: scheduler.bulkDrafts.state,
       auto_enrich: q.getSetting('apollo_auto_enrich', '1') === '1',
     };
@@ -1228,11 +1230,14 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const prospect = q.getProspect(idParam(req));
     if (!prospect) throw new HttpError(404, 'Prospect not found');
     const body = (req.body ?? {}) as { domain?: string; reveal?: number };
+    if (apolloStatus(q).exhausted) throw new HttpError(402, 'Apollo has run out of credits for this cycle. Enrichment resumes when the balance is back.');
     try {
       const r = await enrichProspect(q, prospect.id, { domain: optText(body.domain), reveal: Number.isFinite(Number(body.reveal)) ? Number(body.reveal) : undefined });
       liveEvents.emitUpdate({ kind: 'bd' });
+      void refreshApolloCredits(q);
       res.json({ ...r, prospect: q.getProspect(prospect.id), ...bdData() });
     } catch (err) {
+      if (isCreditsError(err)) { markApolloExhausted(q); liveEvents.emitUpdate({ kind: 'bd' }); throw new HttpError(402, `Apollo ran out of credits: ${(err as Error).message}`); }
       throw new HttpError(502, (err as Error).message);
     }
   });
@@ -1240,18 +1245,37 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   /** Background job: decision makers for every prospect that has none yet. */
   r.post('/bd/enrich-all', (req, res) => {
     if (!apollo.configured) throw new HttpError(400, 'Set APOLLO_API_KEY in .env first.');
-    const body = (req.body ?? {}) as { reveal?: number; ids?: number[] };
-    const state = enrichJob.start({ reveal: Number.isFinite(Number(body.reveal)) ? Number(body.reveal) : undefined, ids: Array.isArray(body.ids) ? body.ids.map(Number).filter(Number.isFinite) : undefined });
-    res.status(202).json({ ...bdData(), enrich: state, candidates: enrichJob.candidates().length });
+    const body = (req.body ?? {}) as { reveal?: number; ids?: number[]; mode?: string };
+    if (apolloStatus(q).exhausted) throw new HttpError(402, 'Apollo has run out of credits for this cycle. Enrichment resumes when the balance is back.');
+    const mode = body.mode === 'no_email' || body.mode === 'all' ? body.mode : 'new';
+    const state = enrichJob.start({ reveal: Number.isFinite(Number(body.reveal)) ? Number(body.reveal) : undefined, ids: Array.isArray(body.ids) ? body.ids.map(Number).filter(Number.isFinite) : undefined, mode });
+    res.status(202).json({ ...bdData(), enrich: state, candidates: enrichJob.candidates(mode).length });
   });
 
   r.put('/bd/settings', (req, res) => {
-    const b = (req.body ?? {}) as { auto_enrich?: unknown };
+    const b = (req.body ?? {}) as { auto_enrich?: unknown; reveal_per_prospect?: unknown; keep_per_prospect?: unknown };
     if (typeof b.auto_enrich === 'boolean') {
       q.setSetting('apollo_auto_enrich', b.auto_enrich ? '1' : '0');
       if (b.auto_enrich) scheduler.autoEnrich();
     }
+    if (b.reveal_per_prospect !== undefined) { const n = Number(b.reveal_per_prospect); if (!Number.isInteger(n) || n < 0 || n > 20) throw new HttpError(400, 'Reveal per prospect must be 0 to 20.'); q.setSetting('apollo_reveal_per_prospect', String(n)); }
+    if (b.keep_per_prospect !== undefined) { const n = Number(b.keep_per_prospect); if (!Number.isInteger(n) || n < 1 || n > 30) throw new HttpError(400, 'Keep per prospect must be 1 to 30.'); q.setSetting('apollo_keep_per_prospect', String(n)); }
     res.json(bdData());
+  });
+
+  /** Check the Apollo key and refresh the credit balance (both free calls). */
+  r.post('/bd/apollo/test', async (_req, res) => {
+    if (!apollo.configured) throw new HttpError(400, 'APOLLO_API_KEY is not set in .env.');
+    let healthy = false;
+    let healthError: string | null = null;
+    try { healthy = await apollo.health(); } catch (err) { healthError = (err as Error).message; }
+    const status = await refreshApolloCredits(q);
+    res.json({ healthy, health_error: healthError, ...bdData(), apollo: status });
+  });
+
+  r.post('/bd/apollo/refresh', async (_req, res) => {
+    const status = await refreshApolloCredits(q);
+    res.json({ ...bdData(), apollo: status });
   });
 
   r.post('/bd/enrich-all/stop', (_req, res) => {
@@ -1269,8 +1293,10 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
       if (!p) return res.status(404).json({ error: 'Apollo has no match for this person.' });
       q.updateContact(contact.id, { name: p.name, title: p.title, email: p.email, linkedin_url: p.linkedin_url, phone: p.phone, apollo_id: p.id, enriched: true, notes: p.email_status ? `Email status: ${p.email_status}` : null });
       liveEvents.emitUpdate({ kind: 'bd' });
+      void refreshApolloCredits(q);
       res.json({ contact: q.getContact(contact.id), prospect: q.getProspect(prospect.id), ...bdData() });
     } catch (err) {
+      if (isCreditsError(err)) { markApolloExhausted(q); liveEvents.emitUpdate({ kind: 'bd' }); throw new HttpError(402, `Apollo ran out of credits: ${(err as Error).message}`); }
       throw new HttpError(502, (err as Error).message);
     }
   });

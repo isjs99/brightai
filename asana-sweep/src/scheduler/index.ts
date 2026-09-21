@@ -8,7 +8,7 @@ import { syncGmv } from '../gmv/sync.js';
 import { LeadsWatcher } from '../leads/sync.js';
 import { InboxWatcher } from '../inbox/sync.js';
 import { importPullFiles } from '../bd/import.js';
-import { EnrichJob } from '../bd/enrich.js';
+import { apolloStatus, EnrichJob, refreshApolloCredits } from '../bd/enrich.js';
 import { AccountMonitor } from '../monitor/index.js';
 import { draftCallFollowups, tldv } from '../bd/tldv.js';
 import { scanEnterpriseAlerts } from '../bd/alerts.js';
@@ -48,6 +48,7 @@ export class Scheduler {
   readonly playbook: PlaybookEngine;
   readonly copilot: Copilot;
   private tldvTask: ScheduledTask | null = null;
+  private apolloTask: ScheduledTask | null = null;
   private followupTask: ScheduledTask | null = null;
 
   constructor(private q: Queries) {
@@ -81,8 +82,11 @@ export class Scheduler {
     // New FastMoss pulls dropped into data/bd-pulls: import at start and every morning.
     importPullFiles(this.q);
     this.q.markExistingClients();
+    this.refreshApollo();
     this.autoEnrich();
     scanEnterpriseAlerts(this.q);
+    // Apollo credits: refresh every 10 minutes so the BD page shows a live balance and enrichment resumes when credits return.
+    this.apolloTask = cron.schedule('*/10 * * * *', () => this.refreshApollo());
     this.pullsTask = cron.schedule('0 6 * * *', () => { importPullFiles(this.q); this.q.markExistingClients(); this.autoEnrich(); scanEnterpriseAlerts(this.q); }, { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Account monitor: rolling scan of every account for the flags the team otherwise catches by hand.
     this.monitor.start();
@@ -98,13 +102,20 @@ export class Scheduler {
     log.info(`Scheduler started with ${this.tasks.size} active rule(s)`);
   }
 
-  /** Apollo decision makers for every prospect that has none, with no one clicking: needs APOLLO_API_KEY and the switch on. */
+  /** Apollo decision makers for every prospect that has none (and a deeper pass on those with no email yet), with no one clicking: needs APOLLO_API_KEY and the switch on. Pauses while Apollo is out of credits. */
   autoEnrich(): void {
     if (!apollo.configured || this.q.getSetting('apollo_auto_enrich', '1') !== '1' || this.enrich.state.running) return;
-    const n = this.enrich.candidates().length;
+    if (apolloStatus(this.q).exhausted) { log.warn('Auto-enrich skipped: Apollo credits are exhausted'); return; }
+    const n = this.enrich.candidates('all').length;
     if (!n) return;
-    log.info(`Auto-enriching ${n} prospect(s) without contacts via Apollo`);
-    this.enrich.start();
+    log.info(`Auto-enriching ${n} prospect(s) via Apollo (new and no-email)`);
+    this.enrich.start({ mode: 'all' });
+  }
+
+  /** Keep the Apollo credit balance fresh for the BD page (free call); also clears the exhausted flag when credits come back, then resumes auto-enrich. */
+  refreshApollo(): void {
+    if (!apollo.configured) return;
+    void refreshApolloCredits(this.q).then((s) => { if (!s.exhausted) this.autoEnrich(); }).catch((err) => log.warn(`Apollo credit check failed: ${(err as Error).message}`));
   }
 
   /** tl;dv call follow-ups, when the key is set, Claude is configured and the switch is on. */
@@ -208,6 +219,10 @@ export class Scheduler {
     this.inbox.stop();
     this.stock.stop();
     this.copilot.stop();
+    this.apolloTask?.destroy();
+    this.apolloTask = null;
+    this.tldvTask?.destroy();
+    this.followupTask?.destroy();
     this.monitor.stop();
     this.pullsTask?.destroy();
     this.pullsTask = null;

@@ -669,6 +669,14 @@ export interface BdProspect {
   domain: string | null;
   website: string | null;
   apollo_org_id: string | null;
+  company_industry: string | null;
+  company_employees: number | null;
+  company_linkedin: string | null;
+  company_location: string | null;
+  company_description: string | null;
+  /** Last Apollo enrichment pass (new prospects and no-email prospects are revisited from this). */
+  enriched_at: string | null;
+  enrich_note: string | null;
   status: BdStatus;
   owner_id: number | null;
   owner_name: string | null;
@@ -898,6 +906,7 @@ export interface BdData {
   last_pull_at: string | null;
   totals: { prospects: number; complete: number; won: number; with_contacts: number; new_30d: number; gmv_started_30d: number };
   enrich: BdEnrichStatus;
+  apollo: ApolloStatus;
   /** Enrich new prospects with Apollo automatically after every pull or import. */
   auto_enrich: boolean;
   bulk_draft: BulkDraftStatus;
@@ -930,6 +939,27 @@ export interface BdEnrichStatus {
   errors: string[];
   started_at: string | null;
   finished_at: string | null;
+  /** Which prospects this run visits: new (no contacts), no_email (contacts but nobody with an email), or all. */
+  mode: 'new' | 'no_email' | 'all';
+  /** Why the run stopped early, if it did. */
+  stopped_reason: 'credits' | 'stopped' | null;
+}
+
+/** Apollo connection and credit balance, refreshed every few minutes and after every enrichment. */
+export interface ApolloStatus {
+  configured: boolean;
+  ok: boolean;
+  error: string | null;
+  remaining: number | null;
+  limit: number | null;
+  used: number | null;
+  cycle_end: string | null;
+  checked_at: string | null;
+  /** Apollo refused a call for lack of credits (or the balance is zero); enrichment pauses until the balance comes back. */
+  exhausted: boolean;
+  exhausted_at: string | null;
+  reveal_per_prospect: number;
+  keep_per_prospect: number;
 }
 
 export interface BdProspectInput {
@@ -972,6 +1002,13 @@ export interface BdProspectPatch {
   outreach_note?: string | null;
   outreach_contact?: string | null;
   apollo_org_id?: string | null;
+  company_industry?: string | null;
+  company_employees?: number | null;
+  company_linkedin?: string | null;
+  company_location?: string | null;
+  company_description?: string | null;
+  enriched_at?: string | null;
+  enrich_note?: string | null;
 }
 
 // ---- CS & affiliate inbox, context library, auto-reply ----
