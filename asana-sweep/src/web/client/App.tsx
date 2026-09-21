@@ -27,27 +27,26 @@ type Theme = 'system' | 'light' | 'dark';
 function readTheme(): Theme {
   try {
     const t = localStorage.getItem('theme');
-    return t === 'light' || t === 'dark' ? t : 'system';
+    return t === 'system' || t === 'dark' ? t : 'light';
   } catch {
-    return 'system';
+    return 'light';
   }
 }
 
 function applyTheme(t: Theme) {
-  if (t === 'system') document.documentElement.removeAttribute('data-theme');
-  else document.documentElement.setAttribute('data-theme', t);
+  document.documentElement.setAttribute('data-theme', t);
   try {
-    if (t === 'system') localStorage.removeItem('theme');
+    if (t === 'light') localStorage.removeItem('theme');
     else localStorage.setItem('theme', t);
   } catch {
     /* private mode or blocked storage: the choice just does not persist */
   }
 }
 
-/** System → Light → Dark cycle. Stored per browser. */
+/** Light (the default, like the website) → Dark → Auto (follow the OS). Stored per browser. */
 function ThemeToggle() {
   const [theme, setTheme] = useState<Theme>(readTheme);
-  const next: Record<Theme, Theme> = { system: 'light', light: 'dark', dark: 'system' };
+  const next: Record<Theme, Theme> = { light: 'dark', dark: 'system', system: 'light' };
   const label: Record<Theme, string> = { system: 'Auto', light: 'Light', dark: 'Dark' };
   const icon: Record<Theme, string> = { system: '◐', light: '○', dark: '●' };
   const change = () => {

@@ -84,6 +84,22 @@ describe('evaluateChecklist', () => {
     expect(r.status).toBe('partial');
   });
 
+  it('a check with open action items stays pending even when its own box is ticked', () => {
+    const cs = item({ name: 'CS - AM daily checks' });
+    const s1 = item({ name: 'Reply to DE return', parent_id: cs.id, role: 'aa' });
+    const s2 = item({ name: 'Escalate FR case', parent_id: cs.id, role: 'aa' });
+    const half = evaluateChecklist([cs, s1, s2], [tick(cs.id), tick(s1.id, DAY, 'DM')], opts);
+    expect(half.items[0].state).toBe('pending');
+    expect(half.items[0].completed_at).not.toBeNull(); // the AM's box is ticked
+    expect(half.am_done).toBe(0);
+    expect(half.am_complete).toBe(false);
+    expect(half.status).toBe('partial');
+    const all = evaluateChecklist([cs, s1, s2], [tick(cs.id), tick(s1.id, DAY, 'DM'), tick(s2.id, DAY, 'DM')], opts);
+    expect(all.items[0].state).toBe('done');
+    expect(all.status).toBe('complete');
+    expect(all.combined_complete).toBe(true);
+  });
+
   it('reports AM complete and AA incomplete separately', () => {
     const a = item({ name: 'Orders' });
     const x = item({ name: 'Affiliate', role: 'aa' });

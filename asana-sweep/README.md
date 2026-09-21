@@ -8,7 +8,7 @@ Every account is checked against a checklist every workday. The checklist is nat
 
 - **Template**: the 14 sections the Asana boards carried (Homepage, Orders, Growth, LIVE & video, Affiliate daily and weekly, CS / Returns / Aftercare, Products, Finance, Cruva, Logistics, Analytics, Marketing, Account health), each with the AM's daily check and the guidance underneath, plus the AA action items. Every account follows the template unless it has its own list.
 - **Per-account lists**: "Give it its own list" on the Checklist items page copies the template for that account; lines can then be added, edited, reordered or switched off for that account alone. "Back to the template" drops the copy.
-- **Roles**: every line is AM or AA. Top-level checks default to AM, action items to AA; the Affiliate lines are AA work. AM, AA and combined completion are reported separately; an account is complete when both are.
+- **Roles**: every line is AM or AA. Top-level checks default to AM, action items to AA; the Affiliate lines are AA work. AM, AA and combined completion are reported separately. A check counts as done only when its own box and every action item under it are ticked (a ticked check with open action items shows "Waiting on AA"), and an account is complete only when every box is ticked.
 - **Frequency**: every workday, or weekly on a chosen weekday. Weekly lines only show up (and only count) on their day.
 - **Ticking**: on Checklists, expand an account and tick. Ticks record who (the "You are" pick top right) and when, update the live status for everyone over SSE, and feed the Calendar, Analytics and Grades. "Tick all AM lines", "Tick all AA actions", "Tick everything" and "Clear day" do the whole account at once. Account managers signed in with the view-only password can tick; everything else stays admin only. Admins can correct past days from the date picker.
 
@@ -63,7 +63,7 @@ The Checklists page always shows the live picture. Once a day (weekdays 16:00 Ma
 
 - **AM** = the account manager's lines.
 - **AA** = the action items underneath and any line marked AA.
-- An account is **complete** when both AM and AA are complete. AM and AA are also shown separately.
+- An account is **complete** only when every box is ticked, AM and AA. A check with open action items stays pending even when its own box is ticked. AM and AA are also shown separately.
 - Weekly lines only count on the day they are due.
 
 Screens:
@@ -108,6 +108,10 @@ Analytics page, top section. Each account and AM gets a score out of 100 and a l
 - score = checklist weight × compliance + (100 − weight) × GMV attainment, with attainment capped at 100. Default weight 50/50, adjustable on the page.
 - A 90+, B 80+, C 70+, D 60+, F below.
 - During the running month GMV attainment uses the projected month-end figure so mid-month grades are fair. If an account has no target, it is graded on checklist alone.
+
+## Look and feel
+
+The dashboard follows brightform.agency: white canvas, near-black type, Archivo Black uppercase headings, Manrope body text, black pill buttons, rounded cards with hairline borders and electric blue as the one accent. Light is the default; the toggle top right switches to dark or follows the OS.
 
 ## Roles
 

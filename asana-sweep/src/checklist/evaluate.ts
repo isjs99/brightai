@@ -2,7 +2,8 @@
 //
 // For one account on one day:
 //   - Every enabled top-level item that is due on the date (daily items on workdays, weekly items on
-//     their weekday) is one checklist line; it is DONE when a tick exists for that date, else PENDING.
+//     their weekday) is one checklist line; it is DONE when its own box and every one of its due action
+//     items are ticked for that date, else PENDING. Every box has to be ticked for a list to be done.
 //   - Items not due today are reported as NOT_DUE and do not count.
 //   - Action items (children) are evaluated the same way underneath their parent; a child is only
 //     shown when it is due (or was ticked) on the date.
@@ -107,15 +108,17 @@ export function evaluateChecklist(items: ChecklistItem[], ticks: ChecklistTick[]
   for (const item of enabled.filter((i) => i.parent_id === null).sort(byPos)) {
     const tick = tickByItem.get(item.id);
     const due = isDue(item, opts.checkDate);
-    const state: ItemState = tick ? 'done' : due ? 'pending' : 'not_due';
     const subtasks: SubtaskResult[] = [];
-    if (state !== 'not_due') {
+    if (tick || due) {
       for (const child of (children.get(item.id) ?? []).sort(byPos)) {
         const ct = tickByItem.get(child.id);
         if (!ct && !isDue(child, opts.checkDate)) continue;
         subtasks.push({ name: child.name, task_gid: String(child.id), role: child.role, done: Boolean(ct), frequency: child.frequency, assignee_name: nameFor(child.role, ct), completed_at: ct?.done_at ?? null });
       }
     }
+    // Every box counts: the check is done only when its own box and all of its action items are ticked.
+    // A ticked check with open action items stays pending (completed_at says the AM's box is ticked).
+    const state: ItemState = tick && subtasks.every((st) => st.done) ? 'done' : tick || due ? 'pending' : 'not_due';
     results.push({
       name: item.name,
       state,

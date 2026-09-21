@@ -49,7 +49,9 @@ function TickList({ accountId, check, date, editable, onChange }: { accountId: n
   };
   const due = check.items.filter((i) => i.state !== 'not_due');
   const later = check.items.filter((i) => i.state === 'not_due');
-  const stateLabel: Record<string, string> = { done: 'Done', pending: 'To do', not_due: 'Not today', stale: 'Old' };
+  const label = (it: CheckItem) => (it.state === 'done' ? 'Done' : it.state === 'pending' && it.completed_at ? 'Waiting on AA' : it.state === 'pending' ? 'To do' : 'Not today');
+  const total = check.am_total + check.aa_total;
+  const ticked = check.am_done + check.aa_done;
   const box = (id: string, done: boolean, label: React.ReactNode, sub?: React.ReactNode) => (
     <label className={`tick ${done ? 'on' : ''}`}>
       <input type="checkbox" checked={done} disabled={!editable || busy !== null} onChange={(e) => toggle(id, e.target.checked)} />
@@ -60,6 +62,9 @@ function TickList({ accountId, check, date, editable, onChange }: { accountId: n
     <div className="ticklist">
       {error && <div className="banner crit">{error}</div>}
       {check.error_message && <div className="banner crit">{check.error_message}</div>}
+      {due.length > 0 && (check.combined_complete
+        ? <div className="banner good" style={{ marginBottom: 8 }}><b>List done.</b> Every box is ticked, AM and AA.</div>
+        : <p className="sub" style={{ margin: '0 0 8px' }}>{ticked} of {total} boxes ticked. The list is done when every box is ticked, the AM checks and the AA action items underneath.</p>)}
       {editable && due.length > 0 && (
         <div className="actions" style={{ marginBottom: 8 }}>
           <button className="small" disabled={busy !== null} onClick={() => all(true, 'am')}>Tick all AM lines</button>
@@ -72,9 +77,9 @@ function TickList({ accountId, check, date, editable, onChange }: { accountId: n
         <ul className="item-list">
           {due.map((it: CheckItem) => (
             <li key={it.task_gid}>
-              <span className={`badge ${it.state === 'done' ? 'good' : 'crit'}`}>{stateLabel[it.state]}</span>
+              <span className={`badge ${it.state === 'done' ? 'good' : it.completed_at ? 'warn' : 'crit'}`}>{label(it)}</span>
               <div>
-                {box(it.task_gid, it.state === 'done', <b>{it.name}</b>, <span className="sub"> · {it.role.toUpperCase()}{it.section_name ? ` · ${it.section_name}` : ''}{it.frequency === 'weekly' ? ' · weekly' : ''}{it.completed_at ? ` · ${it.assignee_name ?? 'someone'} ${fmtRelative(it.completed_at)}` : ''}</span>)}
+                {box(it.task_gid, Boolean(it.completed_at), <b>{it.name}</b>, <span className="sub"> · {it.role.toUpperCase()}{it.section_name ? ` · ${it.section_name}` : ''}{it.frequency === 'weekly' ? ' · weekly' : ''}{it.completed_at ? ` · ${it.assignee_name ?? 'someone'} ${fmtRelative(it.completed_at)}` : ''}</span>)}
                 {it.guidance && <div className="guidance">{it.guidance}</div>}
                 {it.subtasks.length > 0 && (
                   <ul>
@@ -238,7 +243,7 @@ export default function Checklists() {
         </table>
       )}
       <p className="hint" style={{ marginTop: 12 }}>
-        AM = the account manager's daily checks. AA = the action items underneath (and the Affiliate lines). An account is complete when both are. Weekly lines only appear on their day. Past days can be corrected by an admin.
+        AM = the account manager's daily checks. AA = the action items underneath (and the Affiliate lines). A check is done only when its box and every action item under it are ticked, and an account is complete when every box is. Weekly lines only appear on their day. Past days can be corrected by an admin.
       </p>
     </>
   );

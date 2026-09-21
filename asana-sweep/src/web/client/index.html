@@ -4,16 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Brightform AM Ops</title>
-    <meta name="theme-color" content="#000000" />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Archivo+Black&family=JetBrains+Mono:wght@400;500&display=swap" />
+    <meta name="theme-color" content="#ffffff" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" />
   </head>
   <body>
     <script>
-      // Apply the saved theme before first paint so there is no flash. "system" leaves it to the OS.
-      try {
-        var t = localStorage.getItem('theme');
-        if (t === 'light' || t === 'dark') document.documentElement.setAttribute('data-theme', t);
-      } catch (e) {}
+      // Apply the saved theme before first paint so there is no flash. Light is the default, like the website;
+      // "system" follows the OS, "dark" forces dark.
+      var t = 'light';
+      try { var s = localStorage.getItem('theme'); if (s === 'dark' || s === 'system') t = s; } catch (e) {}
+      document.documentElement.setAttribute('data-theme', t);
     </script>
     <div id="root"></div>
     <script type="module" src="/main.tsx"></script>

@@ -51,10 +51,11 @@ describe('native checklist', () => {
     // Tick every AM line.
     for (const i of dueTop.filter((x) => x.role === 'am')) q.setTick(a.id, i.id, date, true, 'Elena');
     const mid = checkAccount(q, a, { trigger: 'live', tz: TZ, date });
-    expect(mid.am_complete).toBe(true); // the AM's own lines are done
     expect(mid.aa_complete).toBe(false); // the AA action items underneath are still open
+    expect(mid.am_complete).toBe(false); // and a check only counts once its action items are ticked too
     expect(mid.status).toBe('partial');
-    expect(mid.am_done).toBe(dueTop.filter((x) => x.role === 'am').length);
+    expect(mid.am_done).toBeGreaterThan(0); // the checks without action items (Homepage, Orders, Growth, LIVE)
+    expect(mid.am_done).toBeLessThan(dueTop.filter((x) => x.role === 'am').length);
     // Tick everything else that is due.
     for (const i of q.checklistItemsFor(a.id).filter((x) => x.enabled && isDue(x, date))) q.setTick(a.id, i.id, date, true, 'DM');
     const done = checkAccount(q, a, { trigger: 'live', tz: TZ, date });
