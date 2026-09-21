@@ -4,11 +4,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Queries } from '../db/queries.js';
 import { Scheduler } from '../scheduler/index.js';
-import { LiveWatcher } from '../live/index.js';
 import { SharedPasswordAuth } from './auth.js';
 import { buildRouter } from './routes.js';
 
-export function createApp(q: Queries, scheduler: Scheduler, live: LiveWatcher) {
+export function createApp(q: Queries, scheduler: Scheduler) {
   const app = express();
   app.disable('x-powered-by');
   // Hosted behind a reverse proxy (Railway, Fly, nginx): trust it for client IPs and https detection.
@@ -22,7 +21,7 @@ export function createApp(q: Queries, scheduler: Scheduler, live: LiveWatcher) {
   });
 
   const auth = new SharedPasswordAuth();
-  app.use('/api', buildRouter(q, scheduler, auth, live));
+  app.use('/api', buildRouter(q, scheduler, auth));
 
   // Built front end (dist/client). In dev, Vite serves the client on :5173 and proxies /api here.
   const here = dirname(fileURLToPath(import.meta.url));

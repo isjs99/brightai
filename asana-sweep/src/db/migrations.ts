@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import { SEED_CONTACTS, SEED_DOMAINS, SEED_PULLED_AT, SEED_SHOPS } from '../bd/seed.js';
 import { SEED_ENRICHED } from '../bd/seed-enriched.js';
 import { SEED_TTS_CONTACTS } from '../bd/seed-tts.js';
+import { CHECKLIST_TEMPLATE } from '../checklist/template.js';
 import { SEED_WATCHLIST } from '../bd/watchlist.js';
 import { SEED_BOOKING_URL, SEED_EXAMPLES, SEED_PITCH, SEED_SENDER_NAME, SEED_SENDER_TITLE, SEED_SENT_QUERY } from '../bd/voice.js';
 
@@ -1066,6 +1067,59 @@ const migrations: Migration[] = [
       for (const c of SEED_TTS_CONTACTS) {
         if (byName.get(c.name, c.market) || (c.email && byEmail.get(c.email, c.market))) continue;
         ins.run(c.market, c.category, c.name, c.role, c.lark, c.email, c.notes, c.is_agency_manager ? 1 : 0);
+      }
+    },
+  },
+  {
+    version: 21,
+    name: 'native AM checklist: items and ticks live here, Asana sweep tables dropped',
+    up(db) {
+      db.exec(`
+        CREATE TABLE checklist_items (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          account_id INTEGER REFERENCES accounts(id) ON DELETE CASCADE,
+          parent_id INTEGER REFERENCES checklist_items(id) ON DELETE CASCADE,
+          section TEXT NOT NULL DEFAULT '',
+          name TEXT NOT NULL,
+          guidance TEXT,
+          role TEXT NOT NULL DEFAULT 'am',
+          frequency TEXT NOT NULL DEFAULT 'daily',
+          weekday INTEGER,
+          position INTEGER NOT NULL DEFAULT 0,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+        CREATE INDEX checklist_items_account ON checklist_items(account_id, parent_id, position);
+
+        CREATE TABLE checklist_ticks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          item_id INTEGER NOT NULL REFERENCES checklist_items(id) ON DELETE CASCADE,
+          account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          tick_date TEXT NOT NULL,
+          done_by TEXT,
+          done_at TEXT NOT NULL,
+          note TEXT,
+          UNIQUE(item_id, account_id, tick_date)
+        );
+        CREATE INDEX checklist_ticks_day ON checklist_ticks(account_id, tick_date);
+
+        DROP TABLE IF EXISTS run_items;
+        DROP TABLE IF EXISTS runs;
+        DROP TABLE IF EXISTS rules;
+        DROP TABLE IF EXISTS completions;
+        DELETE FROM settings WHERE key IN ('live_enabled', 'live_interval_seconds', 'live_sweep_enabled');
+      `);
+      // The master template: what every board in Asana carried, now the default list for every account.
+      const ins = db.prepare(`INSERT INTO checklist_items (account_id, parent_id, section, name, guidance, role, frequency, weekday, position) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      let pos = 0;
+      for (const item of CHECKLIST_TEMPLATE) {
+        const parent = Number(ins.run(null, item.section, item.name, item.guidance, item.role, item.frequency, item.frequency === 'weekly' ? item.weekday ?? 1 : null, pos++).lastInsertRowid);
+        let sub = 0;
+        for (const st of item.subtasks) {
+          const freq = st.frequency ?? 'daily';
+          ins.run(parent, item.section, st.name, null, st.role ?? 'aa', freq, freq === 'weekly' ? st.weekday ?? 1 : null, sub++);
+        }
       }
     },
   },

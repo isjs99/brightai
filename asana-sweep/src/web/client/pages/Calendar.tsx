@@ -45,7 +45,7 @@ export default function CalendarPage() {
     <>
       {rows.map((r) => (
         <tr key={r.account.id} className="sub-row">
-          <td className="sub" style={{ paddingLeft: 24 }}>{r.account.name}{!r.account.asana_project_gid && <span className="badge muted" style={{ marginLeft: 6 }}>not linked</span>}</td>
+          <td className="sub" style={{ paddingLeft: 24 }}>{r.account.name}</td>
           {r.cells.map((c) => <Cell key={c.date} c={c} today={today} />)}
           <td className="num">{r.complete_days}/{r.checked_days}</td>
           <td className="num">{r.missed ? <span className="frac bad">{r.missed}</span> : <span className="sub">0</span>}</td>

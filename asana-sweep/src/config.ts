@@ -32,7 +32,6 @@ function required(name: string): string {
 }
 
 export const config = {
-  asanaPat: process.env.ASANA_PAT?.trim() ?? '',
   dashboardPassword: required('DASHBOARD_PASSWORD'),
   /** Optional second password that signs in with the read-only "account manager" role. */
   amPassword: process.env.AM_PASSWORD?.trim() ?? '',
@@ -52,5 +51,4 @@ export const config = {
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET?.trim() ?? '',
   /** Bearer token that lets an external job (e.g. a scheduled Claude routine) POST fresh FastMoss pulls to /api/bd/import. */
   ingestToken: process.env.INGEST_TOKEN?.trim() ?? '',
-  asanaBaseUrl: (process.env.ASANA_BASE_URL?.trim() || 'https://app.asana.com/api/1.0').replace(/\/+$/, ''),
 };

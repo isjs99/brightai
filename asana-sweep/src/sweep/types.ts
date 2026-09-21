@@ -1,85 +1,39 @@
 // Shared between server and client. Keep this file free of Node-only imports.
 
-export type RunItemAction =
-  | 'deleted'
-  | 'would_delete'
-  | 'delete_failed'
-  | 'skipped_no_twin'
-  | 'skipped_too_recent'
-  | 'skipped_section_mismatch';
+// ---- Native AM checklist (items live in this app; ticks are recorded per account and day) ----
 
-export type RunStatus = 'running' | 'ok' | 'error' | 'dry_run';
+export type ChecklistRole = 'am' | 'aa';
+export type ChecklistFrequency = 'daily' | 'weekly';
 
-export interface Rule {
+/** One line of the checklist. account_id null = the master template every account uses unless it has its own rows. */
+export interface ChecklistItem {
   id: number;
+  account_id: number | null;
+  parent_id: number | null;
+  section: string;
   name: string;
-  asana_project_gid: string;
-  asana_project_name: string;
+  /** What to look at, shown under the item. */
+  guidance: string | null;
+  role: ChecklistRole;
+  frequency: ChecklistFrequency;
+  /** For weekly items: 1 = Monday … 5 = Friday. */
+  weekday: number | null;
+  position: number;
   enabled: boolean;
-  cron: string;
-  timezone: string;
-  dry_run: boolean;
-  min_age_hours: number;
-  require_section_match: boolean;
-  max_deletes_per_run: number;
-  notify_slack_webhook: string | null;
   created_at: string;
   updated_at: string;
 }
 
-export type RuleInput = Omit<Rule, 'id' | 'created_at' | 'updated_at'>;
+export type ChecklistItemInput = Pick<ChecklistItem, 'account_id' | 'parent_id' | 'section' | 'name' | 'guidance' | 'role' | 'frequency' | 'weekday' | 'position' | 'enabled'>;
 
-export interface Run {
+export interface ChecklistTick {
   id: number;
-  rule_id: number;
-  started_at: string;
-  finished_at: string | null;
-  status: RunStatus;
-  trigger: 'schedule' | 'manual' | 'live';
-  dry_run: boolean;
-  scanned_count: number;
-  matched_count: number;
-  deleted_count: number;
-  error_message: string | null;
-  warnings: string[];
-}
-
-export interface RunItem {
-  id: number;
-  run_id: number;
-  task_gid: string;
-  task_name: string;
-  section_name: string | null;
-  completed_at: string | null;
-  num_subtasks: number;
-  action: RunItemAction;
-  reason: string;
-}
-
-export interface RuleSummary extends Rule {
-  schedule_text: string;
-  next_run_at: string | null;
-  last_run: Pick<Run, 'id' | 'status' | 'started_at' | 'finished_at' | 'scanned_count' | 'matched_count' | 'deleted_count' | 'error_message'> | null;
-  is_running: boolean;
-}
-
-export interface PreviewItem {
-  task_gid: string;
-  task_name: string;
-  section_name: string | null;
-  completed_at: string | null;
-  num_subtasks: number;
-  action: RunItemAction;
-  reason: string;
-}
-
-export interface PreviewResult {
-  project_name: string;
-  scanned_count: number;
-  matched_count: number;
-  cap_exceeded: boolean;
-  warnings: string[];
-  items: PreviewItem[];
+  item_id: number;
+  account_id: number;
+  tick_date: string;
+  done_by: string | null;
+  done_at: string;
+  note: string | null;
 }
 
 // ---- Checklist completion tracking ----
@@ -90,8 +44,6 @@ export interface Account {
   markets: string | null;
   am_name: string | null;
   aa_name: string | null;
-  asana_project_gid: string | null;
-  asana_project_name: string;
   enabled: boolean;
   notes: string | null;
   /** Agency commission on the base amount, in percent. Null = no deal recorded. */
@@ -118,13 +70,16 @@ export interface CheckItem {
   name: string;
   state: 'done' | 'pending' | 'not_due' | 'stale';
   role: 'am' | 'aa';
+  /** The checklist item id as a string (historically the Asana task gid). */
   task_gid: string;
+  guidance?: string | null;
+  frequency?: ChecklistFrequency;
   section_name: string | null;
   assignee_name: string | null;
   due_on: string | null;
   completed_at: string | null;
   flags: ('no_repeat' | 'no_due_date' | 'overdue')[];
-  subtasks: { name: string; task_gid: string; role: 'am' | 'aa'; done: boolean; assignee_name: string | null; completed_at: string | null }[];
+  subtasks: { name: string; task_gid: string; role: 'am' | 'aa'; done: boolean; assignee_name: string | null; completed_at: string | null; frequency?: ChecklistFrequency }[];
 }
 
 export interface Check {
@@ -155,9 +110,11 @@ export interface AccountStatusRow {
   account: Account;
   /** The recorded check for the date (locked at the deadline). */
   check: Check | null;
-  /** Latest live evaluation from the watcher, today only. */
+  /** Latest live evaluation (re-done on every tick), today only. */
   live: Check | null;
-  has_sweep_rule: boolean;
+  /** Whether the account uses the master template or its own item list. */
+  checklist_source: 'template' | 'custom' | 'none';
+  checklist_items: number;
 }
 
 export interface CheckSettings {
@@ -168,11 +125,6 @@ export interface CheckSettings {
   schedule_text: string;
   next_run_at: string | null;
   is_running: boolean;
-  live_enabled: boolean;
-  live_interval_seconds: number;
-  live_sweep_enabled: boolean;
-  live_last_tick_at: string | null;
-  live_watching: number;
 }
 
 export interface AnalyticsDay {
@@ -208,21 +160,6 @@ export interface Analytics {
   days: AnalyticsDay[];
   accounts: AnalyticsAccount[];
   ams: AnalyticsAm[];
-}
-
-/** A task the sweep deleted, kept so the day's checklist check can still count it as done. */
-export interface Completion {
-  task_gid: string;
-  project_gid: string;
-  parent_gid: string | null;
-  name: string;
-  section_name: string | null;
-  assignee_name: string | null;
-  completed: boolean;
-  completed_at: string | null;
-  num_subtasks: number;
-  deleted_at: string;
-  run_id: number | null;
 }
 
 // ---- People (AMs / AAs) and Slack reminders ----
@@ -865,7 +802,7 @@ export interface MonitorRule {
   title: string;
   description: string;
   severity: 'crit' | 'warn' | 'info';
-  source: 'tts' | 'dashboard' | 'cruva' | 'asana';
+  source: 'tts' | 'dashboard' | 'cruva' | 'checklist';
   enabled: boolean;
 }
 

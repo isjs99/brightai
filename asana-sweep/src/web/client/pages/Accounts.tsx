@@ -3,45 +3,7 @@ import { Link } from 'react-router-dom';
 import type { Account, AccountInput, AccountStatusRow } from '../../../sweep/types';
 import { api } from '../api';
 
-const EMPTY: AccountInput = { name: '', markets: '', am_name: '', aa_name: '', asana_project_gid: null, asana_project_name: '', enabled: true, notes: '', commission_pct: null, commission_basis: 'gmv', settlement_pct: 100, slack_channel: '', client_slack_channel: '', client_domain: '' };
-
-function ProjectSearch({ value, onPick }: { value: { gid: string | null; name: string }; onPick: (gid: string | null, name: string) => void }) {
-  const [q, setQ] = useState('');
-  const [results, setResults] = useState<{ gid: string; name: string }[]>([]);
-  const [err, setErr] = useState<string | null>(null);
-  useEffect(() => {
-    if (q.trim().length < 2) return setResults([]);
-    const t = window.setTimeout(() => {
-      api.searchProjects(q.trim()).then((r) => { setResults(r.projects); setErr(null); }).catch((e) => setErr((e as Error).message));
-    }, 300);
-    return () => window.clearTimeout(t);
-  }, [q]);
-  if (value.gid) {
-    return (
-      <div className="picker">
-        <div className="chosen">
-          <b>{value.name || '(name filled on first check)'}</b>
-          <span className="sub mono">{value.gid}</span>
-          <span style={{ flex: 1 }} />
-          <button type="button" className="small" onClick={() => onPick(null, '')}>Unlink</button>
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div className="picker">
-      <input type="text" placeholder="Search Asana projects…" value={q} onChange={(e) => setQ(e.target.value)} />
-      {err && <div className="help error">{err}</div>}
-      {results.length > 0 && (
-        <ul>
-          {results.map((p) => (
-            <li key={p.gid} onMouseDown={() => onPick(p.gid, p.name)}>{p.name}<span className="sub mono">{p.gid}</span></li>
-          ))}
-        </ul>
-      )}
-    </div>
-  );
-}
+const EMPTY: AccountInput = { name: '', markets: '', am_name: '', aa_name: '', enabled: true, notes: '', commission_pct: null, commission_basis: 'gmv', settlement_pct: 100, slack_channel: '', client_slack_channel: '', client_domain: '' };
 
 function AccountForm({ initial, onSave, onCancel }: { initial: AccountInput; onSave: (a: AccountInput) => Promise<void>; onCancel: () => void }) {
   const [form, setForm] = useState<AccountInput>(initial);
@@ -67,7 +29,6 @@ function AccountForm({ initial, onSave, onCancel }: { initial: AccountInput; onS
         <label className="field"><span className="lbl">Markets</span><input type="text" value={form.markets ?? ''} onChange={(e) => set('markets', e.target.value)} placeholder="DE/IT/FR" /></label>
         <label className="field"><span className="lbl">AM (account manager)</span><input type="text" value={form.am_name ?? ''} onChange={(e) => set('am_name', e.target.value)} placeholder="Elena" /><span className="help">Tasks assigned to this person count as AM work. First name is enough.</span></label>
         <label className="field"><span className="lbl">AA (account assistant)</span><input type="text" value={form.aa_name ?? ''} onChange={(e) => set('aa_name', e.target.value)} placeholder="DM" /><span className="help">Optional. Anyone who is not the AM counts as AA anyway; unassigned subtasks count as AA.</span></label>
-        <label className="field"><span className="lbl">Asana checklist project</span><ProjectSearch value={{ gid: form.asana_project_gid, name: form.asana_project_name }} onPick={(gid, name) => setForm((f) => ({ ...f, asana_project_gid: gid, asana_project_name: name }))} /></label>
         <label className="field"><span className="lbl">Notes</span><input type="text" value={form.notes ?? ''} onChange={(e) => set('notes', e.target.value)} placeholder="e.g. OCT PAUSE" /></label>
         <label className="field"><span className="lbl">Internal Slack channel</span><input type="text" value={form.slack_channel ?? ''} onChange={(e) => set('slack_channel', e.target.value)} placeholder="#acct-kijimea" /><span className="help">Incidents for this account post here. Blank = the default incidents channel.</span></label>
         <label className="field"><span className="lbl">Client Slack channel</span><input type="text" value={form.client_slack_channel ?? ''} onChange={(e) => set('client_slack_channel', e.target.value)} placeholder="#ext-kijimea" /><span className="help">Shared channel with the client: reports go here and client questions are picked up from here.</span></label>
@@ -105,14 +66,9 @@ export default function Accounts() {
   };
 
   const remove = async (a: Account) => {
-    if (!window.confirm(`Remove "${a.name}" and its check history? This does not touch Asana.`)) return;
+    if (!window.confirm(`Remove "${a.name}" and its checklist history?`)) return;
     setBusy(a.id);
     try { await api.deleteAccount(a.id); await load(); } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
-  };
-
-  const addRule = async (a: Account) => {
-    setBusy(a.id);
-    try { await api.createSweepRule(a.id); await load(); } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   };
 
   const toggle = async (a: Account) => {
@@ -125,8 +81,6 @@ export default function Accounts() {
     markets: a.markets,
     am_name: a.am_name,
     aa_name: a.aa_name,
-    asana_project_gid: a.asana_project_gid,
-    asana_project_name: a.asana_project_name,
     enabled: a.enabled,
     notes: a.notes,
     commission_pct: a.commission_pct,
@@ -137,14 +91,14 @@ export default function Accounts() {
     client_domain: a.client_domain,
   });
 
-  const linked = rows?.filter((r) => r.account.asana_project_gid).length ?? 0;
+  const custom = rows?.filter((r) => r.checklist_source === 'custom').length ?? 0;
 
   return (
     <>
       <div className="page-head">
         <div>
           <h1>Accounts</h1>
-          <p className="hint" style={{ margin: 0 }}>{rows ? `${rows.length} accounts, ${linked} linked to an Asana checklist project.` : ''} Link a project to include an account in the 16:00 check.</p>
+          <p className="hint" style={{ margin: 0 }}>{rows ? `${rows.length} accounts; ${custom ? `${custom} with their own checklist, the rest` : 'all'} on the template.` : ''} Every enabled account is checked against its checklist at the daily lock. Edit the items under <Link to="/checklist-template">Checklist items</Link>.</p>
         </div>
         <button className="admin-only" onClick={() => setEditing("new")}>+ New account</button>
       </div>
@@ -153,19 +107,16 @@ export default function Accounts() {
       {rows === null ? <p>Loading…</p> : (
         <table>
           <thead>
-            <tr><th>Account</th><th className="hide-sm">Markets</th><th>AM</th><th className="hide-sm">AA</th><th>Checklist project</th><th className="hide-sm">Sweep rule</th><th>Checked</th><th></th></tr>
+            <tr><th>Account</th><th className="hide-sm">Markets</th><th>AM</th><th className="hide-sm">AA</th><th>Checklist</th><th>Checked</th><th></th></tr>
           </thead>
           <tbody>
-            {rows.map(({ account: a, has_sweep_rule }) => (
+            {rows.map(({ account: a, checklist_source, checklist_items }) => (
               <tr key={a.id} style={{ opacity: a.enabled ? 1 : 0.55 }}>
                 <td><b>{a.name}</b>{a.notes && <div className="sub">{a.notes}</div>}</td>
                 <td className="hide-sm sub">{a.markets ?? ''}</td>
                 <td>{a.am_name ?? <span className="sub">none</span>}</td>
                 <td className="hide-sm">{a.aa_name ?? <span className="sub">any</span>}</td>
-                <td>{a.asana_project_gid ? <span>{a.asana_project_name || <span className="mono">{a.asana_project_gid}</span>}</span> : <span className="badge muted">not linked</span>}</td>
-                <td className="hide-sm">
-                  {!a.asana_project_gid ? <span className="sub">–</span> : has_sweep_rule ? <Link to="/">yes</Link> : <button className="small" disabled={busy === a.id} onClick={() => addRule(a)}>Add</button>}
-                </td>
+                <td><Link to={`/checklist-template?account=${a.id}`}>{checklist_source === 'custom' ? `own list · ${checklist_items} items` : checklist_source === 'template' ? `template · ${checklist_items} items` : 'no items'}</Link></td>
                 <td><label className="toggle admin-only"><input type="checkbox" checked={a.enabled} disabled={busy === a.id} onChange={() => toggle(a)} />{a.enabled ? 'Yes' : 'No'}</label></td>
                 <td><div className="actions admin-only"><button className="small" onClick={() => setEditing(a)}>Edit</button><button className="small danger" disabled={busy === a.id} onClick={() => remove(a)}>Remove</button></div></td>
               </tr>

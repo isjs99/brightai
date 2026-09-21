@@ -1,4 +1,3 @@
-import { asana, AsanaClient, type ChecklistTask } from '../asana/client.js';
 import { Queries } from '../db/queries.js';
 import { log } from '../logger.js';
 import { postSlack } from '../notify/slack.js';
@@ -20,64 +19,31 @@ export function todayIn(tz: string): string {
 export interface CheckOptions {
   trigger: 'schedule' | 'manual' | 'live';
   tz: string;
-  client?: AsanaClient;
+  /** Evaluate this date instead of today (ticks on past days from the history view). */
+  date?: string;
   /** Lock the result as the official snapshot for the day (the deadline check). */
   final?: boolean;
 }
 
 /**
- * Check one account for the given date. Always records a row (status error / unlinked when it
- * cannot evaluate). Every check also refreshes the live status; the recorded check is only
- * overwritten while the day's snapshot has not been locked.
+ * Evaluate one account's checklist for the date from its items and ticks. Always records a row.
+ * Every check refreshes the live status; the recorded check is only overwritten while the day's
+ * snapshot has not been locked.
  */
-export async function checkAccount(q: Queries, account: Account, opts: CheckOptions): Promise<CheckWithItems> {
-  const client = opts.client ?? asana;
-  const checkDate = todayIn(opts.tz);
+export function checkAccount(q: Queries, account: Account, opts: CheckOptions): CheckWithItems {
+  const checkDate = opts.date ?? todayIn(opts.tz);
   const empty = { am_total: 0, am_done: 0, aa_total: 0, aa_done: 0, am_complete: false, aa_complete: false, combined_complete: false, warnings: [] as string[], items: [] as CheckItem[] };
   const record = (data: Omit<CheckWithItems, 'id' | 'account_id' | 'check_date' | 'checked_at' | 'final' | 'trigger'>) => {
-    q.upsertLive(account.id, checkDate, data);
+    if (checkDate === todayIn(opts.tz)) q.upsertLive(account.id, checkDate, data);
     const stored = q.upsertCheck(account.id, checkDate, { ...data, trigger: opts.trigger, final: opts.final });
     liveEvents.emit('update', { kind: 'check', account_id: account.id });
-    // Callers that want "what Asana looks like right now" get the live figures even after the lock.
-    return opts.trigger === 'live' && stored.final ? q.getLive(account.id)! : stored;
+    // Callers that want "what the checklist looks like right now" get the live figures even after the lock.
+    return opts.trigger === 'live' && stored.final ? q.getLive(account.id) ?? stored : stored;
   };
-
-  if (!account.asana_project_gid) {
-    return record({ ...empty, status: 'unlinked', error_message: 'No Asana checklist project linked.' });
-  }
-
   try {
-    const project = await client.getProject(account.asana_project_gid);
-    q.setAccountProjectName(account.id, project.name);
-    const topLevel = await client.listChecklistTasks(account.asana_project_gid);
-    const subtasksByParent = new Map<string, ChecklistTask[]>();
-    for (const t of topLevel) {
-      if (t.num_subtasks > 0) subtasksByParent.set(t.gid, await client.listSubtasks(t.gid));
-    }
-    // Completed copies the sweep already deleted today still count as done.
-    const dayStart = new Date(Date.now() - 48 * 3600000).toISOString();
-    for (const c of q.listCompletionsSince(account.asana_project_gid, dayStart)) {
-      if (topLevel.some((t) => t.gid === c.task_gid)) continue;
-      const task: ChecklistTask = {
-        gid: c.task_gid,
-        name: c.name,
-        completed: c.completed,
-        completed_at: c.completed_at,
-        due_on: null,
-        assignee_name: c.assignee_name,
-        section_name: c.section_name,
-        num_subtasks: c.num_subtasks,
-        parent_gid: c.parent_gid,
-      };
-      if (c.parent_gid) subtasksByParent.set(c.parent_gid, [...(subtasksByParent.get(c.parent_gid) ?? []), task]);
-      else topLevel.push(task);
-    }
-    const result = evaluateChecklist(topLevel, subtasksByParent, {
-      checkDate,
-      tz: opts.tz,
-      amName: account.am_name,
-      aaName: account.aa_name,
-    });
+    const items = q.checklistItemsFor(account.id);
+    const ticks = q.listTicks(account.id, checkDate);
+    const result = evaluateChecklist(items, ticks, { checkDate, tz: opts.tz, amName: account.am_name, aaName: account.aa_name });
     return record({ ...result, error_message: null });
   } catch (err) {
     const msg = (err as Error).message ?? String(err);
@@ -92,7 +58,7 @@ export async function checkAccount(q: Queries, account: Account, opts: CheckOpti
  */
 export async function runAllChecks(
   q: Queries,
-  opts: { trigger: 'schedule' | 'manual'; client?: AsanaClient; notify?: boolean; remind?: boolean; final?: boolean },
+  opts: { trigger: 'schedule' | 'manual'; notify?: boolean; remind?: boolean; final?: boolean },
 ): Promise<CheckWithItems[] | null> {
   if (checkRunning) {
     log.warn(`Checklist check already running, skipping ${opts.trigger} trigger.`);
@@ -104,9 +70,7 @@ export async function runAllChecks(
   try {
     const accounts = q.listAccounts().filter((a) => a.enabled);
     log.info(`Checklist check started (${opts.trigger}) for ${accounts.length} account(s)`);
-    for (const account of accounts) {
-      results.push(await checkAccount(q, account, { trigger: opts.trigger, tz, client: opts.client, final: opts.final }));
-    }
+    for (const account of accounts) results.push(checkAccount(q, account, { trigger: opts.trigger, tz, final: opts.final }));
     const complete = results.filter((r) => r.combined_complete).length;
     log.info(`Checklist check finished: ${complete}/${results.length} accounts complete`);
     const webhook = q.getSetting('check_slack_webhook', '');
@@ -121,6 +85,17 @@ export async function runAllChecks(
     checkRunning = false;
   }
   return results;
+}
+
+/** Refresh today's live status for every enabled account without touching locked snapshots or Slack. */
+export function refreshLive(q: Queries): number {
+  const tz = q.getSetting('check_timezone', 'Europe/Madrid');
+  let n = 0;
+  for (const account of q.listAccounts().filter((a) => a.enabled)) {
+    checkAccount(q, account, { trigger: 'live', tz });
+    n += 1;
+  }
+  return n;
 }
 
 /** "16:00 CEST" from the check cron, for reminder text. */
@@ -145,11 +120,9 @@ export function digestMessage(q: Queries, checks: CheckWithItems[], tz: string):
   };
   for (const c of linked) {
     if (c.status === 'error') lines.push(`:x: ${label(c)}: error, ${c.error_message}`);
-    else if (c.status === 'empty') lines.push(`:grey_question: ${label(c)}: no tasks due today`);
+    else if (c.status === 'empty') lines.push(`:grey_question: ${label(c)}: no items due today`);
     else if (c.combined_complete) lines.push(`:white_check_mark: ${label(c)}: AM ${c.am_done}/${c.am_total}, AA ${c.aa_done}/${c.aa_total}`);
     else lines.push(`:warning: ${label(c)}: AM ${c.am_done}/${c.am_total}${c.am_complete ? ' ok' : ''}, AA ${c.aa_done}/${c.aa_total}${c.aa_complete ? ' ok' : ''}`);
   }
-  const unlinked = checks.length - linked.length;
-  if (unlinked) lines.push(`${unlinked} account(s) have no checklist project linked yet.`);
   return lines.join('\n');
 }

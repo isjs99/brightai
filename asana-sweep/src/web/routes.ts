@@ -1,15 +1,13 @@
 import { Router, type Request, type Response } from 'express';
-import { asana, AsanaError } from '../asana/client.js';
 import { Queries } from '../db/queries.js';
 import { Scheduler } from '../scheduler/index.js';
 import { CRON_PRESETS, describeSchedule, isValidTimezone, nextRun, validateCron } from '../scheduler/describe.js';
-import { isRuleRunning, previewRule, runAllRules, runRule } from '../sweep/runner.js';
-import type { AccountInput, AccountStatusRow, Analytics, AnalyticsAccount, AnalyticsAm, CheckSettings, RuleInput, RuleSummary } from '../sweep/types.js';
-import { checkAccount, deadlineLabel, isCheckRunning, runAllChecks, todayIn } from '../checklist/checker.js';
+import type { AccountInput, AccountStatusRow, Analytics, AnalyticsAccount, AnalyticsAm, CheckSettings, ChecklistItemInput } from '../sweep/types.js';
+import { checkAccount, deadlineLabel, isCheckRunning, refreshLive, runAllChecks, todayIn } from '../checklist/checker.js';
+import { isDue } from '../checklist/evaluate.js';
 import { DEFAULT_REMINDER_TEXT, incompleteByPerson, notifyAms, renderReminder } from '../checklist/reminders.js';
 import { slackBot } from '../notify/slackbot.js';
 import { liveEvents } from '../live/events.js';
-import type { LiveWatcher } from '../live/index.js';
 import { buildCalendar, buildGmv, buildGrades } from '../reports/index.js';
 import { syncGmv } from '../gmv/sync.js';
 import { currencyForShop } from '../gmv/currency.js';
@@ -71,15 +69,11 @@ const optText = (v: unknown): string | null => {
 export function parseAccountInput(body: Record<string, unknown>): AccountInput {
   const name = String(body.name ?? '').trim();
   if (!name) throw new HttpError(400, 'Account name is required.');
-  const gid = optText(body.asana_project_gid);
-  if (gid && !/^\d+$/.test(gid)) throw new HttpError(400, 'Asana project GID must be numeric.');
   return {
     name,
     markets: optText(body.markets),
     am_name: optText(body.am_name),
     aa_name: optText(body.aa_name),
-    asana_project_gid: gid,
-    asana_project_name: String(body.asana_project_name ?? '').trim(),
     enabled: bool(body.enabled, true),
     notes: optText(body.notes),
     slack_channel: optText(body.slack_channel),
@@ -101,65 +95,8 @@ export function parseDeal(body: Record<string, unknown>): { commission_pct: numb
 }
 
 /** Validate and normalise a rule payload from the dashboard. Throws HttpError(400) on bad input. */
-export function parseRuleInput(body: Record<string, unknown>): RuleInput {
-  const name = String(body.name ?? '').trim();
-  const gid = String(body.asana_project_gid ?? '').trim();
-  const cron = String(body.cron ?? '').trim();
-  const timezone = String(body.timezone ?? 'Europe/Madrid').trim() || 'Europe/Madrid';
-  const minAge = int(body.min_age_hours, 12);
-  const maxDeletes = int(body.max_deletes_per_run, 50);
-  const webhook = String(body.notify_slack_webhook ?? '').trim();
-
-  if (!name) throw new HttpError(400, 'Name is required.');
-  if (!/^\d+$/.test(gid)) throw new HttpError(400, 'Pick an Asana project (the project GID must be numeric).');
-  const cronError = validateCron(cron);
-  if (cronError) throw new HttpError(400, cronError);
-  if (!isValidTimezone(timezone)) throw new HttpError(400, `Unknown timezone "${timezone}".`);
-  if (!Number.isFinite(minAge) || minAge < 0) throw new HttpError(400, 'min_age_hours must be 0 or more.');
-  if (!Number.isFinite(maxDeletes) || maxDeletes < 1) throw new HttpError(400, 'max_deletes_per_run must be at least 1.');
-  if (webhook && !/^https:\/\/hooks\.slack\.com\//.test(webhook)) throw new HttpError(400, 'Slack webhook must start with https://hooks.slack.com/');
-
-  return {
-    name,
-    asana_project_gid: gid,
-    asana_project_name: String(body.asana_project_name ?? '').trim(),
-    enabled: bool(body.enabled, true),
-    cron,
-    timezone,
-    dry_run: bool(body.dry_run, true),
-    min_age_hours: minAge,
-    require_section_match: bool(body.require_section_match, true),
-    max_deletes_per_run: maxDeletes,
-    notify_slack_webhook: webhook || null,
-  };
-}
-
-export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider, live: LiveWatcher): Router {
+export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider): Router {
   const r = Router();
-
-  const summarise = (ruleId: number): RuleSummary => {
-    const rule = q.getRule(ruleId);
-    if (!rule) throw new HttpError(404, 'Rule not found');
-    const last = q.lastRun(rule.id);
-    return {
-      ...rule,
-      schedule_text: describeSchedule(rule.cron, rule.timezone),
-      next_run_at: scheduler.nextRunAt(rule)?.toISOString() ?? null,
-      last_run: last
-        ? {
-            id: last.id,
-            status: last.status,
-            started_at: last.started_at,
-            finished_at: last.finished_at,
-            scanned_count: last.scanned_count,
-            matched_count: last.matched_count,
-            deleted_count: last.deleted_count,
-            error_message: last.error_message,
-          }
-        : null,
-      is_running: isRuleRunning(rule.id),
-    };
-  };
 
   const idParam = (req: Request): number => {
     const id = Number(req.params.id);
@@ -223,18 +160,8 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   r.use(requireAuth(auth));
   if (auth instanceof SharedPasswordAuth) r.use(requireAdminForWrites(auth));
 
-  r.get('/status', async (_req, res) => {
-    let asanaUser: { gid: string; name: string } | null = null;
-    let asanaError: string | null = null;
-    if (!config.asanaPat) asanaError = 'ASANA_PAT is not set.';
-    else {
-      try {
-        asanaUser = await asana.me();
-      } catch (err) {
-        asanaError = (err as Error).message;
-      }
-    }
-    res.json({ asana_user: asanaUser, asana_error: asanaError, public_url: config.publicUrl, retention_days: config.runRetentionDays });
+  r.get('/status', (_req, res) => {
+    res.json({ public_url: config.publicUrl, retention_days: config.runRetentionDays });
   });
 
   r.get('/meta', (_req, res) => {
@@ -252,119 +179,6 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     });
   });
 
-  r.get('/asana/projects', async (req, res) => {
-    const qs = String(req.query.q ?? '').trim();
-    if (qs.length < 2) return res.json({ projects: [] });
-    const projects = await asana.searchProjects(qs);
-    res.json({ projects });
-  });
-
-  // ---- Rules ----
-  r.get('/rules', (_req, res) => {
-    res.json({ rules: q.listRules().map((rule) => summarise(rule.id)) });
-  });
-
-  r.post('/rules', (req, res) => {
-    const input = parseRuleInput(req.body ?? {});
-    const rule = q.createRule(input);
-    scheduler.reloadRule(rule.id);
-    res.status(201).json({ rule: summarise(rule.id) });
-  });
-
-  r.get('/rules/:id', (req, res) => {
-    res.json({ rule: summarise(idParam(req)) });
-  });
-
-  r.put('/rules/:id', (req, res) => {
-    const id = idParam(req);
-    const input = parseRuleInput(req.body ?? {});
-    const rule = q.updateRule(id, input);
-    if (!rule) throw new HttpError(404, 'Rule not found');
-    scheduler.reloadRule(id);
-    res.json({ rule: summarise(id) });
-  });
-
-  /** Partial update used by the list's enabled / dry run toggles. */
-  r.patch('/rules/:id', (req, res) => {
-    const id = idParam(req);
-    const existing = q.getRule(id);
-    if (!existing) throw new HttpError(404, 'Rule not found');
-    const body = (req.body ?? {}) as Record<string, unknown>;
-    const merged: Record<string, unknown> = { ...existing };
-    for (const key of ['enabled', 'dry_run'] as const) if (key in body) merged[key] = Boolean(body[key]);
-    q.updateRule(id, parseRuleInput(merged));
-    scheduler.reloadRule(id);
-    res.json({ rule: summarise(id) });
-  });
-
-  r.delete('/rules/:id', (req, res) => {
-    const id = idParam(req);
-    if (!q.deleteRule(id)) throw new HttpError(404, 'Rule not found');
-    scheduler.reloadRule(id);
-    res.json({ ok: true });
-  });
-
-  r.post('/rules/:id/duplicate', (req, res) => {
-    const id = idParam(req);
-    const existing = q.getRule(id);
-    if (!existing) throw new HttpError(404, 'Rule not found');
-    const copy = q.createRule({
-      ...existing,
-      name: `${existing.name} (copy)`,
-      enabled: false,
-      dry_run: true, // copies always start in dry run
-    });
-    scheduler.reloadRule(copy.id);
-    res.status(201).json({ rule: summarise(copy.id) });
-  });
-
-  r.post('/rules/:id/run', async (req, res) => {
-    const id = idParam(req);
-    const rule = q.getRule(id);
-    if (!rule) throw new HttpError(404, 'Rule not found');
-    // Run now deletes immediately: ignores dry run and the minimum age.
-    const run = await runRule(q, rule, { trigger: 'manual', force: true });
-    if (!run) return res.status(409).json({ error: 'This rule is already running. Try again in a moment.' });
-    res.json({ run, rule: summarise(id) });
-  });
-
-  r.post('/rules/run-all', async (_req, res) => {
-    const runs = await runAllRules(q, { force: true });
-    res.json({ runs, rules: q.listRules().map((rule) => summarise(rule.id)) });
-  });
-
-  r.get('/rules/:id/runs', (req, res) => {
-    const id = idParam(req);
-    if (!q.getRule(id)) throw new HttpError(404, 'Rule not found');
-    res.json({ runs: q.listRuns(id, 200) });
-  });
-
-  r.get('/runs/:id', (req, res) => {
-    const id = idParam(req);
-    const run = q.getRun(id);
-    if (!run) throw new HttpError(404, 'Run not found');
-    res.json({ run, items: q.listRunItems(id) });
-  });
-
-  // ---- Preview (live matching, no writes) ----
-  r.post('/preview', async (req, res) => {
-    const body = (req.body ?? {}) as Record<string, unknown>;
-    const gid = String(body.asana_project_gid ?? '').trim();
-    if (!/^\d+$/.test(gid)) throw new HttpError(400, 'Pick an Asana project first.');
-    const minAge = int(body.min_age_hours, 12);
-    const maxDeletes = int(body.max_deletes_per_run, 50);
-    if (!Number.isFinite(minAge) || minAge < 0) throw new HttpError(400, 'min_age_hours must be 0 or more.');
-    if (!Number.isFinite(maxDeletes) || maxDeletes < 1) throw new HttpError(400, 'max_deletes_per_run must be at least 1.');
-    const result = await previewRule({
-      asana_project_gid: gid,
-      min_age_hours: minAge,
-      require_section_match: bool(body.require_section_match, true),
-      max_deletes_per_run: maxDeletes,
-    });
-    res.json(result);
-  });
-
-  // ---- Accounts ----
   const accountRows = (date: string): AccountStatusRow[] => {
     const checks = new Map(q.listChecksForDate(date).map((c) => [c.account_id, c]));
     const lives = new Map(q.listLive(date).map((c) => [c.account_id, c]));
@@ -372,7 +186,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
       account,
       check: checks.get(account.id) ?? null,
       live: lives.get(account.id) ?? null,
-      has_sweep_rule: account.asana_project_gid ? q.ruleExistsForProject(account.asana_project_gid) : false,
+      ...(() => { const c = q.checklistSource(account.id); return { checklist_source: c.source, checklist_items: c.items }; })(),
     }));
   };
 
@@ -404,29 +218,9 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     res.json({ accounts: accountRows(todayIn(checkTz())) });
   });
 
-  /** Every linked checklist board gets its own sweep rule (live, weekdays 06:30). */
-  const ensureSweepRule = (account: { name: string; asana_project_gid: string | null; asana_project_name: string }) => {
-    if (!account.asana_project_gid || q.ruleExistsForProject(account.asana_project_gid)) return null;
-    const rule = q.createRule({
-      name: `${account.name} AM Daily Checklist`,
-      asana_project_gid: account.asana_project_gid,
-      asana_project_name: account.asana_project_name,
-      enabled: true,
-      cron: '30 6 * * 1-5',
-      timezone: checkTz(),
-      dry_run: false,
-      min_age_hours: 12,
-      require_section_match: true,
-      max_deletes_per_run: 50,
-      notify_slack_webhook: null,
-    });
-    scheduler.reloadRule(rule.id);
-    return rule;
-  };
-
   r.post('/accounts', (req, res) => {
     const account = q.createAccount(parseAccountInput(req.body ?? {}));
-    ensureSweepRule(account);
+    checkAccount(q, account, { trigger: 'live', tz: checkTz() });
     res.status(201).json({ account });
   });
 
@@ -434,7 +228,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const id = idParam(req);
     const account = q.updateAccount(id, parseAccountInput(req.body ?? {}));
     if (!account) throw new HttpError(404, 'Account not found');
-    ensureSweepRule(account);
+    checkAccount(q, account, { trigger: 'live', tz: checkTz() });
     res.json({ account });
   });
 
@@ -452,20 +246,10 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     res.json({ ok: true });
   });
 
-  /** Create the sweep rule for the account's checklist project if it is missing. */
-  r.post('/accounts/:id/sweep-rule', (req, res) => {
+  r.post('/accounts/:id/check', (req, res) => {
     const account = q.getAccount(idParam(req));
     if (!account) throw new HttpError(404, 'Account not found');
-    if (!account.asana_project_gid) throw new HttpError(400, 'Link an Asana project first.');
-    const rule = ensureSweepRule(account);
-    if (!rule) throw new HttpError(409, 'A sweep rule already exists for this project.');
-    res.status(201).json({ rule: summarise(rule.id) });
-  });
-
-  r.post('/accounts/:id/check', async (req, res) => {
-    const account = q.getAccount(idParam(req));
-    if (!account) throw new HttpError(404, 'Account not found');
-    const check = await checkAccount(q, account, { trigger: 'manual', tz: checkTz() });
+    const check = checkAccount(q, account, { trigger: 'manual', tz: checkTz() });
     res.json({ check });
   });
 
@@ -500,11 +284,6 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
       schedule_text: describeSchedule(cron, tz),
       next_run_at: scheduler.nextCheckAt()?.toISOString() ?? null,
       is_running: isCheckRunning(),
-      live_enabled: q.getSetting('live_enabled', '1') === '1',
-      live_interval_seconds: Number(q.getSetting('live_interval_seconds', '60')) || 60,
-      live_sweep_enabled: q.getSetting('live_sweep_enabled', '1') === '1',
-      live_last_tick_at: live.lastTickAt,
-      live_watching: live.watching,
     };
   };
 
@@ -523,22 +302,143 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     q.setSetting('check_timezone', tz);
     q.setSetting('check_enabled', bool(body.check_enabled, true) ? '1' : '0');
     q.setSetting('check_slack_webhook', webhook);
-    const interval = int(body.live_interval_seconds, 60);
-    if (!Number.isFinite(interval) || interval < 15 || interval > 3600) throw new HttpError(400, 'Live interval must be between 15 and 3600 seconds.');
-    q.setSetting('live_enabled', bool(body.live_enabled, true) ? '1' : '0');
-    q.setSetting('live_interval_seconds', String(interval));
-    q.setSetting('live_sweep_enabled', bool(body.live_sweep_enabled, true) ? '1' : '0');
     scheduler.reloadCheckSchedule();
-    live.start();
     liveEvents.emitUpdate({ kind: 'settings' });
     res.json({ settings: settingsPayload() });
   });
 
-  /** Re-evaluate every board on the next tick (and run it now). */
-  r.post('/live/refresh', async (_req, res) => {
-    live.reset();
-    await live.tick();
-    res.json({ ok: true, rows: accountRows(todayIn(checkTz())) });
+  /** Re-evaluate today's live status for every account (after editing items, or just to be sure). */
+  r.post('/checklists/refresh', (_req, res) => {
+    const n = refreshLive(q);
+    res.json({ ok: true, refreshed: n, rows: accountRows(todayIn(checkTz())) });
+  });
+
+  // ---- Native checklist: items (template or per account) and ticks ----
+  const parseItem = (body: Record<string, unknown>): Partial<ChecklistItemInput> => {
+    const out: Partial<ChecklistItemInput> = {};
+    if (body.name !== undefined) { const name = String(body.name ?? '').trim(); if (!name) throw new HttpError(400, 'Name is required.'); out.name = name; }
+    if (body.section !== undefined) out.section = String(body.section ?? '').trim();
+    if (body.guidance !== undefined) out.guidance = optText(body.guidance);
+    if (body.role !== undefined) out.role = body.role === 'aa' ? 'aa' : 'am';
+    if (body.frequency !== undefined) out.frequency = body.frequency === 'weekly' ? 'weekly' : 'daily';
+    if (body.weekday !== undefined) { const w = int(body.weekday, 1); if (w < 1 || w > 7) throw new HttpError(400, 'Weekday must be 1 (Monday) to 7 (Sunday).'); out.weekday = w; }
+    if (body.position !== undefined) out.position = int(body.position, 0);
+    if (body.enabled !== undefined) out.enabled = Boolean(body.enabled);
+    if (body.parent_id !== undefined) out.parent_id = body.parent_id === null || body.parent_id === '' ? null : int(body.parent_id, 0) || null;
+    if (body.account_id !== undefined) out.account_id = body.account_id === null || body.account_id === '' ? null : int(body.account_id, 0) || null;
+    return out;
+  };
+
+  /** The template, or an account's effective list (with where it comes from). */
+  r.get('/checklists/items', (req, res) => {
+    const accountId = req.query.account_id ? Number(req.query.account_id) : null;
+    if (accountId) {
+      const account = q.getAccount(accountId);
+      if (!account) throw new HttpError(404, 'Account not found');
+      const src = q.checklistSource(accountId);
+      res.json({ account, source: src.source, items: q.checklistItemsFor(accountId), template: q.listTemplateItems() });
+    } else {
+      res.json({ account: null, source: 'template', items: q.listTemplateItems(), template: q.listTemplateItems() });
+    }
+  });
+
+  r.post('/checklists/items', (req, res) => {
+    const b = parseItem((req.body ?? {}) as Record<string, unknown>);
+    if (!b.name) throw new HttpError(400, 'Name is required.');
+    if (b.parent_id) {
+      const parent = q.getChecklistItem(b.parent_id);
+      if (!parent) throw new HttpError(404, 'Parent item not found');
+      b.account_id = parent.account_id;
+      b.section = b.section ?? parent.section;
+    }
+    if (b.account_id) {
+      // Adding to an account that still follows the template: give it its own copy first so the rest stays.
+      if (!q.listAccountItems(b.account_id).length) q.customiseChecklist(b.account_id);
+    }
+    const item = q.createChecklistItem({ ...b, name: b.name });
+    refreshLive(q);
+    liveEvents.emitUpdate({ kind: 'settings' });
+    res.status(201).json({ item });
+  });
+
+  r.put('/checklists/items/:id', (req, res) => {
+    const item = q.updateChecklistItem(idParam(req), parseItem((req.body ?? {}) as Record<string, unknown>));
+    if (!item) throw new HttpError(404, 'Item not found');
+    refreshLive(q);
+    liveEvents.emitUpdate({ kind: 'settings' });
+    res.json({ item });
+  });
+
+  r.delete('/checklists/items/:id', (req, res) => {
+    if (!q.deleteChecklistItem(idParam(req))) throw new HttpError(404, 'Item not found');
+    refreshLive(q);
+    liveEvents.emitUpdate({ kind: 'settings' });
+    res.json({ ok: true });
+  });
+
+  /** Reorder siblings: ids in the new order. */
+  r.put('/checklists/items/reorder', (req, res) => {
+    const ids = ((req.body ?? {}) as { ids?: unknown }).ids;
+    if (!Array.isArray(ids)) throw new HttpError(400, 'ids must be an array');
+    ids.map(Number).filter((n) => Number.isInteger(n) && n > 0).forEach((id, i) => q.updateChecklistItem(id, { position: i }));
+    liveEvents.emitUpdate({ kind: 'settings' });
+    res.json({ ok: true });
+  });
+
+  /** Give an account its own editable copy of the template. */
+  r.post('/checklists/accounts/:id/customise', (req, res) => {
+    const account = q.getAccount(idParam(req));
+    if (!account) throw new HttpError(404, 'Account not found');
+    const items = q.customiseChecklist(account.id);
+    checkAccount(q, account, { trigger: 'live', tz: checkTz() });
+    res.json({ items, source: 'custom' });
+  });
+
+  /** Back to the template (drops the account's own list). */
+  r.post('/checklists/accounts/:id/reset', (req, res) => {
+    const account = q.getAccount(idParam(req));
+    if (!account) throw new HttpError(404, 'Account not found');
+    q.resetChecklist(account.id);
+    checkAccount(q, account, { trigger: 'live', tz: checkTz() });
+    res.json({ items: q.listTemplateItems(), source: 'template' });
+  });
+
+  /** Tick or untick one line for an account (today by default). Account managers can do this too. */
+  r.post('/checklists/tick', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const accountId = int(b.account_id, 0);
+    const itemId = int(b.item_id, 0);
+    const account = q.getAccount(accountId);
+    if (!account) throw new HttpError(404, 'Account not found');
+    const item = q.getChecklistItem(itemId);
+    if (!item) throw new HttpError(404, 'Checklist item not found');
+    if (!q.checklistItemsFor(accountId).some((i) => i.id === itemId)) throw new HttpError(400, 'That item is not on this account\'s checklist.');
+    const tz = checkTz();
+    const date = String(b.date ?? '') || todayIn(tz);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new HttpError(400, 'date must be YYYY-MM-DD');
+    if (date > todayIn(tz)) throw new HttpError(400, 'Cannot tick a future day.');
+    const done = bool(b.done, true);
+    const tick = q.setTick(accountId, itemId, date, done, actorOf(req), optText(b.note));
+    const check = checkAccount(q, account, { trigger: 'live', tz, date });
+    res.json({ tick, check, due: isDue(item, date) });
+  });
+
+  /** Tick every line due today for an account in one go (or untick all). */
+  r.post('/checklists/tick-all', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const account = q.getAccount(int(b.account_id, 0));
+    if (!account) throw new HttpError(404, 'Account not found');
+    const role = b.role === 'am' || b.role === 'aa' ? (b.role as 'am' | 'aa') : null;
+    const tz = checkTz();
+    const date = String(b.date ?? '') || todayIn(tz);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || date > todayIn(tz)) throw new HttpError(400, 'date must be today or earlier, YYYY-MM-DD');
+    const done = bool(b.done, true);
+    let n = 0;
+    for (const item of q.checklistItemsFor(account.id).filter((i) => i.enabled && isDue(i, date) && (!role || i.role === role))) {
+      q.setTick(account.id, item.id, date, done, actorOf(req));
+      n += 1;
+    }
+    res.json({ changed: n, check: checkAccount(q, account, { trigger: 'live', tz, date }) });
   });
 
   // ---- People (AMs) and Slack reminders ----
@@ -1978,10 +1878,9 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
 
   // Error handler last, so every route above (including the ones appended later) returns JSON.
   r.use((err: unknown, _req: Request, res: Response, _next: unknown) => {
-    const status = err instanceof HttpError ? err.status : err instanceof AsanaError ? 502 : 500;
+    const status = err instanceof HttpError ? err.status : 500;
     const message = (err as Error)?.message ?? 'Unknown error';
     if (status === 500) console.error(err);
-    else if (status === 502) console.warn(`Asana error on ${_req.method} ${_req.path}: ${message}`);
     res.status(status).json({ error: message });
   });
 

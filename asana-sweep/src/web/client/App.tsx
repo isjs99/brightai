@@ -3,9 +3,6 @@ import { Link, NavLink, Navigate, Route, Routes, useLocation, useNavigate } from
 import { api, currentActor, setCurrentActor, type Status } from './api';
 import { SessionContext, type Role } from './session';
 import type { Person } from '../../sweep/types';
-import RulesList from './pages/RulesList';
-import RuleEditor from './pages/RuleEditor';
-import RunHistory from './pages/RunHistory';
 import Accounts from './pages/Accounts';
 import Checklists from './pages/Checklists';
 import AnalyticsPage from './pages/Analytics';
@@ -23,6 +20,7 @@ import StockPage from './pages/Stock';
 import ReportsPage from './pages/Reports';
 import PlaybookPage from './pages/Playbook';
 import CopilotPage from './pages/Copilot';
+import ChecklistTemplatePage from './pages/ChecklistTemplate';
 
 type Theme = 'system' | 'light' | 'dark';
 
@@ -108,7 +106,6 @@ const NAV: { section: string; items: { to: string; label: string; end?: boolean 
     items: [
       { to: '/checklists', label: 'Checklists' },
       { to: '/calendar', label: 'Calendar' },
-      { to: '/', label: 'Sweep rules', end: true },
     ],
   },
   {
@@ -143,6 +140,7 @@ const NAV: { section: string; items: { to: string; label: string; end?: boolean 
     section: 'Setup',
     items: [
       { to: '/accounts', label: 'Accounts' },
+      { to: '/checklist-template', label: 'Checklist items' },
       { to: '/people', label: 'Team' },
     ],
   },
@@ -180,7 +178,7 @@ export default function App() {
   const logout = async () => {
     await api.logout();
     setRole(null);
-    navigate('/');
+    navigate('/checklists');
   };
 
   return (
@@ -194,7 +192,6 @@ export default function App() {
           </div>
           <nav>
             <ActorPicker />
-            {status?.asana_user && <span className="sub hide-sm">Asana: {status.asana_user.name}</span>}
             <span className={`badge ${role === 'admin' ? 'accent' : 'muted'}`} title={role === 'admin' ? 'Admin: can change settings' : 'Account manager: view only'}>
               {role === 'admin' ? 'Admin' : 'View only'}
             </span>
@@ -216,17 +213,9 @@ export default function App() {
             ))}
           </aside>
           <main className="page">
-            {status?.asana_error && (
-              <div className="banner crit">
-                <b>Asana is not reachable.</b> {status.asana_error} Runs and previews will fail until this is fixed.
-              </div>
-            )}
             <Routes>
-              <Route path="/" element={<RulesList />} />
-              <Route path="/rules/new" element={<RuleEditor />} />
-              <Route path="/rules/:id" element={<RuleEditor />} />
-              <Route path="/rules/:id/runs" element={<RunHistory />} />
               <Route path="/accounts" element={<Accounts />} />
+              <Route path="/checklist-template" element={<ChecklistTemplatePage />} />
               <Route path="/checklists" element={<Checklists />} />
               <Route path="/analytics" element={<AnalyticsPage />} />
               <Route path="/calendar" element={<CalendarPage />} />

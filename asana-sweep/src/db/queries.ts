@@ -1,5 +1,8 @@
 import type Database from 'better-sqlite3';
 import type {
+  ChecklistItem,
+  ChecklistItemInput,
+  ChecklistTick,
   Account,
   AccountInput,
   AccountShop,
@@ -12,7 +15,6 @@ import type {
   CheckItem,
   CheckStatus,
   CheckWithItems,
-  Completion,
   ContextEntry,
   BdEmailDraft,
   OutreachExample,
@@ -47,73 +49,11 @@ import type {
   TtsShopRow,
   Person,
   PersonInput,
-  Rule,
-  RuleInput,
-  Run,
-  RunItem,
-  RunItemAction,
-  RunStatus,
 } from '../sweep/types.js';
 import { isSignedStage, leadKey, matchPerson, type SheetLead } from '../leads/sheet.js';
 import { fastmossShopUrl, launchFlags, matchesAccountName, outreachComplete, riseScore } from '../bd/score.js';
 
 type Row = Record<string, unknown>;
-
-function rowToRule(r: Row): Rule {
-  return {
-    id: r.id as number,
-    name: r.name as string,
-    asana_project_gid: r.asana_project_gid as string,
-    asana_project_name: r.asana_project_name as string,
-    enabled: Boolean(r.enabled),
-    cron: r.cron as string,
-    timezone: r.timezone as string,
-    dry_run: Boolean(r.dry_run),
-    min_age_hours: r.min_age_hours as number,
-    require_section_match: Boolean(r.require_section_match),
-    max_deletes_per_run: r.max_deletes_per_run as number,
-    notify_slack_webhook: (r.notify_slack_webhook as string | null) || null,
-    created_at: r.created_at as string,
-    updated_at: r.updated_at as string,
-  };
-}
-
-function rowToRun(r: Row): Run {
-  let warnings: string[] = [];
-  try {
-    warnings = JSON.parse((r.warnings as string) || '[]');
-  } catch {
-    warnings = [];
-  }
-  return {
-    id: r.id as number,
-    rule_id: r.rule_id as number,
-    started_at: r.started_at as string,
-    finished_at: (r.finished_at as string | null) ?? null,
-    status: r.status as RunStatus,
-    trigger: r.trigger as Run['trigger'],
-    dry_run: Boolean(r.dry_run),
-    scanned_count: r.scanned_count as number,
-    matched_count: r.matched_count as number,
-    deleted_count: r.deleted_count as number,
-    error_message: (r.error_message as string | null) ?? null,
-    warnings,
-  };
-}
-
-function rowToItem(r: Row): RunItem {
-  return {
-    id: r.id as number,
-    run_id: r.run_id as number,
-    task_gid: r.task_gid as string,
-    task_name: r.task_name as string,
-    section_name: (r.section_name as string | null) ?? null,
-    completed_at: (r.completed_at as string | null) ?? null,
-    num_subtasks: (r.num_subtasks as number) ?? 0,
-    action: r.action as RunItemAction,
-    reason: (r.reason as string) ?? '',
-  };
-}
 
 function rowToAccount(r: Row): Account {
   return {
@@ -122,8 +62,6 @@ function rowToAccount(r: Row): Account {
     markets: (r.markets as string | null) || null,
     am_name: (r.am_name as string | null) || null,
     aa_name: (r.aa_name as string | null) || null,
-    asana_project_gid: (r.asana_project_gid as string | null) || null,
-    asana_project_name: (r.asana_project_name as string) ?? '',
     enabled: Boolean(r.enabled),
     notes: (r.notes as string | null) || null,
     commission_pct: r.commission_pct === null || r.commission_pct === undefined ? null : Number(r.commission_pct),
@@ -183,8 +121,8 @@ export class Queries {
   createAccount(input: AccountInput): Account {
     const res = this.db
       .prepare(
-        `INSERT INTO accounts (name, markets, am_name, aa_name, asana_project_gid, asana_project_name, enabled, notes, commission_pct, commission_basis, settlement_pct, slack_channel, client_slack_channel, client_domain)
-         VALUES (@name, @markets, @am_name, @aa_name, @asana_project_gid, @asana_project_name, @enabled, @notes, @commission_pct, @commission_basis, @settlement_pct, @slack_channel, @client_slack_channel, @client_domain)`,
+        `INSERT INTO accounts (name, markets, am_name, aa_name, enabled, notes, commission_pct, commission_basis, settlement_pct, slack_channel, client_slack_channel, client_domain)
+         VALUES (@name, @markets, @am_name, @aa_name, @enabled, @notes, @commission_pct, @commission_basis, @settlement_pct, @slack_channel, @client_slack_channel, @client_domain)`,
       )
       .run({ ...input, enabled: input.enabled ? 1 : 0 });
     return this.getAccount(Number(res.lastInsertRowid))!;
@@ -193,8 +131,7 @@ export class Queries {
   updateAccount(id: number, input: AccountInput): Account | null {
     const res = this.db
       .prepare(
-        `UPDATE accounts SET name=@name, markets=@markets, am_name=@am_name, aa_name=@aa_name, asana_project_gid=@asana_project_gid,
-            asana_project_name=@asana_project_name, enabled=@enabled, notes=@notes,
+        `UPDATE accounts SET name=@name, markets=@markets, am_name=@am_name, aa_name=@aa_name, enabled=@enabled, notes=@notes,
             commission_pct=@commission_pct, commission_basis=@commission_basis, settlement_pct=@settlement_pct,
             slack_channel=@slack_channel, client_slack_channel=@client_slack_channel, client_domain=@client_domain,
             updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
@@ -204,16 +141,8 @@ export class Queries {
     return res.changes ? this.getAccount(id) : null;
   }
 
-  setAccountProjectName(id: number, name: string): void {
-    this.db.prepare('UPDATE accounts SET asana_project_name = ? WHERE id = ? AND asana_project_name <> ?').run(name, id, name);
-  }
-
   deleteAccount(id: number): boolean {
     return this.db.prepare('DELETE FROM accounts WHERE id = ?').run(id).changes > 0;
-  }
-
-  ruleExistsForProject(gid: string): boolean {
-    return Boolean(this.db.prepare('SELECT 1 FROM rules WHERE asana_project_gid = ? LIMIT 1').get(gid));
   }
 
   // ---- Settings ----
@@ -336,135 +265,132 @@ export class Queries {
     return this.db.prepare('DELETE FROM checks WHERE check_date < ?').run(cutoff).changes;
   }
 
-  // ---- Rules ----
+  // ---- Native checklist: items (template or per account) and daily ticks ----
 
-  listRules(): Rule[] {
-    return this.db.prepare('SELECT * FROM rules ORDER BY id').all().map((r) => rowToRule(r as Row));
+  private rowToChecklistItem(r: Row): ChecklistItem {
+    return {
+      id: r.id as number,
+      account_id: (r.account_id as number | null) ?? null,
+      parent_id: (r.parent_id as number | null) ?? null,
+      section: (r.section as string) ?? '',
+      name: r.name as string,
+      guidance: (r.guidance as string | null) || null,
+      role: r.role === 'aa' ? 'aa' : 'am',
+      frequency: r.frequency === 'weekly' ? 'weekly' : 'daily',
+      weekday: (r.weekday as number | null) ?? null,
+      position: (r.position as number) ?? 0,
+      enabled: Boolean(r.enabled),
+      created_at: r.created_at as string,
+      updated_at: r.updated_at as string,
+    };
   }
 
-  getRule(id: number): Rule | null {
-    const r = this.db.prepare('SELECT * FROM rules WHERE id = ?').get(id) as Row | undefined;
-    return r ? rowToRule(r) : null;
+  /** The master template (account_id NULL). */
+  listTemplateItems(): ChecklistItem[] {
+    return (this.db.prepare('SELECT * FROM checklist_items WHERE account_id IS NULL ORDER BY position, id').all() as Row[]).map((r) => this.rowToChecklistItem(r));
   }
 
-  createRule(input: RuleInput): Rule {
+  /** An account's own items, if it has customised its list. */
+  listAccountItems(accountId: number): ChecklistItem[] {
+    return (this.db.prepare('SELECT * FROM checklist_items WHERE account_id = ? ORDER BY position, id').all(accountId) as Row[]).map((r) => this.rowToChecklistItem(r));
+  }
+
+  /** What the account is checked against: its own list when it has one, else the template. */
+  checklistItemsFor(accountId: number): ChecklistItem[] {
+    const own = this.listAccountItems(accountId);
+    return own.length ? own : this.listTemplateItems();
+  }
+
+  checklistSource(accountId: number): { source: 'template' | 'custom' | 'none'; items: number } {
+    const own = this.listAccountItems(accountId).filter((i) => i.enabled);
+    if (own.length) return { source: 'custom', items: own.length };
+    const tpl = this.listTemplateItems().filter((i) => i.enabled);
+    return { source: tpl.length ? 'template' : 'none', items: tpl.length };
+  }
+
+  getChecklistItem(id: number): ChecklistItem | null {
+    const r = this.db.prepare('SELECT * FROM checklist_items WHERE id = ?').get(id) as Row | undefined;
+    return r ? this.rowToChecklistItem(r) : null;
+  }
+
+  createChecklistItem(i: Partial<ChecklistItemInput> & { name: string }): ChecklistItem {
+    const scope = i.account_id ?? null;
+    const parent = i.parent_id ?? null;
+    const position = i.position ?? ((this.db.prepare('SELECT COALESCE(MAX(position), -1) + 1 AS p FROM checklist_items WHERE account_id IS ? AND parent_id IS ?').get(scope, parent) as { p: number }).p);
+    const freq = i.frequency === 'weekly' ? 'weekly' : 'daily';
     const res = this.db
-      .prepare(
-        `INSERT INTO rules (name, asana_project_gid, asana_project_name, enabled, cron, timezone, dry_run,
-                            min_age_hours, require_section_match, max_deletes_per_run, notify_slack_webhook)
-         VALUES (@name, @asana_project_gid, @asana_project_name, @enabled, @cron, @timezone, @dry_run,
-                 @min_age_hours, @require_section_match, @max_deletes_per_run, @notify_slack_webhook)`,
-      )
-      .run({
-        ...input,
-        enabled: input.enabled ? 1 : 0,
-        dry_run: input.dry_run ? 1 : 0,
-        require_section_match: input.require_section_match ? 1 : 0,
-        notify_slack_webhook: input.notify_slack_webhook || null,
-      });
-    return this.getRule(Number(res.lastInsertRowid))!;
+      .prepare('INSERT INTO checklist_items (account_id, parent_id, section, name, guidance, role, frequency, weekday, position, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(scope, parent, i.section ?? '', i.name, i.guidance ?? null, i.role === 'aa' ? 'aa' : parent !== null && !i.role ? 'aa' : 'am', freq, freq === 'weekly' ? i.weekday ?? 1 : null, position, i.enabled === false ? 0 : 1);
+    return this.getChecklistItem(Number(res.lastInsertRowid))!;
   }
 
-  updateRule(id: number, input: RuleInput): Rule | null {
-    const res = this.db
-      .prepare(
-        `UPDATE rules SET name=@name, asana_project_gid=@asana_project_gid, asana_project_name=@asana_project_name,
-            enabled=@enabled, cron=@cron, timezone=@timezone, dry_run=@dry_run, min_age_hours=@min_age_hours,
-            require_section_match=@require_section_match, max_deletes_per_run=@max_deletes_per_run,
-            notify_slack_webhook=@notify_slack_webhook, updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
-         WHERE id=@id`,
-      )
-      .run({
-        ...input,
-        id,
-        enabled: input.enabled ? 1 : 0,
-        dry_run: input.dry_run ? 1 : 0,
-        require_section_match: input.require_section_match ? 1 : 0,
-        notify_slack_webhook: input.notify_slack_webhook || null,
-      });
-    return res.changes ? this.getRule(id) : null;
-  }
-
-  setRuleProjectName(id: number, name: string): void {
-    this.db.prepare('UPDATE rules SET asana_project_name = ? WHERE id = ? AND asana_project_name <> ?').run(name, id, name);
-  }
-
-  deleteRule(id: number): boolean {
-    return this.db.prepare('DELETE FROM rules WHERE id = ?').run(id).changes > 0;
-  }
-
-  // ---- Runs ----
-
-  createRun(ruleId: number, trigger: Run['trigger'], dryRun: boolean): Run {
-    const res = this.db
-      .prepare(`INSERT INTO runs (rule_id, started_at, status, trigger, dry_run) VALUES (?, ?, 'running', ?, ?)`)
-      .run(ruleId, new Date().toISOString(), trigger, dryRun ? 1 : 0);
-    return this.getRun(Number(res.lastInsertRowid))!;
-  }
-
-  finishRun(
-    id: number,
-    patch: { status: RunStatus; scanned_count: number; matched_count: number; deleted_count: number; error_message: string | null; warnings: string[] },
-  ): Run {
+  updateChecklistItem(id: number, patch: Partial<ChecklistItemInput>): ChecklistItem | null {
+    const cur = this.getChecklistItem(id);
+    if (!cur) return null;
+    const next = { ...cur, ...patch };
+    const freq = next.frequency === 'weekly' ? 'weekly' : 'daily';
     this.db
-      .prepare(
-        `UPDATE runs SET finished_at=?, status=?, scanned_count=?, matched_count=?, deleted_count=?, error_message=?, warnings=? WHERE id=?`,
-      )
-      .run(
-        new Date().toISOString(),
-        patch.status,
-        patch.scanned_count,
-        patch.matched_count,
-        patch.deleted_count,
-        patch.error_message,
-        JSON.stringify(patch.warnings),
-        id,
-      );
-    return this.getRun(id)!;
+      .prepare(`UPDATE checklist_items SET section = ?, name = ?, guidance = ?, role = ?, frequency = ?, weekday = ?, position = ?, enabled = ?, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?`)
+      .run(next.section ?? '', next.name, next.guidance ?? null, next.role === 'aa' ? 'aa' : 'am', freq, freq === 'weekly' ? next.weekday ?? 1 : null, next.position ?? 0, next.enabled === false ? 0 : 1, id);
+    return this.getChecklistItem(id);
   }
 
-  getRun(id: number): Run | null {
-    const r = this.db.prepare('SELECT * FROM runs WHERE id = ?').get(id) as Row | undefined;
-    return r ? rowToRun(r) : null;
+  deleteChecklistItem(id: number): boolean {
+    return this.db.prepare('DELETE FROM checklist_items WHERE id = ?').run(id).changes > 0;
   }
 
-  listRuns(ruleId: number, limit = 100): Run[] {
-    return this.db
-      .prepare('SELECT * FROM runs WHERE rule_id = ? ORDER BY started_at DESC, id DESC LIMIT ?')
-      .all(ruleId, limit)
-      .map((r) => rowToRun(r as Row));
-  }
-
-  lastRun(ruleId: number): Run | null {
-    const r = this.db.prepare('SELECT * FROM runs WHERE rule_id = ? ORDER BY started_at DESC, id DESC LIMIT 1').get(ruleId) as Row | undefined;
-    return r ? rowToRun(r) : null;
-  }
-
-  /** Mark any runs left in 'running' (e.g. after a crash) as errored. Called at startup. */
-  failStaleRuns(): number {
-    return this.db
-      .prepare(`UPDATE runs SET status='error', finished_at=?, error_message='Process restarted while the run was in progress.' WHERE status='running'`)
-      .run(new Date().toISOString()).changes;
-  }
-
-  addRunItems(runId: number, items: Omit<RunItem, 'id' | 'run_id'>[]): void {
-    const stmt = this.db.prepare(
-      `INSERT INTO run_items (run_id, task_gid, task_name, section_name, completed_at, num_subtasks, action, reason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    );
+  /** Give an account its own copy of the template so it can be edited without touching the others. Returns the new items. */
+  customiseChecklist(accountId: number): ChecklistItem[] {
+    if (this.listAccountItems(accountId).length) return this.listAccountItems(accountId);
+    const tpl = this.listTemplateItems();
+    const ins = this.db.prepare('INSERT INTO checklist_items (account_id, parent_id, section, name, guidance, role, frequency, weekday, position, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const map = new Map<number, number>();
     this.db.transaction(() => {
-      for (const it of items) {
-        stmt.run(runId, it.task_gid, it.task_name, it.section_name, it.completed_at, it.num_subtasks, it.action, it.reason);
+      for (const i of tpl.filter((x) => x.parent_id === null)) map.set(i.id, Number(ins.run(accountId, null, i.section, i.name, i.guidance, i.role, i.frequency, i.weekday, i.position, i.enabled ? 1 : 0).lastInsertRowid));
+      for (const i of tpl.filter((x) => x.parent_id !== null)) {
+        const parent = map.get(i.parent_id!);
+        if (parent) ins.run(accountId, parent, i.section, i.name, i.guidance, i.role, i.frequency, i.weekday, i.position, i.enabled ? 1 : 0);
       }
     })();
+    return this.listAccountItems(accountId);
   }
 
-  listRunItems(runId: number): RunItem[] {
-    return this.db.prepare('SELECT * FROM run_items WHERE run_id = ? ORDER BY action, task_name').all(runId).map((r) => rowToItem(r as Row));
+  /** Drop an account's own list so it follows the template again (its ticks on those items go with it). */
+  resetChecklist(accountId: number): number {
+    const n = (this.db.prepare('SELECT COUNT(*) AS n FROM checklist_items WHERE account_id = ?').get(accountId) as { n: number }).n;
+    this.db.prepare('DELETE FROM checklist_items WHERE account_id = ?').run(accountId);
+    return n;
   }
 
-  deleteRun(id: number): void {
-    this.db.prepare('DELETE FROM runs WHERE id = ?').run(id);
+  private rowToTick(r: Row): ChecklistTick {
+    return { id: r.id as number, item_id: r.item_id as number, account_id: r.account_id as number, tick_date: r.tick_date as string, done_by: (r.done_by as string | null) || null, done_at: r.done_at as string, note: (r.note as string | null) || null };
+  }
+
+  listTicks(accountId: number, date: string): ChecklistTick[] {
+    return (this.db.prepare('SELECT * FROM checklist_ticks WHERE account_id = ? AND tick_date = ?').all(accountId, date) as Row[]).map((r) => this.rowToTick(r));
+  }
+
+  /** Tick or untick one item for an account on a date. Returns the tick, or null when unticked. */
+  setTick(accountId: number, itemId: number, date: string, done: boolean, by: string | null, note?: string | null): ChecklistTick | null {
+    if (!done) {
+      this.db.prepare('DELETE FROM checklist_ticks WHERE account_id = ? AND item_id = ? AND tick_date = ?').run(accountId, itemId, date);
+      return null;
+    }
+    this.db
+      .prepare(`INSERT INTO checklist_ticks (item_id, account_id, tick_date, done_by, done_at, note) VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(item_id, account_id, tick_date) DO UPDATE SET note = COALESCE(excluded.note, checklist_ticks.note)`)
+      .run(itemId, accountId, date, by, new Date().toISOString(), note ?? null);
+    return this.rowToTick(this.db.prepare('SELECT * FROM checklist_ticks WHERE account_id = ? AND item_id = ? AND tick_date = ?').get(accountId, itemId, date) as Row);
+  }
+
+  /** Who ticked what across a period (for the team activity view). */
+  countTicks(from: string, to: string): { done_by: string | null; ticks: number }[] {
+    return this.db.prepare('SELECT done_by, COUNT(*) AS ticks FROM checklist_ticks WHERE tick_date >= ? AND tick_date <= ? GROUP BY done_by ORDER BY ticks DESC').all(from, to) as { done_by: string | null; ticks: number }[];
+  }
+
+  pruneTicks(olderThanDays: number): number {
+    const cutoff = new Date(Date.now() - olderThanDays * 86400000).toISOString().slice(0, 10);
+    return this.db.prepare('DELETE FROM checklist_ticks WHERE tick_date < ?').run(cutoff).changes;
   }
 
   // ---- TikTok Shop authorisations ----
@@ -704,38 +630,6 @@ export class Queries {
 
   deleteGmvMax(id: number): boolean {
     return this.db.prepare('DELETE FROM gmv_max_settings WHERE id = ?').run(id).changes > 0;
-  }
-
-  // ---- Completions the sweep deleted (so the checklist check still counts them) ----
-
-  recordCompletions(rows: Completion[]): void {
-    const stmt = this.db.prepare(
-      `INSERT INTO completions (task_gid, project_gid, parent_gid, name, section_name, assignee_name, completed, completed_at, num_subtasks, deleted_at, run_id)
-       VALUES (@task_gid, @project_gid, @parent_gid, @name, @section_name, @assignee_name, @completed, @completed_at, @num_subtasks, @deleted_at, @run_id)
-       ON CONFLICT(task_gid) DO UPDATE SET completed = excluded.completed, completed_at = excluded.completed_at, deleted_at = excluded.deleted_at, run_id = excluded.run_id`,
-    );
-    this.db.transaction(() => {
-      for (const r of rows) stmt.run({ ...r, completed: r.completed ? 1 : 0 });
-    })();
-  }
-
-  /** Deleted tasks of a project whose completion (or deletion) happened on or after `sinceIso`. */
-  listCompletionsSince(projectGid: string, sinceIso: string): Completion[] {
-    return (
-      this.db
-        .prepare('SELECT * FROM completions WHERE project_gid = ? AND (completed_at >= ? OR deleted_at >= ?)')
-        .all(projectGid, sinceIso, sinceIso) as (Omit<Completion, 'completed'> & { completed: number })[]
-    ).map((r) => ({ ...r, completed: Boolean(r.completed) }));
-  }
-
-  pruneCompletions(olderThanDays: number): number {
-    const cutoff = new Date(Date.now() - olderThanDays * 86400000).toISOString();
-    return this.db.prepare('DELETE FROM completions WHERE deleted_at < ?').run(cutoff).changes;
-  }
-
-  pruneRuns(olderThanDays: number): number {
-    const cutoff = new Date(Date.now() - olderThanDays * 86400000).toISOString();
-    return this.db.prepare('DELETE FROM runs WHERE started_at < ?').run(cutoff).changes;
   }
 
   // ---- People ----

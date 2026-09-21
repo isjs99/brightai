@@ -88,11 +88,16 @@ export function requireAuth(auth: AuthProvider) {
   };
 }
 
-/** Anything that changes state is admin only. Account managers get read access. */
+/** Writes account managers may make with the view-only login: ticking their own checklist. */
+export const AM_WRITABLE = [/^\/checklists\/tick(-all)?$/];
+
+/** Anything that changes state is admin only. Account managers get read access, plus the checklist ticks. */
 export function requireAdminForWrites(auth: SharedPasswordAuth) {
   return (req: Request, res: Response, next: NextFunction) => {
     if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return next();
-    if (auth.roleOf(req) === 'admin') return next();
+    const role = auth.roleOf(req);
+    if (role === 'admin') return next();
+    if (role === 'am' && req.method === 'POST' && AM_WRITABLE.some((re) => re.test(req.path))) return next();
     res.status(403).json({ error: 'Admin only. Account managers have view access; ask an admin to make this change.' });
   };
 }

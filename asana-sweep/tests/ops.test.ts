@@ -46,7 +46,7 @@ describe('stock countdown and projection', () => {
   });
   it('stores snapshots and overrides', () => {
     const q = new Queries(openTestDb());
-    const a = q.createAccount({ name: 'Kijimea DE', markets: 'DE', am_name: null, aa_name: null, asana_project_gid: null, asana_project_name: '', enabled: true, notes: null, commission_pct: null, commission_basis: 'gmv', settlement_pct: 100, slack_channel: null, client_slack_channel: null, client_domain: null });
+    const a = q.createAccount({ name: 'Kijimea DE', markets: 'DE', am_name: null, aa_name: null, enabled: true, notes: null, commission_pct: null, commission_basis: 'gmv', settlement_pct: 100, slack_channel: null, client_slack_channel: null, client_domain: null });
     expect(q.replaceStockSnapshot('shop1', a.id, [{ product_id: 'p', product_title: 'T', sku_id: 'k', sku_name: null, seller_sku: null, product_status: 'ACTIVATE', on_hand: 3, sold_7d: 1, sold_30d: 4 }])).toBe(1);
     q.setStockOverride('shop1', 'k', { velocity: 2, exclude: true });
     const rows = q.listStock('shop1');
@@ -58,7 +58,7 @@ describe('stock countdown and projection', () => {
 });
 
 describe('incidents', () => {
-  const account = (q: Queries, extra: Partial<Account> = {}) => q.createAccount({ name: 'Kijimea DE', markets: 'DE', am_name: 'Ana', aa_name: null, asana_project_gid: null, asana_project_name: '', enabled: true, notes: null, commission_pct: null, commission_basis: 'gmv', settlement_pct: 100, slack_channel: '#acct-kijimea', client_slack_channel: null, client_domain: null, ...extra });
+  const account = (q: Queries, extra: Partial<Account> = {}) => q.createAccount({ name: 'Kijimea DE', markets: 'DE', am_name: 'Ana', aa_name: null, enabled: true, notes: null, commission_pct: null, commission_basis: 'gmv', settlement_pct: 100, slack_channel: '#acct-kijimea', client_slack_channel: null, client_domain: null, ...extra });
   it('maps monitor flags to incident kinds', () => {
     const d = incidentsFromFlags([{ id: 1, account_id: 1, account_name: 'K', shop_id: 's', code: 'tts_unshipped', severity: 'crit', message: 'K: 3 orders waiting', detail: 'a, b', first_seen_at: '', last_seen_at: '', resolved_at: null, acknowledged_at: null }, { id: 2, account_id: 1, account_name: 'K', shop_id: null, code: 'tts_low_stock', severity: 'warn', message: 'x', detail: null, first_seen_at: '', last_seen_at: '', resolved_at: null, acknowledged_at: null }]);
     expect(d).toHaveLength(1);
@@ -111,7 +111,7 @@ describe('client reports', () => {
   });
   it('gathers GMV, calls and market context and renders the prompt and template', async () => {
     const q = new Queries(openTestDb());
-    const a = q.createAccount({ name: 'Kijimea DE', markets: 'DE', am_name: 'Ana', aa_name: null, asana_project_gid: null, asana_project_name: '', enabled: true, notes: null, commission_pct: null, commission_basis: 'gmv', settlement_pct: 100, slack_channel: null, client_slack_channel: '#ext-kijimea', client_domain: 'kijimea.com' });
+    const a = q.createAccount({ name: 'Kijimea DE', markets: 'DE', am_name: 'Ana', aa_name: null, enabled: true, notes: null, commission_pct: null, commission_basis: 'gmv', settlement_pct: 100, slack_channel: null, client_slack_channel: '#ext-kijimea', client_domain: 'kijimea.com' });
     q.addShop(a.id, 'cr1', 'Kijimea DE', 'EUR');
     q.upsertGmv([{ shop_id: 'cr1', date: '2026-09-08', total_gmv: 1000, affiliate_gmv: 600, units: 40 }, { shop_id: 'cr1', date: '2026-09-10', total_gmv: 500, affiliate_gmv: 200, units: 20 }, { shop_id: 'cr1', date: '2026-09-02', total_gmv: 800, affiliate_gmv: 300, units: 30 }]);
     q.createProspect({ shop_name: 'Beper IT', market: 'DE', rise_score: 0.3, gmv_7d: 37733, currency: 'EUR', category: 'Home' } as never);
@@ -157,7 +157,7 @@ describe('cruva playbook', () => {
   });
   it('seeds the library, imports a listing, reconciles and builds an apply pack', async () => {
     const q = new Queries(openTestDb());
-    const a = q.createAccount({ name: 'GreatVita', markets: 'DE', am_name: null, aa_name: null, asana_project_gid: null, asana_project_name: '', enabled: true, notes: null, commission_pct: null, commission_basis: 'gmv', settlement_pct: 100, slack_channel: null, client_slack_channel: null, client_domain: null });
+    const a = q.createAccount({ name: 'GreatVita', markets: 'DE', am_name: null, aa_name: null, enabled: true, notes: null, commission_pct: null, commission_basis: 'gmv', settlement_pct: 100, slack_channel: null, client_slack_channel: null, client_domain: null });
     q.addShop(a.id, 'gv', 'GreatVita DE', 'EUR');
     const eng = new PlaybookEngine(q, { configured: false } as never);
     eng.seed();
@@ -201,7 +201,7 @@ describe('client copilot', () => {
   });
   it('indexes SOPs and account data, drafts an answer with sources, and sends it to the Slack thread', async () => {
     const q = new Queries(openTestDb());
-    const a = q.createAccount({ name: 'Kijimea DE', markets: 'DE', am_name: null, aa_name: null, asana_project_gid: null, asana_project_name: '', enabled: true, notes: null, commission_pct: null, commission_basis: 'gmv', settlement_pct: 100, slack_channel: null, client_slack_channel: '#ext-kijimea', client_domain: 'kijimea.com' });
+    const a = q.createAccount({ name: 'Kijimea DE', markets: 'DE', am_name: null, aa_name: null, enabled: true, notes: null, commission_pct: null, commission_basis: 'gmv', settlement_pct: 100, slack_channel: null, client_slack_channel: '#ext-kijimea', client_domain: 'kijimea.com' });
     q.createContext({ language: '*', scope: 'both', account_id: a.id, title: 'Reporting cadence', body: 'We send the weekly report every Monday before noon and the monthly report on the 3rd working day.', enabled: true });
     const posts: { channel: string; text: string; thread?: string | null }[] = [];
     const slack = { configured: true, channelId: async (c: string) => c, post: async (channel: string, text: string, o: { thread_ts?: string | null } = {}) => { posts.push({ channel, text, thread: o.thread_ts }); return { ts: '2', channel }; }, history: async () => [], tryDm: async () => null };

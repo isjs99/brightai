@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from 'react';
-import type { AccountStatusRow, Check, CheckSettings, CheckWithItems } from '../../../sweep/types';
-import { api, fmtDate, fmtRelative, useLiveUpdates } from '../api';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Link } from 'react-router-dom';
+import type { AccountStatusRow, Check, CheckItem, CheckSettings, CheckWithItems } from '../../../sweep/types';
+import { api, currentActor, fmtDate, fmtRelative, useLiveUpdates } from '../api';
+import { useIsAdmin } from '../session';
 
 function Frac({ done, total, complete }: { done: number; total: number; complete: boolean }) {
   if (total === 0) return <span className="frac sub">0/0</span>;
@@ -13,38 +15,71 @@ export function StatusPill({ check }: { check: Check | null }) {
     case 'complete': return <span className="badge good">✓ Complete</span>;
     case 'partial': return <span className="badge warn">◐ Partial</span>;
     case 'none': return <span className="badge crit">○ Nothing done</span>;
-    case 'empty': return <span className="badge muted">No tasks due</span>;
-    case 'unlinked': return <span className="badge muted">Not linked</span>;
+    case 'empty': return <span className="badge muted">No items due</span>;
+    case 'unlinked': return <span className="badge muted">No items</span>;
     case 'error': return <span className="badge crit">Error</span>;
   }
 }
 
-function CheckDetail({ checkId, accountId, version }: { checkId: number; accountId: number; version: string }) {
-  const [check, setCheck] = useState<CheckWithItems | null>(null);
-  useEffect(() => {
-    // Live rows carry a negative id; fetch them by account instead.
-    const p = checkId > 0 ? api.getCheck(checkId) : api.getLiveCheck(accountId);
-    p.then((r) => setCheck(r.check)).catch(() => setCheck(null));
-  }, [checkId, accountId, version]);
-  if (!check) return <p className="sub">Loading…</p>;
-  const stateLabel: Record<string, string> = { done: 'Done', pending: 'Pending', not_due: 'Not due today', stale: 'Old copy' };
-  const flagLabel: Record<string, string> = { no_repeat: 'no new copy: repeat not set?', no_due_date: 'no due date', overdue: 'overdue' };
+const DAY_NAMES = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+/**
+ * The checklist itself: every line due on the date with a checkbox, the AA action items underneath.
+ * Ticks go straight to the server and the status updates live for everyone.
+ */
+function TickList({ accountId, check, date, editable, onChange }: { accountId: number; check: CheckWithItems; date: string; editable: boolean; onChange: (c: CheckWithItems) => void }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const toggle = async (itemId: string, done: boolean) => {
+    setBusy(itemId);
+    setError(null);
+    try {
+      const r = await api.tick({ account_id: accountId, item_id: Number(itemId), done, date });
+      onChange(r.check);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+  const all = async (done: boolean, role?: 'am' | 'aa') => {
+    setBusy('all');
+    setError(null);
+    try { onChange((await api.tickAll({ account_id: accountId, done, role, date })).check); } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
+  };
+  const due = check.items.filter((i) => i.state !== 'not_due');
+  const later = check.items.filter((i) => i.state === 'not_due');
+  const stateLabel: Record<string, string> = { done: 'Done', pending: 'To do', not_due: 'Not today', stale: 'Old' };
+  const box = (id: string, done: boolean, label: React.ReactNode, sub?: React.ReactNode) => (
+    <label className={`tick ${done ? 'on' : ''}`}>
+      <input type="checkbox" checked={done} disabled={!editable || busy !== null} onChange={(e) => toggle(id, e.target.checked)} />
+      <span>{label}{sub}</span>
+    </label>
+  );
   return (
-    <>
+    <div className="ticklist">
+      {error && <div className="banner crit">{error}</div>}
       {check.error_message && <div className="banner crit">{check.error_message}</div>}
-      {check.warnings.length > 0 && <div className="banner warn">{check.warnings.map((w, i) => <div key={i}>{w}</div>)}</div>}
-      {check.items.length === 0 ? <p className="sub">No tasks found.</p> : (
+      {editable && due.length > 0 && (
+        <div className="actions" style={{ marginBottom: 8 }}>
+          <button className="small" disabled={busy !== null} onClick={() => all(true, 'am')}>Tick all AM lines</button>
+          <button className="small" disabled={busy !== null} onClick={() => all(true, 'aa')}>Tick all AA actions</button>
+          <button className="small" disabled={busy !== null} onClick={() => all(true)}>Tick everything</button>
+          <button className="small" disabled={busy !== null} onClick={() => { if (window.confirm('Untick every line for this day?')) void all(false); }}>Clear day</button>
+        </div>
+      )}
+      {due.length === 0 ? <p className="sub">Nothing is due on this day.</p> : (
         <ul className="item-list">
-          {check.items.map((it) => (
+          {due.map((it: CheckItem) => (
             <li key={it.task_gid}>
-              <span className={`badge ${it.state === 'done' ? 'good' : it.state === 'pending' ? 'crit' : 'muted'}`}>{stateLabel[it.state]}</span>
+              <span className={`badge ${it.state === 'done' ? 'good' : 'crit'}`}>{stateLabel[it.state]}</span>
               <div>
-                <b>{it.name}</b> <span className="sub">· {it.role.toUpperCase()} · {it.assignee_name ?? 'unassigned'}{it.section_name ? ` · ${it.section_name}` : ''}{it.due_on ? ` · due ${it.due_on}` : ''}</span>
-                {it.flags.map((f) => <span key={f} className="flag">{flagLabel[f]}</span>)}
+                {box(it.task_gid, it.state === 'done', <b>{it.name}</b>, <span className="sub"> · {it.role.toUpperCase()}{it.section_name ? ` · ${it.section_name}` : ''}{it.frequency === 'weekly' ? ' · weekly' : ''}{it.completed_at ? ` · ${it.assignee_name ?? 'someone'} ${fmtRelative(it.completed_at)}` : ''}</span>)}
+                {it.guidance && <div className="guidance">{it.guidance}</div>}
                 {it.subtasks.length > 0 && (
                   <ul>
                     {it.subtasks.map((s) => (
-                      <li key={s.task_gid} className="sub">{s.done ? '☑' : '☐'} {s.name} <span className="sub">· {s.role.toUpperCase()} · {s.assignee_name ?? 'unassigned'}</span></li>
+                      <li key={s.task_gid}>{box(s.task_gid, s.done, s.name, <span className="sub"> · {s.role.toUpperCase()}{s.frequency === 'weekly' ? ' · weekly' : ''}{s.completed_at ? ` · ${s.assignee_name ?? 'someone'} ${fmtRelative(s.completed_at)}` : ''}</span>)}</li>
                     ))}
                   </ul>
                 )}
@@ -53,8 +88,20 @@ function CheckDetail({ checkId, accountId, version }: { checkId: number; account
           ))}
         </ul>
       )}
-    </>
+      {later.length > 0 && <p className="sub" style={{ marginTop: 8 }}>Not due today: {later.map((i) => i.name).join(' · ')}</p>}
+    </div>
   );
+}
+
+function CheckDetail({ accountId, checkId, date, isToday, version, editable }: { accountId: number; checkId: number; date: string; isToday: boolean; version: string; editable: boolean }) {
+  const [check, setCheck] = useState<CheckWithItems | null>(null);
+  useEffect(() => {
+    // Today: the live picture (negative ids are live rows). Past days: the recorded check.
+    const p = isToday ? api.getLiveCheck(accountId).catch(() => (checkId > 0 ? api.getCheck(checkId) : Promise.reject(new Error('no live status')))) : api.getCheck(checkId);
+    p.then((r) => setCheck(r.check)).catch(() => setCheck(null));
+  }, [checkId, accountId, version, isToday]);
+  if (!check) return <p className="sub">Loading…</p>;
+  return <TickList accountId={accountId} check={check} date={date} editable={editable} onChange={setCheck} />;
 }
 
 function SettingsPanel({ settings, onSaved }: { settings: CheckSettings; onSaved: (s: CheckSettings) => void }) {
@@ -68,15 +115,7 @@ function SettingsPanel({ settings, onSaved }: { settings: CheckSettings; onSaved
     setBusy(true);
     setError(null);
     try {
-      const r = await api.saveCheckSettings({
-        check_cron: form.check_cron,
-        check_timezone: form.check_timezone,
-        check_enabled: form.check_enabled,
-        check_slack_webhook: form.check_slack_webhook,
-        live_enabled: form.live_enabled,
-        live_interval_seconds: form.live_interval_seconds,
-        live_sweep_enabled: form.live_sweep_enabled,
-      });
+      const r = await api.saveCheckSettings({ check_cron: form.check_cron, check_timezone: form.check_timezone, check_enabled: form.check_enabled, check_slack_webhook: form.check_slack_webhook });
       onSaved(r.settings);
       setForm(r.settings);
     } catch (err) {
@@ -87,14 +126,10 @@ function SettingsPanel({ settings, onSaved }: { settings: CheckSettings; onSaved
   };
   return (
     <form className="card inline-form admin-only" onSubmit={save} style={{ marginBottom: 16 }}>
-      <label className="field"><span className="lbl">Check time (cron)</span><input type="text" className="mono" value={form.check_cron} onChange={(e) => setForm({ ...form, check_cron: e.target.value })} /><span className="help">{settings.schedule_text}</span></label>
+      <label className="field"><span className="lbl">Lock time (cron)</span><input type="text" className="mono" value={form.check_cron} onChange={(e) => setForm({ ...form, check_cron: e.target.value })} /><span className="help">{settings.schedule_text}</span></label>
       <label className="field"><span className="lbl">Timezone</span><select value={form.check_timezone} onChange={(e) => setForm({ ...form, check_timezone: e.target.value })}>{tzs.map((tz) => <option key={tz}>{tz}</option>)}</select></label>
       <label className="field" style={{ flex: 1, minWidth: 260 }}><span className="lbl">Slack webhook for the daily digest</span><input type="url" value={form.check_slack_webhook} onChange={(e) => setForm({ ...form, check_slack_webhook: e.target.value })} placeholder="https://hooks.slack.com/services/…" /></label>
-      <label className="field check"><input type="checkbox" checked={form.check_enabled} onChange={(e) => setForm({ ...form, check_enabled: e.target.checked })} /><span>Scheduled</span></label>
-      <div style={{ flexBasis: '100%', height: 0 }} />
-      <label className="field check"><input type="checkbox" checked={form.live_enabled} onChange={(e) => setForm({ ...form, live_enabled: e.target.checked })} /><span>Live watching<div className="help">Look for changes on every linked board and update this page as they happen.</div></span></label>
-      <label className="field" style={{ minWidth: 120 }}><span className="lbl">Every (seconds)</span><input type="number" min={15} max={3600} value={form.live_interval_seconds} onChange={(e) => setForm({ ...form, live_interval_seconds: Number(e.target.value) })} /></label>
-      <label className="field check"><input type="checkbox" checked={form.live_sweep_enabled} onChange={(e) => setForm({ ...form, live_sweep_enabled: e.target.checked })} /><span>Delete spent copies immediately<div className="help">When a board changes, run its sweep rule straight away (ignores the minimum age; dry run still respected).</div></span></label>
+      <label className="field check"><input type="checkbox" checked={form.check_enabled} onChange={(e) => setForm({ ...form, check_enabled: e.target.checked })} /><span>Lock the day's record on schedule</span></label>
       <button className="primary" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
       {error && <span className="error">{error}</span>}
     </form>
@@ -102,17 +137,17 @@ function SettingsPanel({ settings, onSaved }: { settings: CheckSettings; onSaved
 }
 
 export default function Checklists() {
+  const isAdmin = useIsAdmin();
   const [date, setDate] = useState<string | undefined>(undefined);
   const [data, setData] = useState<{ date: string; today: string; rows: AccountStatusRow[]; dates: string[] } | null>(null);
   const [settings, setSettings] = useState<CheckSettings | null>(null);
   const [showSettings, setShowSettings] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
-  const [open, setOpen] = useState<number | null>(null);
-  const [busy, setBusy] = useState<number | null>(null);
-  const [filterAm, setFilterAm] = useState('');
-
+  const [open, setOpen] = useState<Set<number>>(new Set());
+  const [filterAm, setFilterAm] = useState(() => currentActor());
   const [version, setVersion] = useState(0);
+
   const load = useCallback(() => {
     api.listChecks(date).then((d) => { setData(d); setVersion((v) => v + 1); }).catch((e) => setError((e as Error).message));
     api.getCheckSettings().then((r) => setSettings(r.settings)).catch(() => undefined);
@@ -126,31 +161,23 @@ export default function Checklists() {
     try { await api.runChecks(); setDate(undefined); load(); } catch (e) { setError((e as Error).message); } finally { setRunning(false); }
   };
 
-  const refreshLive = async () => {
-    setRunning(true);
-    setError(null);
-    try { await api.liveRefresh(); load(); } catch (e) { setError((e as Error).message); } finally { setRunning(false); }
-  };
-
-  const checkOne = async (id: number) => {
-    setBusy(id);
-    try { await api.checkAccount(id); load(); } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
-  };
-
-  const order: Record<string, number> = { none: 0, partial: 1, error: 2, complete: 3, empty: 4, unlinked: 5 };
-  const isTodayView = Boolean(data && data.date === data.today);
+  const isToday = Boolean(data && data.date === data.today);
+  const ams = useMemo(() => [...new Set((data?.rows ?? []).map((r) => r.account.am_name ?? 'Unassigned'))].sort(), [data]);
+  const amFilter = ams.includes(filterAm) ? filterAm : ams.find((a) => filterAm && a.toLowerCase().startsWith(filterAm.toLowerCase().split(' ')[0])) ?? '';
   // Today shows the live picture (falls back to the recorded check); past days show the record.
   const rows = (data?.rows ?? [])
-    .map((r) => ({ ...r, snapshot: r.check, check: isTodayView ? (r.live ?? r.check) : r.check }))
-    .filter((r) => r.account.enabled && (!filterAm || (r.account.am_name ?? 'Unassigned') === filterAm))
-    .sort((a, b) => (a.check ? order[a.check.status] : 6) - (b.check ? order[b.check.status] : 6) || a.account.name.localeCompare(b.account.name));
-  const lastLive = rows.map((r) => r.live?.checked_at ?? '').filter(Boolean).sort().at(-1) ?? null;
-  const linked = rows.filter((r) => r.check && r.check.status !== 'unlinked');
-  const complete = linked.filter((r) => r.check!.combined_complete).length;
-  const amDone = linked.filter((r) => r.check!.am_complete).length;
-  const aaDone = linked.filter((r) => r.check!.aa_complete).length;
-  const ams = [...new Set((data?.rows ?? []).map((r) => r.account.am_name ?? 'Unassigned'))].sort();
-  const isToday = data && data.date === data.today;
+    .map((r) => ({ ...r, snapshot: r.check, check: isToday ? (r.live ?? r.check) : r.check }))
+    .filter((r) => r.account.enabled && (!amFilter || (r.account.am_name ?? 'Unassigned') === amFilter))
+    // Stable order (AM, then account) so rows do not jump around while someone is ticking.
+    .sort((a, b) => (a.account.am_name ?? 'zz').localeCompare(b.account.am_name ?? 'zz') || a.account.name.localeCompare(b.account.name));
+  const counted = rows.filter((r) => r.check && r.check.status !== 'unlinked' && r.check.status !== 'empty');
+  const complete = counted.filter((r) => r.check!.combined_complete).length;
+  const amDone = counted.filter((r) => r.check!.am_complete).length;
+  const aaDone = counted.filter((r) => r.check!.aa_complete).length;
+  const lines = rows.reduce((n, r) => n + (r.check ? r.check.am_total + r.check.aa_total : 0), 0);
+  const linesDone = rows.reduce((n, r) => n + (r.check ? r.check.am_done + r.check.aa_done : 0), 0);
+  const editable = isToday || isAdmin;
+  const dayLabel = data ? `${DAY_NAMES[((new Date(data.date + 'T12:00:00Z').getUTCDay() + 6) % 7) + 1]} ${data.date}` : '';
 
   return (
     <>
@@ -158,16 +185,15 @@ export default function Checklists() {
         <div>
           <h1>Checklists</h1>
           <p className="hint" style={{ margin: 0 }}>
-            {settings?.live_enabled ? (
-              <><span className={`badge ${connected ? 'good' : 'muted'}`}>{connected ? '● Live' : '○ Reconnecting'}</span> watching {settings.live_watching} board{settings.live_watching === 1 ? '' : 's'} every {settings.live_interval_seconds}s{lastLive ? `, last change ${fmtRelative(lastLive)}` : ''}. </>
-            ) : settings ? <><span className="badge muted">Live off</span> </> : ''}
-            {settings ? <>Locked as the day's record {settings.schedule_text}{settings.next_run_at ? ` (next ${fmtRelative(settings.next_run_at)})` : ' (paused)'}.</> : ''}{' '}
-            <a href="#" onClick={(e) => { e.preventDefault(); setShowSettings((s) => !s); }}>{showSettings ? 'Hide settings' : 'Settings'}</a>
+            <span className={`badge ${connected ? 'good' : 'muted'}`}>{connected ? '● Live' : '○ Reconnecting'}</span>{' '}
+            Tick your lines here as you go; every tick updates the status for everyone. {settings ? <>The day's record is locked {settings.schedule_text}{settings.next_run_at ? ` (next ${fmtRelative(settings.next_run_at)})` : ' (paused)'}.</> : ''}{' '}
+            {isAdmin && <a href="#" onClick={(e) => { e.preventDefault(); setShowSettings((s) => !s); }}>{showSettings ? 'Hide settings' : 'Settings'}</a>}
+            {isAdmin && <> · <Link to="/checklist-template">Edit the items</Link></>}
           </p>
         </div>
         <div className="actions">
-          <button className="admin-only" onClick={refreshLive} disabled={running}>{running ? 'Refreshing…' : 'Refresh from Asana'}</button>
-          <button className="primary admin-only" onClick={runAll} disabled={running}>{running ? 'Checking all accounts…' : 'Check all now'}</button>
+          <button className="small" onClick={() => setOpen(open.size === rows.length ? new Set() : new Set(rows.map((r) => r.account.id)))}>{open.size === rows.length && rows.length ? 'Collapse all' : 'Expand all'}</button>
+          <button className="primary admin-only" onClick={runAll} disabled={running}>{running ? 'Recording…' : 'Record status now'}</button>
         </div>
       </div>
       {error && <div className="banner crit">{error}</div>}
@@ -178,57 +204,63 @@ export default function Checklists() {
           {data && !data.dates.includes(data.today) && <option value={data.today}>{data.today} (today)</option>}
           {(data?.dates ?? []).map((d) => <option key={d} value={d}>{d}{d === data?.today ? ' (today)' : ''}</option>)}
         </select>
-        <select value={filterAm} onChange={(e) => setFilterAm(e.target.value)}>
+        <select value={amFilter} onChange={(e) => setFilterAm(e.target.value)} title="Pick your name top right and this follows you">
           <option value="">All AMs</option>
           {ams.map((a) => <option key={a} value={a}>{a}</option>)}
         </select>
+        {data && <span className="sub">{dayLabel}{!isToday ? ' · past day: the recorded status' : ''}</span>}
       </div>
 
       <div className="kpis">
-        <div className="kpi"><div className="v">{complete}/{linked.length}</div><div className="k">accounts fully complete</div></div>
-        <div className="kpi"><div className="v">{amDone}/{linked.length}</div><div className="k">AM checklists complete</div></div>
-        <div className="kpi"><div className="v">{aaDone}/{linked.length}</div><div className="k">AA actions complete</div></div>
-        <div className="kpi"><div className="v">{rows.length - linked.length}</div><div className="k">not linked or not checked</div></div>
+        <div className="kpi"><div className="v">{complete}/{counted.length}</div><div className="k">accounts fully complete</div></div>
+        <div className="kpi"><div className="v">{amDone}/{counted.length}</div><div className="k">AM checklists complete</div></div>
+        <div className="kpi"><div className="v">{aaDone}/{counted.length}</div><div className="k">AA actions complete</div></div>
+        <div className="kpi"><div className="v">{linesDone}/{lines}</div><div className="k">lines ticked{amFilter ? ` for ${amFilter}` : ''}</div></div>
       </div>
 
-      {data === null ? <p>Loading…</p> : (
+      {data === null ? <p>Loading…</p> : rows.length === 0 ? <div className="empty">No accounts{amFilter ? ` for ${amFilter}` : ''}.</div> : (
         <table>
           <thead>
-            <tr><th>Account</th><th>AM</th><th>Status</th><th className="num">AM</th><th className="num">AA</th><th className="hide-sm">Flags</th><th className="hide-sm">Checked</th><th></th></tr>
+            <tr><th></th><th>Account</th><th>AM</th><th>Status</th><th className="num">AM</th><th className="num">AA</th><th className="hide-sm">Updated</th></tr>
           </thead>
           <tbody>
-            {rows.map(({ account: a, check: c, snapshot }) => (
-              <RowGroup key={a.id} a={a} c={c} snapshot={isTodayView && snapshot?.final ? snapshot : null} version={String(version)} open={open === a.id} onToggle={() => setOpen(open === a.id ? null : a.id)} onCheck={isToday ? () => checkOne(a.id) : undefined} busy={busy === a.id} />
-            ))}
+            {rows.map(({ account: a, check: c, snapshot, checklist_source, checklist_items }) => {
+              const isOpen = open.has(a.id);
+              const toggleOpen = () => { const n = new Set(open); if (isOpen) n.delete(a.id); else n.add(a.id); setOpen(n); };
+              return (
+                <RowGroup key={a.id} a={a} c={c} source={checklist_source} items={checklist_items} snapshot={isToday && snapshot?.final ? snapshot : null} open={isOpen} onToggle={toggleOpen}>
+                  {isOpen && c && <CheckDetail accountId={a.id} checkId={c.id} date={data.date} isToday={isToday} version={String(version)} editable={editable} />}
+                  {isOpen && !c && <p className="sub">No status recorded for this day.</p>}
+                </RowGroup>
+              );
+            })}
           </tbody>
         </table>
       )}
       <p className="hint" style={{ marginTop: 12 }}>
-        AM = tasks assigned to the account manager. AA = everything else, including subtasks. An account is complete when both are. Weekly checks only count on the day they are due.
+        AM = the account manager's daily checks. AA = the action items underneath (and the Affiliate lines). An account is complete when both are. Weekly lines only appear on their day. Past days can be corrected by an admin.
       </p>
     </>
   );
 }
 
-function RowGroup({ a, c, snapshot, version, open, onToggle, onCheck, busy }: { a: AccountStatusRow['account']; c: Check | null; snapshot: Check | null; version: string; open: boolean; onToggle: () => void; onCheck?: () => void; busy: boolean }) {
-  const flags = c?.warnings.length ?? 0;
+function RowGroup({ a, c, source, items, snapshot, open, onToggle, children }: { a: AccountStatusRow['account']; c: Check | null; source: AccountStatusRow['checklist_source']; items: number; snapshot: Check | null; open: boolean; onToggle: () => void; children?: React.ReactNode }) {
   return (
     <>
-      <tr className={c ? 'clickable' : ''} onClick={c ? onToggle : undefined}>
-        <td><b>{a.name}</b><div className="sub">{a.asana_project_gid ? a.asana_project_name : 'no project linked'}</div></td>
+      <tr className="clickable" onClick={onToggle}>
+        <td style={{ width: 24 }}><button className="small" onClick={(e) => { e.stopPropagation(); onToggle(); }} aria-label={open ? 'Collapse' : 'Expand'}>{open ? '−' : '+'}</button></td>
+        <td><b>{a.name}</b><div className="sub">{source === 'custom' ? `own list · ${items} lines` : source === 'template' ? `${items} lines` : 'no checklist items'}</div></td>
         <td>{a.am_name ?? <span className="sub">none</span>}</td>
         <td>
           <StatusPill check={c} />
-          {snapshot && snapshot.status !== c?.status && <div className="sub" title="Status when the day's record was locked">at deadline: {snapshot.status.replace('_', ' ')}</div>}
+          {snapshot && snapshot.status !== c?.status && <div className="sub" title="Status when the day's record was locked">at lock: {snapshot.status.replace('_', ' ')}</div>}
         </td>
         <td className="num">{c && c.status !== 'unlinked' ? <Frac done={c.am_done} total={c.am_total} complete={c.am_complete} /> : ''}</td>
         <td className="num">{c && c.status !== 'unlinked' ? <Frac done={c.aa_done} total={c.aa_total} complete={c.aa_complete} /> : ''}</td>
-        <td className="hide-sm">{flags ? <span className="badge crit">{flags} warning{flags > 1 ? 's' : ''}</span> : c?.error_message ? <span className="sub">{c.error_message}</span> : ''}</td>
         <td className="hide-sm sub" title={c ? fmtDate(c.checked_at) : ''}>{c ? fmtRelative(c.checked_at) : ''}</td>
-        <td onClick={(e) => e.stopPropagation()}>{onCheck && a.asana_project_gid && <button className="small admin-only" disabled={busy} onClick={onCheck}>{busy ? '…' : 'Check now'}</button>}</td>
       </tr>
-      {open && c && (
-        <tr className="expand"><td colSpan={8}><CheckDetail checkId={c.id} accountId={a.id} version={version} /></td></tr>
+      {open && (
+        <tr className="expand"><td colSpan={7}>{children}</td></tr>
       )}
     </>
   );

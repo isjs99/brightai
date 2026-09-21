@@ -1,15 +1,14 @@
 // Pure checklist completion logic. No I/O. Tested in tests/evaluate.test.ts.
 //
-// For one account project on one day:
-//   - Group top-level tasks by trimmed name. Each group is one checklist item.
-//   - An item is DONE if any copy was completed on the check date (in the account timezone).
-//   - Otherwise it is PENDING if an incomplete copy is due today, overdue, or has no due date.
-//   - Items whose only incomplete copy is due in the future (weekly checks) are not due today.
-//   - Subtasks (AA action items) count if incomplete or completed today.
-//   - Every task is attributed to the AM or the AA by assignee, so AM, AA and combined
-//     completion can be reported separately.
+// For one account on one day:
+//   - Every enabled top-level item that is due on the date (daily items on workdays, weekly items on
+//     their weekday) is one checklist line; it is DONE when a tick exists for that date, else PENDING.
+//   - Items not due today are reported as NOT_DUE and do not count.
+//   - Action items (children) are evaluated the same way underneath their parent; a child is only
+//     shown when it is due (or was ticked) on the date.
+//   - Every line carries a role (AM or AA) so AM, AA and combined completion are reported separately.
 
-import type { ChecklistTask } from '../asana/client.js';
+import type { ChecklistItem, ChecklistTick } from '../sweep/types.js';
 
 export type Role = 'am' | 'aa';
 export type ItemState = 'done' | 'pending' | 'not_due' | 'stale';
@@ -20,6 +19,8 @@ export interface ItemResult {
   state: ItemState;
   role: Role;
   task_gid: string;
+  guidance: string | null;
+  frequency: 'daily' | 'weekly';
   section_name: string | null;
   assignee_name: string | null;
   due_on: string | null;
@@ -33,6 +34,7 @@ export interface SubtaskResult {
   task_gid: string;
   role: Role;
   done: boolean;
+  frequency: 'daily' | 'weekly';
   assignee_name: string | null;
   completed_at: string | null;
 }
@@ -80,112 +82,52 @@ export function personMatches(assignee: string | null, configured: string | null
   return a[0] === c[0] || a.join(' ') === c.join(' ');
 }
 
-function roleOf(task: { assignee_name: string | null }, isSubtask: boolean, opts: EvalOptions): Role {
-  const a = task.assignee_name;
-  if (personMatches(a, opts.amName)) return 'am';
-  if (personMatches(a, opts.aaName)) return 'aa';
-  if (!a) return isSubtask ? 'aa' : 'am';
-  // Assigned to someone who is not the configured AM: treat as AA work.
-  return opts.amName ? 'aa' : 'am';
+/** ISO weekday of a YYYY-MM-DD date: 1 = Monday … 7 = Sunday. */
+export function isoWeekday(date: string): number {
+  const d = new Date(date + 'T12:00:00Z').getUTCDay();
+  return d === 0 ? 7 : d;
 }
 
-export function evaluateChecklist(topLevel: ChecklistTask[], subtasksByParent: Map<string, ChecklistTask[]>, opts: EvalOptions): EvalResult {
-  const groups = new Map<string, ChecklistTask[]>();
-  for (const t of topLevel) {
-    const key = t.name.trim();
-    if (!key) continue;
-    const list = groups.get(key) ?? [];
-    list.push(t);
-    groups.set(key, list);
-  }
+/** Is this item due on the date? Daily items every day the checklist is evaluated; weekly ones on their weekday. */
+export function isDue(item: Pick<ChecklistItem, 'frequency' | 'weekday'>, date: string): boolean {
+  if (item.frequency === 'weekly') return (item.weekday ?? 1) === isoWeekday(date);
+  return true;
+}
 
-  const items: ItemResult[] = [];
-  const warnings: string[] = [];
+export function evaluateChecklist(items: ChecklistItem[], ticks: ChecklistTick[], opts: EvalOptions): EvalResult {
+  const tickByItem = new Map<number, ChecklistTick>();
+  for (const t of ticks) if (t.tick_date === opts.checkDate) tickByItem.set(t.item_id, t);
+  const enabled = items.filter((i) => i.enabled);
+  const children = new Map<number, ChecklistItem[]>();
+  for (const i of enabled) if (i.parent_id !== null) children.set(i.parent_id, [...(children.get(i.parent_id) ?? []), i]);
+  const byPos = (a: ChecklistItem, b: ChecklistItem) => a.position - b.position || a.id - b.id;
+  const nameFor = (role: Role, tick: ChecklistTick | undefined) => tick?.done_by ?? (role === 'am' ? opts.amName : opts.aaName);
 
-  for (const [name, copies] of groups) {
-    // Most recent completion first, so repeated completions on one day resolve to the latest copy.
-    const doneToday = copies
-      .filter((c) => c.completed && c.completed_at && localDate(c.completed_at, opts.tz) === opts.checkDate)
-      .sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''));
-    const incomplete = copies.filter((c) => !c.completed);
-    // Earliest due first (no due date last), so the copy that is actually due today represents the item.
-    const pending = incomplete
-      .filter((c) => !c.due_on || c.due_on <= opts.checkDate)
-      .sort((a, b) => (a.due_on ?? '9999').localeCompare(b.due_on ?? '9999'));
-    const future = incomplete.filter((c) => c.due_on && c.due_on > opts.checkDate);
-
-    let state: ItemState;
-    let rep: ChecklistTask;
-    const flags: ItemFlag[] = [];
-    if (doneToday.length) {
-      state = 'done';
-      rep = doneToday[0];
-      if (!incomplete.length) {
-        flags.push('no_repeat');
-        warnings.push(`"${name}" was completed today but no new copy appeared. Check it is set to repeat every workday.`);
-      }
-    } else if (pending.length) {
-      state = 'pending';
-      rep = pending[0];
-      if (!rep.due_on) {
-        flags.push('no_due_date');
-        warnings.push(`"${name}" has no due date, so it cannot repeat.`);
-      } else if (rep.due_on < opts.checkDate) {
-        flags.push('overdue');
-      }
-    } else if (future.length) {
-      state = 'not_due';
-      rep = future[0];
-    } else {
-      state = 'stale';
-      rep = copies[0];
-      warnings.push(`"${name}" only exists as an old completed copy (no incomplete copy). One-off, or not set to repeat.`);
-    }
-
-    // Subtasks are evaluated like items: grouped by name across every copy of the parent, because
-    // subtasks repeat too (a completed copy due today plus a fresh copy due tomorrow) and Asana
-    // copies them onto each new parent instance. A subtask is done if any copy was completed
-    // today, pending if a copy is due today or overdue, and ignored if it is only due later.
+  const results: ItemResult[] = [];
+  for (const item of enabled.filter((i) => i.parent_id === null).sort(byPos)) {
+    const tick = tickByItem.get(item.id);
+    const due = isDue(item, opts.checkDate);
+    const state: ItemState = tick ? 'done' : due ? 'pending' : 'not_due';
     const subtasks: SubtaskResult[] = [];
-    if (state === 'done' || state === 'pending') {
-      const byName = new Map<string, ChecklistTask[]>();
-      for (const c of copies) {
-        for (const st of subtasksByParent.get(c.gid) ?? []) {
-          const key = st.name.trim().toLowerCase();
-          if (!key) continue;
-          byName.set(key, [...(byName.get(key) ?? []), st]);
-        }
-      }
-      for (const list of byName.values()) {
-        const doneSt = list
-          .filter((s) => s.completed && s.completed_at && localDate(s.completed_at, opts.tz) === opts.checkDate)
-          .sort((a, b) => (b.completed_at ?? '').localeCompare(a.completed_at ?? ''));
-        const pendingSt = list
-          .filter((s) => !s.completed && (!s.due_on || s.due_on <= opts.checkDate))
-          .sort((a, b) => (a.due_on ?? '9999').localeCompare(b.due_on ?? '9999'));
-        const st = doneSt[0] ?? pendingSt[0];
-        if (!st) continue; // only future copies, or finished on an earlier day
-        subtasks.push({
-          name: st.name,
-          task_gid: st.gid,
-          role: roleOf(st, true, opts),
-          done: doneSt.length > 0,
-          assignee_name: st.assignee_name,
-          completed_at: doneSt.length ? st.completed_at : null,
-        });
+    if (state !== 'not_due') {
+      for (const child of (children.get(item.id) ?? []).sort(byPos)) {
+        const ct = tickByItem.get(child.id);
+        if (!ct && !isDue(child, opts.checkDate)) continue;
+        subtasks.push({ name: child.name, task_gid: String(child.id), role: child.role, done: Boolean(ct), frequency: child.frequency, assignee_name: nameFor(child.role, ct), completed_at: ct?.done_at ?? null });
       }
     }
-
-    items.push({
-      name,
+    results.push({
+      name: item.name,
       state,
-      role: roleOf(rep, false, opts),
-      task_gid: rep.gid,
-      section_name: rep.section_name,
-      assignee_name: rep.assignee_name,
-      due_on: rep.due_on,
-      completed_at: state === 'done' ? rep.completed_at : null,
-      flags,
+      role: item.role,
+      task_gid: String(item.id),
+      guidance: item.guidance,
+      frequency: item.frequency,
+      section_name: item.section || null,
+      assignee_name: nameFor(item.role, tick),
+      due_on: due ? opts.checkDate : null,
+      completed_at: tick?.done_at ?? null,
+      flags: [],
       subtasks,
     });
   }
@@ -195,30 +137,20 @@ export function evaluateChecklist(topLevel: ChecklistTask[], subtasksByParent: M
   let aa_total = 0;
   let aa_done = 0;
   const count = (role: Role, done: boolean) => {
-    if (role === 'am') {
-      am_total += 1;
-      if (done) am_done += 1;
-    } else {
-      aa_total += 1;
-      if (done) aa_done += 1;
-    }
+    if (role === 'am') { am_total += 1; if (done) am_done += 1; } else { aa_total += 1; if (done) aa_done += 1; }
   };
-  for (const it of items) {
+  for (const it of results) {
     if (it.state === 'done' || it.state === 'pending') count(it.role, it.state === 'done');
     for (const st of it.subtasks) count(st.role, st.done);
   }
-
   const total = am_total + aa_total;
   const done = am_done + aa_done;
   const am_complete = am_done === am_total;
   const aa_complete = aa_done === aa_total;
   const status: CheckStatus = total === 0 ? 'empty' : done === total ? 'complete' : done === 0 ? 'none' : 'partial';
-
-  items.sort((a, b) => {
-    const order: Record<ItemState, number> = { pending: 0, done: 1, not_due: 2, stale: 3 };
-    return order[a.state] - order[b.state] || a.name.localeCompare(b.name);
-  });
-
+  // Pending first, then done, then the weekly lines that are not due today. Position order within each group.
+  const order: Record<ItemState, number> = { pending: 0, done: 1, not_due: 2, stale: 3 };
+  results.sort((a, b) => order[a.state] - order[b.state]);
   return {
     status,
     am_total,
@@ -228,7 +160,7 @@ export function evaluateChecklist(topLevel: ChecklistTask[], subtasksByParent: M
     am_complete: total > 0 && am_complete,
     aa_complete: total > 0 && aa_complete,
     combined_complete: total > 0 && am_complete && aa_complete,
-    warnings,
-    items,
+    warnings: [],
+    items: results,
   };
 }

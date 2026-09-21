@@ -17,8 +17,8 @@ import { log } from '../logger.js';
 type Found = { account_id: number | null; shop_id: string | null; code: string; severity: MonitorFlag['severity']; message: string; detail?: string | null };
 
 export const RULES: Omit<MonitorRule, 'enabled'>[] = [
-  { code: 'checklist_incomplete', title: 'Daily checklist not done', description: 'The AM checklist for today is not complete after 14:00 in the account timezone.', severity: 'warn', source: 'asana' },
-  { code: 'checklist_error', title: 'Checklist check failed', description: 'The last checklist check errored (Asana project missing, token rejected).', severity: 'warn', source: 'asana' },
+  { code: 'checklist_incomplete', title: 'Daily checklist not done', description: 'The AM checklist for today is not complete after 14:00 in the account timezone.', severity: 'warn', source: 'checklist' },
+  { code: 'checklist_error', title: 'Checklist check failed', description: 'The last checklist check errored.', severity: 'warn', source: 'checklist' },
   { code: 'inbox_unanswered', title: 'Buyer or creator waiting over 24h', description: 'A CS or affiliate conversation needs a reply and the last message is older than 24 hours.', severity: 'crit', source: 'dashboard' },
   { code: 'no_live_promotion', title: 'No live promotion', description: 'The account has no promotion live or scheduled to start within 7 days.', severity: 'info', source: 'dashboard' },
   { code: 'gmv_drop_wow', title: 'GMV down 30%+ week on week', description: 'Last 7 days of GMV is at least 30% below the 7 days before (Cruva sync).', severity: 'warn', source: 'cruva' },

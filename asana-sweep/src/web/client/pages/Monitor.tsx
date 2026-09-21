@@ -73,7 +73,7 @@ export default function MonitorPage() {
               <tr key={r.code} className={r.enabled ? '' : 'dim'}>
                 <td>{isAdmin ? <input type="checkbox" checked={r.enabled} onChange={(e) => run(`r${r.code}`, () => api.monitorRule(r.code, e.target.checked))} /> : r.enabled ? 'on' : 'off'}</td>
                 <td><b>{r.title}</b></td>
-                <td><span className="badge muted">{r.source === 'tts' ? 'TikTok API' : r.source === 'cruva' ? 'Cruva GMV' : r.source === 'asana' ? 'Asana' : 'Dashboard'}</span></td>
+                <td><span className="badge muted">{r.source === 'tts' ? 'TikTok API' : r.source === 'cruva' ? 'Cruva GMV' : r.source === 'checklist' ? 'Checklist' : 'Dashboard'}</span></td>
                 <td>{sev(r.severity)}</td>
                 <td className="sub">{r.description}</td>
               </tr>

@@ -2,7 +2,7 @@
   "name": "asana-sweep",
   "version": "0.1.0",
   "private": true,
-  "description": "Cleans up completed recurring tasks in Asana on a schedule, with a config dashboard.",
+  "description": "Brightform AM Ops: the AM daily checklist, GMV and bonus tracking, client reports and the BD pipeline in one dashboard.",
   "type": "module",
   "engines": { "node": ">=20" },
   "scripts": {

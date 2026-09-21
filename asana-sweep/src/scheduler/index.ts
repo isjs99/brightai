@@ -5,8 +5,7 @@ import { resolve } from 'node:path';
 import { Queries } from '../db/queries.js';
 import { log } from '../logger.js';
 import { config } from '../config.js';
-import { runRule } from '../sweep/runner.js';
-import { runAllChecks } from '../checklist/checker.js';
+import { refreshLive, runAllChecks } from '../checklist/checker.js';
 import { syncGmv } from '../gmv/sync.js';
 import { LeadsWatcher } from '../leads/sync.js';
 import { InboxWatcher } from '../inbox/sync.js';
@@ -25,16 +24,15 @@ import { PlaybookEngine } from '../playbook/index.js';
 import { Copilot } from '../copilot/index.js';
 import { slackBot } from '../notify/slackbot.js';
 import { apollo } from '../bd/apollo.js';
-import type { Rule } from '../sweep/types.js';
 import { nextRun } from './describe.js';
 
 /**
- * In-process scheduler. One node-cron task per enabled rule, each with its own expression and
- * timezone. Call reloadRule() after any rule change so the schedule reflects the database.
+ * In-process scheduler: the daily checklist lock and reminders, the GMV sync, the FastMoss pull and
+ * enrichment, the account monitor and the smaller background jobs. Schedules are read from settings.
  */
 export class Scheduler {
-  private tasks = new Map<number, ScheduledTask>();
   private pruneTask: ScheduledTask | null = null;
+  private rolloverTask: ScheduledTask | null = null;
   private pullsTask: ScheduledTask | null = null;
   private pullsLateTask: ScheduledTask | null = null;
   private fastmossTask: ScheduledTask | null = null;
@@ -73,16 +71,17 @@ export class Scheduler {
   }
 
   start(): void {
-    for (const rule of this.q.listRules()) this.register(rule);
-    // Prune old runs once a day at 03:15 server time.
+    // Prune old checks and ticks once a day at 03:15 server time.
     this.pruneTask = cron.schedule('15 3 * * *', () => {
-      const n = this.q.pruneRuns(config.runRetentionDays);
-      if (n) log.info(`Pruned ${n} runs older than ${config.runRetentionDays} days`);
+      const n = this.q.pruneChecks(config.runRetentionDays) + this.q.pruneTicks(config.runRetentionDays);
+      if (n) log.info(`Pruned ${n} checklist rows older than ${config.runRetentionDays} days`);
     });
-    this.q.pruneRuns(config.runRetentionDays);
     this.q.pruneChecks(config.runRetentionDays);
-    this.q.pruneCompletions(config.runRetentionDays);
+    this.q.pruneTicks(config.runRetentionDays);
     this.reloadCheckSchedule();
+    // Today's live checklist status: now, and again just after midnight so the new day starts at 0/N.
+    refreshLive(this.q);
+    this.rolloverTask = cron.schedule('2 0 * * *', () => refreshLive(this.q), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     this.leads.start();
     this.inbox.start();
     // New FastMoss pulls dropped into data/bd-pulls: import at start and every morning.
@@ -108,7 +107,7 @@ export class Scheduler {
     setTimeout(() => this.checkCalls(), 30000);
     // Follow-up reminders: 09:00 on workdays, a Slack DM per person with what is due.
     this.followupTask = cron.schedule('0 9 * * 1-5', () => void this.remindFollowups(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
-    log.info(`Scheduler started with ${this.tasks.size} active rule(s)`);
+    log.info('Scheduler started');
   }
 
   /**
@@ -285,12 +284,10 @@ export class Scheduler {
     this.pullsTask = null;
     this.pullsLateTask?.destroy();
     this.pullsLateTask = null;
-    for (const [id, task] of this.tasks) {
-      task.destroy();
-      this.tasks.delete(id);
-    }
     this.pruneTask?.destroy();
     this.pruneTask = null;
+    this.rolloverTask?.destroy();
+    this.rolloverTask = null;
     this.checkTask?.destroy();
     this.checkTask = null;
     this.reminderTask?.destroy();
@@ -299,44 +296,5 @@ export class Scheduler {
     this.gmvTask = null;
     this.gmvMonthlyTask?.destroy();
     this.gmvMonthlyTask = null;
-  }
-
-  /** Re-read a rule from the database and (re)register or unregister it. */
-  reloadRule(id: number): void {
-    const existing = this.tasks.get(id);
-    if (existing) {
-      existing.destroy();
-      this.tasks.delete(id);
-    }
-    const rule = this.q.getRule(id);
-    if (rule) this.register(rule);
-  }
-
-  private register(rule: Rule): void {
-    if (!rule.enabled) return;
-    if (!cron.validate(rule.cron)) {
-      log.error(`Rule ${rule.id} (${rule.name}) has an invalid cron "${rule.cron}", not scheduled`);
-      return;
-    }
-    try {
-      const task = cron.schedule(
-        rule.cron,
-        async () => {
-          const fresh = this.q.getRule(rule.id);
-          if (!fresh || !fresh.enabled) return;
-          await runRule(this.q, fresh, { trigger: 'schedule' });
-        },
-        { timezone: rule.timezone, name: `rule-${rule.id}` },
-      );
-      this.tasks.set(rule.id, task);
-      log.info(`Scheduled rule ${rule.id} (${rule.name}): "${rule.cron}" ${rule.timezone}, next ${this.nextRunAt(rule)?.toISOString() ?? 'unknown'}`);
-    } catch (err) {
-      log.error(`Could not schedule rule ${rule.id}: ${(err as Error).message}`);
-    }
-  }
-
-  nextRunAt(rule: Rule): Date | null {
-    if (!rule.enabled) return null;
-    return nextRun(rule.cron, rule.timezone);
   }
 }

@@ -31,6 +31,9 @@ import type {
   CalendarData,
   CheckSettings,
   CheckWithItems,
+  ChecklistItem,
+  ChecklistItemInput,
+  ChecklistTick,
   ContextEntry,
   ConversationDetail,
   InboxData,
@@ -47,27 +50,21 @@ import type {
   TtsStatus,
   Person,
   PersonInput,
-  PreviewResult,
   ReminderSettings,
-  Rule,
-  RuleInput,
-  RuleSummary,
-  Run,
-  RunItem,
 } from '../../sweep/types';
 
 /**
  * Subscribe to server-sent live updates. `onUpdate` fires (debounced) whenever a check, run or
  * watcher tick changes state on the server, so pages can refetch without polling.
  */
-export function useLiveUpdates(onUpdate: (e: { kind: string; account_id?: number; rule_id?: number }) => void, debounceMs = 400): boolean {
+export function useLiveUpdates(onUpdate: (e: { kind: string; account_id?: number }) => void, debounceMs = 400): boolean {
   const [connected, setConnected] = useState(false);
   const cb = useRef(onUpdate);
   cb.current = onUpdate;
   useEffect(() => {
     let es: EventSource | null = null;
     let timer: number | null = null;
-    let pending: { kind: string; account_id?: number; rule_id?: number } | null = null;
+    let pending: { kind: string; account_id?: number } | null = null;
     let closed = false;
     const open = () => {
       if (closed) return;
@@ -169,8 +166,6 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 }
 
 export interface Status {
-  asana_user: { gid: string; name: string } | null;
-  asana_error: string | null;
   public_url: string;
   retention_days: number;
 }
@@ -183,33 +178,29 @@ export const api = {
   meta: () => call<{ cron_presets: { label: string; cron: string }[]; timezones: string[] }>('GET', '/meta'),
   describeCron: (expr: string, tz: string) =>
     call<{ error: string | null; text: string | null; next_run_at: string | null }>('GET', `/cron/describe?expr=${encodeURIComponent(expr)}&tz=${encodeURIComponent(tz)}`),
-  searchProjects: (q: string) => call<{ projects: { gid: string; name: string; workspace?: { name: string } }[] }>('GET', `/asana/projects?q=${encodeURIComponent(q)}`),
-  listRules: () => call<{ rules: RuleSummary[] }>('GET', '/rules'),
-  getRule: (id: number) => call<{ rule: RuleSummary }>('GET', `/rules/${id}`),
-  createRule: (input: RuleInput) => call<{ rule: RuleSummary }>('POST', '/rules', input),
-  updateRule: (id: number, input: RuleInput) => call<{ rule: RuleSummary }>('PUT', `/rules/${id}`, input),
-  patchRule: (id: number, patch: Partial<Pick<Rule, 'enabled' | 'dry_run'>>) => call<{ rule: RuleSummary }>('PATCH', `/rules/${id}`, patch),
-  deleteRule: (id: number) => call<{ ok: true }>('DELETE', `/rules/${id}`),
-  duplicateRule: (id: number) => call<{ rule: RuleSummary }>('POST', `/rules/${id}/duplicate`),
-  runRule: (id: number) => call<{ run: Run; rule: RuleSummary }>('POST', `/rules/${id}/run`),
-  runAllRules: () => call<{ runs: Run[]; rules: RuleSummary[] }>('POST', '/rules/run-all'),
-  listRuns: (id: number) => call<{ runs: Run[] }>('GET', `/rules/${id}/runs`),
-  getRun: (id: number) => call<{ run: Run; items: RunItem[] }>('GET', `/runs/${id}`),
   // Accounts + checklist checks
   listAccounts: () => call<{ accounts: AccountStatusRow[] }>('GET', '/accounts'),
   createAccount: (input: AccountInput) => call<{ account: Account }>('POST', '/accounts', input),
   updateAccount: (id: number, input: AccountInput) => call<{ account: Account }>('PUT', `/accounts/${id}`, input),
   patchAccount: (id: number, patch: Partial<AccountInput>) => call<{ account: Account }>('PATCH', `/accounts/${id}`, patch),
   deleteAccount: (id: number) => call<{ ok: true }>('DELETE', `/accounts/${id}`),
-  createSweepRule: (id: number) => call<{ rule: RuleSummary }>('POST', `/accounts/${id}/sweep-rule`),
   checkAccount: (id: number) => call<{ check: CheckWithItems }>('POST', `/accounts/${id}/check`),
   listChecks: (date?: string) => call<{ date: string; today: string; rows: AccountStatusRow[]; dates: string[]; is_running: boolean }>('GET', `/checks${date ? `?date=${date}` : ''}`),
   runChecks: () => call<{ checked: number; rows: AccountStatusRow[] }>('POST', '/checks/run'),
   getCheck: (id: number) => call<{ check: CheckWithItems }>('GET', `/checks/${id}`),
   getLiveCheck: (accountId: number) => call<{ check: CheckWithItems }>('GET', `/checks/${accountId}/live`),
-  liveRefresh: () => call<{ ok: true; rows: AccountStatusRow[] }>('POST', '/live/refresh'),
+  refreshChecklists: () => call<{ ok: true; refreshed: number; rows: AccountStatusRow[] }>('POST', '/checklists/refresh'),
+  checklistItems: (accountId?: number | null) => call<{ account: Account | null; source: 'template' | 'custom' | 'none'; items: ChecklistItem[]; template: ChecklistItem[] }>('GET', `/checklists/items${accountId ? `?account_id=${accountId}` : ''}`),
+  createChecklistItem: (input: Partial<ChecklistItemInput> & { name: string }) => call<{ item: ChecklistItem }>('POST', '/checklists/items', input),
+  updateChecklistItem: (id: number, patch: Partial<ChecklistItemInput>) => call<{ item: ChecklistItem }>('PUT', `/checklists/items/${id}`, patch),
+  deleteChecklistItem: (id: number) => call<{ ok: true }>('DELETE', `/checklists/items/${id}`),
+  reorderChecklistItems: (ids: number[]) => call<{ ok: true }>('PUT', '/checklists/items/reorder', { ids }),
+  customiseChecklist: (accountId: number) => call<{ items: ChecklistItem[]; source: 'custom' }>('POST', `/checklists/accounts/${accountId}/customise`),
+  resetChecklist: (accountId: number) => call<{ items: ChecklistItem[]; source: 'template' }>('POST', `/checklists/accounts/${accountId}/reset`),
+  tick: (input: { account_id: number; item_id: number; done: boolean; date?: string; note?: string }) => call<{ tick: ChecklistTick | null; check: CheckWithItems; due: boolean }>('POST', '/checklists/tick', input),
+  tickAll: (input: { account_id: number; done: boolean; role?: 'am' | 'aa'; date?: string }) => call<{ changed: number; check: CheckWithItems }>('POST', '/checklists/tick-all', input),
   getCheckSettings: () => call<{ settings: CheckSettings }>('GET', '/check-settings'),
-  saveCheckSettings: (s: Pick<CheckSettings, 'check_cron' | 'check_timezone' | 'check_enabled' | 'check_slack_webhook' | 'live_enabled' | 'live_interval_seconds' | 'live_sweep_enabled'>) =>
+  saveCheckSettings: (s: Pick<CheckSettings, 'check_cron' | 'check_timezone' | 'check_enabled' | 'check_slack_webhook'>) =>
     call<{ settings: CheckSettings }>('PUT', '/check-settings', s),
   analytics: (days: number) => call<Analytics>('GET', `/analytics?days=${days}`),
   // People + reminders
@@ -381,8 +372,6 @@ export const api = {
   bulkGmvMax: (ids: number[], patch: GmvMaxPatch) => call<{ changed: number; rows: GmvMaxRow[] }>('PUT', '/gmv-max/bulk', { ids, patch }),
   deleteGmvMax: (id: number) => call<{ rows: GmvMaxRow[] }>('DELETE', `/gmv-max/${id}`),
   saveGradeWeight: (weight_checklist: number) => call<{ weight_checklist: number }>('PUT', '/grade-settings', { weight_checklist }),
-  preview: (input: Pick<RuleInput, 'asana_project_gid' | 'min_age_hours' | 'require_section_match' | 'max_deletes_per_run'>) =>
-    call<PreviewResult>('POST', '/preview', input),
 };
 
 export function fmtDate(iso: string | null | undefined): string {
