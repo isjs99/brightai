@@ -904,7 +904,7 @@ export interface BdData {
   llm_configured: boolean;
   ingest_configured: boolean;
   last_pull_at: string | null;
-  totals: { prospects: number; complete: number; won: number; with_contacts: number; new_30d: number; gmv_started_30d: number };
+  totals: { prospects: number; complete: number; won: number; with_contacts: number; new_30d: number; gmv_started_30d: number; found_7d: number; surging_found_7d: number; found_today: number };
   enrich: BdEnrichStatus;
   apollo: ApolloStatus;
   fastmoss: FastmossStatus;
@@ -954,11 +954,15 @@ export interface FastmossStatus {
   last_error: string | null;
   last_test: string | null;
   quota_hit_at: string | null;
-  last_pull: { date: string; file: string | null; markets: { market: string; pages: number; fetched: number; kept: number; error: string | null }[]; added: number; updated: number; quota_hit: boolean } | null;
+  last_pull: { date: string; file: string | null; markets: { market: string; pages: number; fetched: number; kept: number; error: string | null }[]; added: number; updated: number; quota_hit: boolean; new_surging?: number; new_rising?: number; sorts?: string[]; min_gmv_7d?: number } | null;
   credits: { available: number; granted: number; consumed: number; plan: string | null; expires_at: string | null; monthly?: number | null; checked_at?: string } | null;
   markets: string;
   pages: number;
   pull_hour: string;
+  /** ICP for the daily pull: which sort orders to sweep and the minimum 7-day GMV to keep a shop. */
+  sorts: string;
+  min_gmv_7d: number;
+  min_rise: number;
 }
 
 /** Apollo connection and credit balance, refreshed every few minutes and after every enrichment. */

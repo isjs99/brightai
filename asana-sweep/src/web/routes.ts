@@ -1133,6 +1133,9 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
         with_contacts: prospects.filter((p) => p.contacts.length > 0).length,
         new_30d: prospects.filter((p) => p.new_shop_30d).length,
         gmv_started_30d: prospects.filter((p) => p.gmv_started_30d).length,
+        found_7d: prospects.filter((p) => !p.is_client && p.created_at >= new Date(Date.now() - 7 * 86400000).toISOString()).length,
+        surging_found_7d: prospects.filter((p) => !p.is_client && p.created_at >= new Date(Date.now() - 7 * 86400000).toISOString() && (p.rise_score ?? 0) >= 0.15).length,
+        found_today: prospects.filter((p) => !p.is_client && p.created_at.slice(0, 10) === new Date().toISOString().slice(0, 10)).length,
       },
       enrich: enrichJob.state,
       apollo: apolloStatus(q),
@@ -1305,6 +1308,9 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
 
   r.put('/bd/fastmoss/settings', (req, res) => {
     const b = (req.body ?? {}) as Record<string, unknown>;
+    if (b.sorts !== undefined) { const v = String(b.sorts ?? '').split(/[,\s]+/).filter((x) => ['day7_gmv', 'day7_units_sold', 'total_gmv', 'total_units_sold'].includes(x)); q.setSetting('fastmoss_pull_sorts', v.join(',')); }
+    if (b.min_gmv_7d !== undefined) { const n = Number(b.min_gmv_7d); if (!Number.isFinite(n) || n < 0) throw new HttpError(400, 'Minimum 7-day GMV must be a number.'); q.setSetting('fastmoss_min_gmv_7d', String(n)); }
+    if (b.min_rise !== undefined) { const n = Number(b.min_rise); if (!Number.isFinite(n) || n < 0 || n > 1) throw new HttpError(400, 'Minimum rise must be between 0 and 1 (0.05 = 5%).'); q.setSetting('fastmoss_min_rise', String(n)); }
     if (b.markets !== undefined) q.setSetting('fastmoss_pull_markets', String(b.markets ?? '').toUpperCase().split(/[,\s]+/).filter(Boolean).join(','));
     if (b.pages !== undefined) { const n = Number(b.pages); if (!Number.isInteger(n) || n < 1 || n > 30) throw new HttpError(400, 'Pages must be 1 to 30.'); q.setSetting('fastmoss_pull_pages', String(n)); }
     if (b.enabled !== undefined) q.setSetting('fastmoss_pull_enabled', bool(b.enabled, true) ? '1' : '0');

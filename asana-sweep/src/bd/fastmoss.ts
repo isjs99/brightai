@@ -217,47 +217,67 @@ export const fastmoss = new FastmossClient();
 
 export const PULL_MARKETS = ['DE', 'UK', 'FR', 'IT', 'ES'];
 
-export interface PullResult { date: string; file: string | null; markets: { market: string; pages: number; fetched: number; kept: number; error: string | null }[]; added: number; updated: number; quota_hit: boolean }
+export interface PullResult { date: string; file: string | null; markets: { market: string; pages: number; fetched: number; kept: number; error: string | null }[]; added: number; updated: number; quota_hit: boolean; new_surging: number; new_rising: number; sorts: string[]; min_gmv_7d: number }
+
+export const PULL_SORTS = ['day7_gmv', 'day7_units_sold'];
+
+export function icpSettings(q: Queries): { sorts: string[]; min_gmv_7d: number; min_rise: number } {
+  const sorts = q.getSetting('fastmoss_pull_sorts', '').split(',').map((x) => x.trim()).filter(Boolean);
+  const g = Number(q.getSetting('fastmoss_min_gmv_7d', '2000'));
+  const r = Number(q.getSetting('fastmoss_min_rise', '0.05'));
+  return { sorts: sorts.length ? sorts : PULL_SORTS, min_gmv_7d: Number.isFinite(g) && g >= 0 ? g : 2000, min_rise: Number.isFinite(r) && r >= 0 ? r : 0.05 };
+}
 
 /**
- * The daily pull done in-process: top shops per market by 7-day GMV, keep the risers (7-day share of
- * lifetime GMV at or above minRise) plus the first three pages for refreshed numbers, save the raw rows
- * to data/bd-pulls/<date>.json for the record, and upsert them into the pipeline.
+ * The daily pull done in-process, shaped by the ICP: for each market and each sort order (7-day GMV,
+ * then 7-day units, so fast movers below the top sellers surface too) sweep the pages, keep every shop
+ * whose 7-day share of lifetime GMV is at or above minRise (rising / surging) and above the minimum
+ * 7-day GMV, plus the first three pages of the GMV sort for refreshed numbers on the leaders. The raw
+ * rows go to data/bd-pulls/<date>.json for the record and into the pipeline; the result counts how many
+ * surging and rising shops were new to us today.
  */
-export async function pullFastMoss(q: Queries, client: FastmossClient = fastmoss, opts: { markets?: string[]; pages?: number; minRise?: number; date?: string; delayMs?: number } = {}): Promise<PullResult> {
+export async function pullFastMoss(q: Queries, client: FastmossClient = fastmoss, opts: { markets?: string[]; pages?: number; minRise?: number; date?: string; delayMs?: number; sorts?: string[]; minGmv7d?: number } = {}): Promise<PullResult> {
   if (!client.configured) throw new Error('FastMoss is not configured: set FASTMOSS_API_KEY.');
+  const icp = icpSettings(q);
   const date = opts.date ?? new Date().toISOString().slice(0, 10);
+  const startedAt = new Date().toISOString();
   const pages = Math.min(Math.max(opts.pages ?? (Number(q.getSetting('fastmoss_pull_pages', '10')) || 10), 1), 30);
-  const minRise = opts.minRise ?? 0.05;
+  const minRise = opts.minRise ?? icp.min_rise;
+  const minGmv = opts.minGmv7d ?? icp.min_gmv_7d;
+  const sorts = opts.sorts?.length ? opts.sorts : icp.sorts;
   const configured = q.getSetting('fastmoss_pull_markets', '').split(',').map((m) => m.trim().toUpperCase()).filter(Boolean);
   const markets = opts.markets ?? (configured.length ? configured : PULL_MARKETS);
-  const result: PullResult = { date, file: null, markets: [], added: 0, updated: 0, quota_hit: false };
+  const result: PullResult = { date, file: null, markets: [], added: 0, updated: 0, quota_hit: false, new_surging: 0, new_rising: 0, sorts, min_gmv_7d: minGmv };
   const kept: FastmossShopRow[] = [];
   const seen = new Set<string>();
   outer: for (const market of markets) {
     const m = { market, pages: 0, fetched: 0, kept: 0, error: null as string | null };
     result.markets.push(m);
-    for (let page = 1; page <= pages; page += 1) {
-      let rows: FastmossShopRow[];
-      try {
-        rows = await client.shopSearch({ region: market, page, pagesize: 10 });
-      } catch (err) {
-        m.error = (err as Error).message;
-        if (isQuotaError(err)) { result.quota_hit = true; q.setSetting('fastmoss_quota_hit_at', new Date().toISOString()); break outer; }
-        break;
+    for (const sort of sorts) {
+      for (let page = 1; page <= pages; page += 1) {
+        let rows: FastmossShopRow[];
+        try {
+          rows = await client.shopSearch({ region: market, page, pagesize: 10, orderby: [{ field: sort, order: 'desc' }] });
+        } catch (err) {
+          m.error = (err as Error).message;
+          if (isQuotaError(err)) { result.quota_hit = true; q.setSetting('fastmoss_quota_hit_at', new Date().toISOString()); break outer; }
+          break;
+        }
+        m.pages += 1;
+        m.fetched += rows.length;
+        for (const r of rows) {
+          const name = String(r.shop_name ?? '').trim();
+          if (!name) continue;
+          const key = String(r.seller_id ?? `${market}:${name}`);
+          if (seen.has(key)) continue;
+          const gmv7 = Number(r.gmv_last_7d ?? 0);
+          const rise = Number(r.total_gmv) > 0 ? gmv7 / Number(r.total_gmv) : 0;
+          const leader = sort === sorts[0] && page <= 3;
+          if (leader || (rise >= minRise && gmv7 >= minGmv)) { seen.add(key); kept.push({ ...r, region: r.region ?? market }); m.kept += 1; }
+        }
+        if (rows.length < 10) break;
+        if (opts.delayMs !== 0) await new Promise((r) => setTimeout(r, opts.delayMs ?? 800)); // 80 calls a minute on the Pro plan
       }
-      m.pages += 1;
-      m.fetched += rows.length;
-      for (const r of rows) {
-        const name = String(r.shop_name ?? '').trim();
-        if (!name) continue;
-        const key = String(r.seller_id ?? `${market}:${name}`);
-        if (seen.has(key)) continue;
-        const rise = Number(r.total_gmv) > 0 ? Number(r.gmv_last_7d ?? 0) / Number(r.total_gmv) : 0;
-        if (page <= 3 || rise >= minRise) { seen.add(key); kept.push({ ...r, region: r.region ?? market }); m.kept += 1; }
-      }
-      if (rows.length < 10) break;
-      if (opts.delayMs !== 0) await new Promise((r) => setTimeout(r, opts.delayMs ?? 800)); // 80 calls a minute on the Pro plan
     }
   }
   if (kept.length) {
@@ -279,12 +299,15 @@ export async function pullFastMoss(q: Queries, client: FastmossClient = fastmoss
     result.added = r.added;
     result.updated = r.updated;
     applyEnrichedSeed(q);
+    const fresh = q.listProspects(false).filter((p) => p.created_at >= startedAt && !p.is_client);
+    result.new_surging = fresh.filter((p) => (p.rise_score ?? 0) >= 0.15).length;
+    result.new_rising = fresh.filter((p) => (p.rise_score ?? 0) >= minRise && (p.rise_score ?? 0) < 0.15).length;
   }
   q.setSetting('fastmoss_last_pull_at', new Date().toISOString());
   q.setSetting('fastmoss_last_pull_json', JSON.stringify(result));
   q.setSetting('fastmoss_last_error', result.markets.map((m) => m.error).filter(Boolean).join(' · ').slice(0, 500));
   try { const c = await client.credits(); if (c) q.setSetting('fastmoss_credits_json', JSON.stringify({ ...c, checked_at: new Date().toISOString() })); } catch { /* balance is optional */ }
-  log.info(`FastMoss pull ${date}: ${kept.length} shops kept across ${result.markets.length} market(s), +${result.added} new, ${result.updated} refreshed${result.quota_hit ? ' (quota hit)' : ''}`);
+  log.info(`FastMoss pull ${date}: ${kept.length} shops kept across ${result.markets.length} market(s), +${result.added} new (${result.new_surging} surging, ${result.new_rising} rising), ${result.updated} refreshed${result.quota_hit ? ' (quota hit)' : ''}`);
   liveEvents.emitUpdate({ kind: 'bd' });
   return result;
 }
@@ -306,5 +329,8 @@ export function fastmossStatus(q: Queries, client: FastmossClient = fastmoss): F
     markets: q.getSetting('fastmoss_pull_markets', '') || PULL_MARKETS.join(','),
     pages: Number(q.getSetting('fastmoss_pull_pages', '10')) || 10,
     pull_hour: q.getSetting('fastmoss_pull_cron', '30 5 * * *'),
+    sorts: icpSettings(q).sorts.join(','),
+    min_gmv_7d: icpSettings(q).min_gmv_7d,
+    min_rise: icpSettings(q).min_rise,
   };
 }

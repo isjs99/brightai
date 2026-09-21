@@ -39,7 +39,7 @@ export default function BdPage() {
   const [liMsg, setLiMsg] = useState<{ contact: BdContact; text: string; generator: string } | null>(null);
   const [ttsPoc, setTtsPoc] = useState<Record<number, { contact: TtsContact | null; fallback: TtsContact | null; reason: string }>>({});
   useEffect(() => { if (open !== null && !ttsPoc[open]) api.ttsContactFor(open).then((r) => setTtsPoc((m) => ({ ...m, [open]: r }))).catch(() => undefined); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [f, setF] = useState({ market: '', status: '', category: '', owner: '', rise: '', type: '', launch: '', contact: '', q: '', sort: 'rise' as 'rise' | 'gmv' | 'name' | 'updated' | 'launched', hideDone: false, hideClients: true });
+  const [f, setF] = useState({ market: '', status: '', category: '', owner: '', rise: '', type: '', launch: '', contact: '', q: '', sort: 'rise' as 'rise' | 'gmv' | 'name' | 'updated' | 'launched' | 'found', found: '', hideDone: false, hideClients: true });
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
@@ -143,6 +143,7 @@ export default function BdPage() {
       (!f.rise || band(p.rise_score).label.toLowerCase() === f.rise) &&
       (!f.type || (p.shop_type ?? '') === f.type) &&
       (!f.launch || (f.launch === 'new_shop' ? p.new_shop_30d : f.launch === 'gmv_started' ? p.gmv_started_30d : p.new_shop_30d || p.gmv_started_30d)) &&
+      (!f.found || p.created_at >= new Date(Date.now() - (f.found === 'today' ? 1 : f.found === 'week' ? 7 : 30) * 86400000).toISOString()) &&
       (!f.contact || (f.contact === 'email' ? p.contacts.some((c) => c.email) : f.contact === 'linkedin' ? p.contacts.some((c) => c.linkedin_url) : f.contact === 'any' ? p.contacts.length > 0 : p.contacts.length === 0)) &&
       (!f.hideClients || !p.is_client) &&
       (!f.hideDone || (!p.outreach_complete && p.status !== 'won' && p.status !== 'lost')) &&
@@ -152,6 +153,7 @@ export default function BdPage() {
         : f.sort === 'name' ? a.shop_name.localeCompare(b.shop_name)
           : f.sort === 'updated' ? b.updated_at.localeCompare(a.updated_at)
           : f.sort === 'launched' ? (b.launched_at ?? '').localeCompare(a.launched_at ?? '')
+          : f.sort === 'found' ? b.created_at.localeCompare(a.created_at)
             : (b.rise_score ?? -1) - (a.rise_score ?? -1) || (b.gmv_7d ?? 0) - (a.gmv_7d ?? 0));
 
   const statusBadge = (s: BdStatus) => { const st = STATUSES.find((x) => x.v === s)!; return <span className={`badge ${st.cls}`}>{st.label}</span>; };
@@ -285,7 +287,7 @@ export default function BdPage() {
                 ? <span className="badge warn" title={data.fastmoss.last_error}>FastMoss: error</span>
                 : <span className="badge good" title={`${data.fastmoss.last_test ?? 'Not tested yet'}${data.fastmoss.credits ? `. ${data.fastmoss.credits.available.toLocaleString('en-GB')} credits left` : ''}`}>FastMoss API{data.fastmoss.credits ? `: ${data.fastmoss.credits.available.toLocaleString('en-GB')} credits` : ' connected'}</span>}
           {isAdmin && data.fastmoss.configured && <button className="small" disabled={busy === 'fmtest'} onClick={() => run('fmtest', async () => { const r = await api.fastmossTest(); setNotice(r.ok ? `FastMoss works over ${r.transport === 'cli' ? 'the CLI' : 'MCP'}${r.server ? ` (${r.server})` : ''}: ${r.tools} tools, ${r.rows} row returned${r.fastmoss.credits ? `, ${r.fastmoss.credits.available.toLocaleString('en-GB')} credits left` : ''}.` : `FastMoss test failed: ${r.error}`); return r; })} title="Open an MCP session with the key and run a one-row search (costs at most one credit)">{busy === 'fmtest' ? 'Testing…' : 'Test FastMoss'}</button>}
-          {isAdmin && data.fastmoss.configured && <button className="small primary" disabled={busy === 'fmpull'} onClick={() => run('fmpull', async () => { const r = await api.fastmossPull(); const fm = r.fastmoss.last_pull; setNotice(r.fastmoss_error ? `FastMoss pull failed: ${r.fastmoss_error}` : `Pulled ${fm?.markets.map((m) => `${m.market} ${m.kept}`).join(', ')}: ${fm?.added ?? 0} new prospects, ${fm?.updated ?? 0} refreshed${fm?.quota_hit ? ' (stopped: out of credits)' : ''}. Enrichment queued.`); return r; })} title={`Pull the top ${data.fastmoss.pages} pages per market (${data.fastmoss.markets}) now, about ${data.fastmoss.pages * data.fastmoss.markets.split(',').length} FastMoss calls`}>{busy === 'fmpull' ? 'Pulling…' : 'Pull FastMoss now'}</button>}
+          {isAdmin && data.fastmoss.configured && <button className="small primary" disabled={busy === 'fmpull'} onClick={() => run('fmpull', async () => { const r = await api.fastmossPull(); const fm = r.fastmoss.last_pull; setNotice(r.fastmoss_error ? `FastMoss pull failed: ${r.fastmoss_error}` : `Pulled ${fm?.markets.map((m) => `${m.market} ${m.kept}`).join(', ')}: ${fm?.added ?? 0} new prospects (${fm?.new_surging ?? 0} surging, ${fm?.new_rising ?? 0} rising), ${fm?.updated ?? 0} refreshed${fm?.quota_hit ? ' (stopped: out of credits)' : ''}. Enrichment queued.`); return r; })} title={`Pull the top ${data.fastmoss.pages} pages per market (${data.fastmoss.markets}) now, about ${data.fastmoss.pages * data.fastmoss.markets.split(',').length} FastMoss calls`}>{busy === 'fmpull' ? 'Pulling…' : 'Pull FastMoss now'}</button>}
           {isAdmin && <button className="small" disabled={busy === 'sweep'} onClick={() => run('sweep', async () => { const r = await api.bdSweep(); setNotice(`Sweep done: ${r.pulled ? 'repo pulled, ' : ''}${r.imported.files.length} new pull file(s), ${r.imported.added} prospects added, ${r.imported.updated} refreshed${data.apollo.configured ? ', enrichment queued' : ''}.`); return r; })} title="Run the daily sweep now: git pull, import new pull files, enrich with Apollo, scan alerts">{busy === 'sweep' ? 'Sweeping…' : 'Sweep now'}</button>}
           {!data.apollo.configured
             ? <span className="badge muted" title="Add APOLLO_API_KEY to .env and restart">Apollo not connected</span>
@@ -323,10 +325,13 @@ export default function BdPage() {
           <div className="inline-form" style={{ marginTop: 6 }}>
             <label className="field" style={{ minWidth: 160 }}><span className="lbl">Markets</span><input type="text" defaultValue={data.fastmoss.markets} onBlur={(e) => e.target.value !== data.fastmoss.markets && run('fms', () => api.fastmossSettings({ markets: e.target.value }))} /></label>
             <label className="field" style={{ minWidth: 110 }}><span className="lbl">Pages (×10 shops)</span><input type="number" min={1} max={30} defaultValue={data.fastmoss.pages} onBlur={(e) => Number(e.target.value) !== data.fastmoss.pages && run('fms', () => api.fastmossSettings({ pages: Number(e.target.value) }))} /></label>
+            <label className="field" style={{ minWidth: 200 }}><span className="lbl">Sweep by (ICP)</span><select value={data.fastmoss.sorts} onChange={(e) => run('fms', () => api.fastmossSettings({ sorts: e.target.value }))}><option value="day7_gmv,day7_units_sold">7d GMV + 7d units (widest)</option><option value="day7_gmv">7d GMV only</option><option value="day7_units_sold">7d units only</option></select><span className="help">Each sort sweeps the pages; a shop is kept when its 7-day share of lifetime GMV is at or above the rise threshold</span></label>
+            <label className="field" style={{ minWidth: 120 }}><span className="lbl">Min 7d GMV</span><input type="number" min={0} step={500} defaultValue={data.fastmoss.min_gmv_7d} onBlur={(e) => Number(e.target.value) !== data.fastmoss.min_gmv_7d && run('fms', () => api.fastmossSettings({ min_gmv_7d: Number(e.target.value) }))} /><span className="help">In the market currency</span></label>
+            <label className="field" style={{ minWidth: 110 }}><span className="lbl">Min rise</span><input type="number" min={0} max={1} step={0.01} defaultValue={data.fastmoss.min_rise} onBlur={(e) => Number(e.target.value) !== data.fastmoss.min_rise && run('fms', () => api.fastmossSettings({ min_rise: Number(e.target.value) }))} /><span className="help">0.05 = rising, 0.15 = surging only</span></label>
             <label className="field" style={{ minWidth: 140 }}><span className="lbl">Daily pull (cron, {'Madrid time'})</span><input type="text" defaultValue={data.fastmoss.pull_hour} onBlur={(e) => e.target.value !== data.fastmoss.pull_hour && run('fms', () => api.fastmossSettings({ cron: e.target.value }))} /></label>
             <span className="sub" style={{ alignSelf: 'flex-end', paddingBottom: 6 }}>Transport: {data.fastmoss.transport === 'cli' ? 'FastMoss CLI' : 'MCP over HTTPS (mcp.fastmoss.com)'}{data.fastmoss.credits ? ` · ${data.fastmoss.credits.available.toLocaleString('en-GB')} of ${data.fastmoss.credits.monthly ?? data.fastmoss.credits.granted} credits left${data.fastmoss.credits.expires_at ? `, plan to ${data.fastmoss.credits.expires_at.slice(0, 10)}` : ''}` : ''}</span>
           </div>
-          {data.fastmoss.last_pull && <p className="sub" style={{ marginBottom: 0 }}>Last pull {data.fastmoss.last_pull.date}: {data.fastmoss.last_pull.markets.map((m) => `${m.market} ${m.pages}p/${m.kept} kept${m.error ? ` (${m.error.slice(0, 60)})` : ''}`).join(' · ')} → {data.fastmoss.last_pull.added} new, {data.fastmoss.last_pull.updated} refreshed.</p>}
+          {data.fastmoss.last_pull && <p className="sub" style={{ marginBottom: 0 }}>Last pull {data.fastmoss.last_pull.date}: {data.fastmoss.last_pull.markets.map((m) => `${m.market} ${m.pages}p/${m.kept} kept${m.error ? ` (${m.error.slice(0, 60)})` : ''}`).join(' · ')} → {data.fastmoss.last_pull.added} new ({data.fastmoss.last_pull.new_surging ?? 0} surging, {data.fastmoss.last_pull.new_rising ?? 0} rising), {data.fastmoss.last_pull.updated} refreshed. Every new shop goes to Apollo automatically.</p>}
         </details>
       )}
       {isAdmin && data.apollo.configured && (
@@ -400,6 +405,7 @@ export default function BdPage() {
         <div className="kpi"><div className="v">{data.totals.complete}</div><div className="k">Outreach complete</div><div className="d">all three channels</div></div>
         <div className="kpi"><div className="v">{data.totals.new_30d}</div><div className="k">Launched last 30 days</div><div className="d">shop created date</div></div>
         <div className="kpi"><div className="v">{data.totals.gmv_started_30d}</div><div className="k">Started selling last 30 days</div><div className="d">first sales, or took off</div></div>
+        <div className="kpi"><div className="v">{data.totals.found_7d}</div><div className="k">Found last 7 days</div><div className="d">{data.totals.surging_found_7d} surging · {data.totals.found_today} today</div></div>
         <div className="kpi"><div className="v">{data.totals.won}</div><div className="k">Won</div></div>
       </div>
 
@@ -430,7 +436,8 @@ export default function BdPage() {
         <select value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}><option value="">Local + cross-border</option><option value="local">Local shops</option><option value="cross_border">Cross-border</option></select>
         <select value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}><option value="">All categories</option>{data.categories.map((c) => <option key={c}>{c}</option>)}</select>
         <select value={f.owner} onChange={(e) => setF({ ...f, owner: e.target.value })}><option value="">Any owner</option>{data.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-        <select value={f.sort} onChange={(e) => setF({ ...f, sort: e.target.value as typeof f.sort })}><option value="rise">Fastest rising</option><option value="gmv">Biggest 7d GMV</option><option value="updated">Recently updated</option><option value="launched">Newest shops</option><option value="name">Name</option></select>
+        <select value={f.sort} onChange={(e) => setF({ ...f, sort: e.target.value as typeof f.sort })}><option value="rise">Fastest rising</option><option value="gmv">Biggest 7d GMV</option><option value="updated">Recently updated</option><option value="launched">Newest shops</option><option value="found">Newest found</option><option value="name">Name</option></select>
+        <select value={f.found} onChange={(e) => setF({ ...f, found: e.target.value })} title="When the lead was first found by a pull or added by hand"><option value="">Found any time</option><option value="today">Found in last 24h</option><option value="week">Found in last 7 days</option><option value="month">Found in last 30 days</option></select>
         <label className="field check"><input type="checkbox" checked={f.hideDone} onChange={(e) => setF({ ...f, hideDone: e.target.checked })} /> Hide complete / closed</label>
         <label className="field check"><input type="checkbox" checked={f.hideClients} onChange={(e) => setF({ ...f, hideClients: e.target.checked })} /> Hide existing clients</label>
         <span className="sub">{rows.length} of {data.prospects.length}</span>
@@ -438,7 +445,7 @@ export default function BdPage() {
 
       {rows.length === 0 ? <div className="empty">No prospects match.</div> : (
         <table>
-          <thead><tr><th></th><th>Shop</th><th>Country</th><th className="hide-sm">Category</th><th className="num">7d GMV</th><th>Momentum</th><th>Status</th><th>Owner</th><th>Outreach</th></tr></thead>
+          <thead><tr><th></th><th>Shop</th><th>Country</th><th className="hide-sm">Category</th><th className="num">7d GMV</th><th>Momentum</th><th>Found</th><th>Status</th><th>Owner</th><th>Outreach</th></tr></thead>
           <tbody>
             {rows.flatMap((p) => {
               const b = band(p.rise_score);
@@ -455,6 +462,7 @@ export default function BdPage() {
                   <td className="hide-sm sub">{p.category ?? ''}</td>
                   <td className="num">{fmtMoney(p.gmv_7d, p.currency)}<div className="sub">{p.rise_score === null ? '' : `${fmtPct(p.rise_score * 100)} of lifetime`}</div></td>
                   <td><span className={`badge ${b.cls}`}>{b.label}</span> {launchBadge(p)}</td>
+                  <td title={`First found ${new Date(p.created_at).toLocaleString()} (${p.source === 'fastmoss' ? 'FastMoss pull' : p.source === 'manual' ? 'added by hand' : p.source})${p.pulled_at ? `. Numbers from the ${p.pulled_at.slice(0, 10)} pull.` : ''}`}>{fmtRelative(p.created_at)}<div className="sub">{p.created_at.slice(0, 10)}{p.created_at >= new Date(Date.now() - 86400000).toISOString() ? ' · new' : ''}</div></td>
                   <td>{isAdmin ? <select value={p.status} onChange={(e) => patch(p, { status: e.target.value as BdStatus })} style={{ width: 'auto' }}>{STATUSES.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}</select> : statusBadge(p.status)}</td>
                   <td>{isAdmin ? <select value={p.owner_id ?? ''} onChange={(e) => patch(p, { owner_id: e.target.value ? Number(e.target.value) : null })} style={{ width: 'auto' }}><option value="">–</option>{data.people.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</select> : p.owner_name ?? <span className="sub">–</span>}</td>
                   <td>

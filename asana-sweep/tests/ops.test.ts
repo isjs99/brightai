@@ -388,9 +388,10 @@ describe('fastmoss mcp client and pull', () => {
     process.env.BD_PULLS_DIR = dir;
     try {
       const { client, calls } = fake({ rowsFor: (r, p) => Array.from({ length: 10 }, (_, i) => shop(r, p * 10 + i, p <= 3 ? 0.01 : i === 0 ? 0.3 : 0.01)) });
-      const r = await pullFastMoss(q, client, { markets: ['DE', 'UK'], pages: 5, date: '2026-09-21', delayMs: 0 });
+      const r = await pullFastMoss(q, client, { markets: ['DE', 'UK'], pages: 5, date: '2026-09-21', delayMs: 0, sorts: ['day7_gmv'], minGmv7d: 0 });
       expect(r.markets.map((m) => [m.market, m.pages, m.kept])).toEqual([['DE', 5, 32], ['UK', 5, 32]]);
       expect(r.added).toBe(64);
+      expect(r.new_surging).toBe(4); // one 30% riser per page on pages 4 and 5, both markets
       expect(r.file).toBe('2026-09-21.json');
       expect(existsSync(`${dir}/2026-09-21.json`)).toBe(true);
       expect(calls.filter((c) => c.method === 'tools/call' && (c.params as { name: string }).name === 'shop_search')).toHaveLength(10);
@@ -402,7 +403,7 @@ describe('fastmoss mcp client and pull', () => {
       expect(st.credits?.available).toBe(756);
       expect(st.quota_hit_at).toBeNull();
       const { client: c2 } = fake({ rowsFor: (r, p) => [shop(r, p, 0.5)], quotaAfter: 1 });
-      const r2 = await pullFastMoss(q, c2, { markets: ['DE', 'FR'], pages: 3, date: '2026-09-22', delayMs: 0 });
+      const r2 = await pullFastMoss(q, c2, { markets: ['DE', 'FR'], pages: 3, date: '2026-09-22', delayMs: 0, sorts: ['day7_gmv'], minGmv7d: 0 });
       expect(r2.quota_hit).toBe(true);
       expect(r2.markets[0].kept).toBe(1);
       expect(fastmossStatus(q, c2).quota_hit_at).not.toBeNull();
