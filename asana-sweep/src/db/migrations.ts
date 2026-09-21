@@ -1123,6 +1123,15 @@ const migrations: Migration[] = [
       }
     },
   },
+  {
+    version: 22,
+    name: 'unlock the switch-over day so ticks reach the record',
+    up(db) {
+      // The Asana-era check locked today's snapshot at 16:00 before the native checklist existed; ticks made
+      // after the switch would otherwise never reach the Calendar, Analytics or Grades for that day.
+      db.exec(`UPDATE checks SET final = 0 WHERE check_date >= date('now', '-1 day')`);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {
