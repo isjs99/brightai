@@ -43,6 +43,10 @@ Dashboard is on http://localhost:3000. The SQLite database lives on the `sweep-d
 
 Set `PUBLIC_URL` in `.env` to wherever the dashboard is reachable so links in Slack messages work.
 
+## Testing OAuth callbacks from a laptop
+
+TikTok (and Google) must reach the dashboard over https to complete an authorisation. For a quick test without deploying, `scripts/dev-tunnel.sh` starts a Cloudflare quick tunnel to port 3000, writes the tunnel address into `.env` as `PUBLIC_URL`, prints the redirect URL to paste into Partner Center, and starts the dashboard. The address changes on every run, so this is for testing; deploy for real use.
+
 ## Hosting it for the team
 
 The app is one Node process plus a SQLite file, so any host that runs a Docker container with a persistent volume works. The easiest is Railway (about $5 a month):
