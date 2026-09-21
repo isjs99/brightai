@@ -949,13 +949,13 @@ export interface BdEnrichStatus {
 /** FastMoss OpenAPI connection, last in-process pull, and credit balance when the API exposes it. */
 export interface FastmossStatus {
   configured: boolean;
+  transport: 'http' | 'cli';
   last_pull_at: string | null;
   last_error: string | null;
   last_test: string | null;
   quota_hit_at: string | null;
   last_pull: { date: string; file: string | null; markets: { market: string; pages: number; fetched: number; kept: number; error: string | null }[]; added: number; updated: number; quota_hit: boolean } | null;
-  credits: { available: number; granted: number; consumed: number; plan: string | null; expires_at: string | null; checked_at?: string } | null;
-  paths: { token: string; shop_search: string; credits: string };
+  credits: { available: number; granted: number; consumed: number; plan: string | null; expires_at: string | null; monthly?: number | null; checked_at?: string } | null;
   markets: string;
   pages: number;
   pull_hour: string;

@@ -23,7 +23,7 @@ import { amSummary } from '../leads/points.js';
 import { apollo } from '../bd/apollo.js';
 import { apolloStatus, enrichProspect, markApolloExhausted, refreshApolloCredits } from '../bd/enrich.js';
 import { isCreditsError } from '../bd/apollo.js';
-import { fastmoss, fastmossPaths, fastmossStatus, isQuotaError, pullFastMoss } from '../bd/fastmoss.js';
+import { fastmoss, fastmossStatus, isQuotaError } from '../bd/fastmoss.js';
 import { advanceLinkedin, LINKEDIN_STEPS, suggestTtsContact } from '../bd/sequence.js';
 import { scanEnterpriseAlerts, syncWatchlistFromSheet } from '../bd/alerts.js';
 import { draftCallFollowups, tldv } from '../bd/tldv.js';
@@ -1275,29 +1275,22 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     res.json({ healthy, health_error: healthError, ...bdData(), apollo: status });
   });
 
-  /** Check the FastMoss credentials: find the token path, run a one-row shop search, read the balance when available. */
+  /** Check the FastMoss key: initialise the MCP session, list tools, one-row shop search, balance. */
   r.post('/bd/fastmoss/test', async (_req, res) => {
-    if (!fastmoss.configured) throw new HttpError(400, 'Set FASTMOSS_CLIENT_ID and FASTMOSS_CLIENT_SECRET in .env first.');
-    fastmoss.setPaths(fastmossPaths(q));
-    const out: { token_path: string | null; shop_search_path: string | null; rows: number; error: string | null; credits: unknown } = { token_path: null, shop_search_path: null, rows: 0, error: null, credits: null };
+    if (!fastmoss.configured) throw new HttpError(400, 'Set FASTMOSS_API_KEY in .env first (developers.fastmoss.com > MCP&CLI > API Keys).');
+    let out: Awaited<ReturnType<typeof fastmoss.test>>;
     try {
-      out.token_path = await fastmoss.discoverTokenPath();
-      if (!out.token_path) throw new Error(`No token path answered (tried ${['configured path', 'oauth/token', 'oauth/v1/token', 'api/oauth/token', 'auth/token'].join(', ')}). Check the client id / secret, and set the token path from developers.fastmoss.com in the FastMoss settings below.`);
-      const s2 = await fastmoss.discoverShopSearchPath('DE');
-      if (!s2) throw new Error('Token works but no shop search path answered. Set the shop endpoint path from developers.fastmoss.com in the FastMoss settings below.');
-      out.shop_search_path = s2.path;
-      out.rows = s2.rows;
-      const paths = fastmossPaths(q);
-      q.setSetting('fastmoss_paths', JSON.stringify({ ...paths, token: out.token_path, shop_search: out.shop_search_path }));
-      const c = await fastmoss.credits();
-      if (c) q.setSetting('fastmoss_credits_json', JSON.stringify({ ...c, checked_at: new Date().toISOString() }));
-      out.credits = c;
-      q.setSetting('fastmoss_last_test', `ok ${new Date().toISOString()}: token ${out.token_path}, shops ${out.shop_search_path} (${out.rows} row)`);
-      q.setSetting('fastmoss_last_error', '');
+      out = await fastmoss.test();
     } catch (err) {
-      out.error = (err as Error).message;
-      q.setSetting('fastmoss_last_test', `failed ${new Date().toISOString()}: ${out.error}`);
+      out = { ok: false, transport: fastmoss.transport, server: null, tools: 0, rows: 0, error: (err as Error).message };
       if (isQuotaError(err)) q.setSetting('fastmoss_quota_hit_at', new Date().toISOString());
+    }
+    if (out.ok) {
+      try { const c = await fastmoss.credits(); if (c) q.setSetting('fastmoss_credits_json', JSON.stringify({ ...c, checked_at: new Date().toISOString() })); } catch { /* optional */ }
+      q.setSetting('fastmoss_last_test', `ok ${new Date().toISOString()}: ${out.transport}${out.server ? `, ${out.server}` : ''}, ${out.tools} tools, ${out.rows} row`);
+      q.setSetting('fastmoss_last_error', '');
+    } else {
+      q.setSetting('fastmoss_last_test', `failed ${new Date().toISOString()}: ${out.error}`);
     }
     liveEvents.emitUpdate({ kind: 'bd' });
     res.json({ ...out, ...bdData() });
@@ -1305,14 +1298,13 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
 
   /** Pull the fast risers from FastMoss now (in-process), then import, enrich and scan. */
   r.post('/bd/fastmoss/pull', async (_req, res) => {
-    if (!fastmoss.configured) throw new HttpError(400, 'Set FASTMOSS_CLIENT_ID and FASTMOSS_CLIENT_SECRET in .env first.');
+    if (!fastmoss.configured) throw new HttpError(400, 'Set FASTMOSS_API_KEY in .env first.');
     const r2 = await scheduler.dailyPull({ fastmoss: true });
     res.json({ ...r2, ...bdData() });
   });
 
   r.put('/bd/fastmoss/settings', (req, res) => {
     const b = (req.body ?? {}) as Record<string, unknown>;
-    if (b.paths !== undefined) { const t = String(b.paths ?? '').trim(); if (t) { try { JSON.parse(t); } catch { throw new HttpError(400, 'Paths must be JSON like {"token": "/oauth/token", "shop_search": "/shop/v1/search"}.'); } } q.setSetting('fastmoss_paths', t); fastmoss.setPaths(fastmossPaths(q)); }
     if (b.markets !== undefined) q.setSetting('fastmoss_pull_markets', String(b.markets ?? '').toUpperCase().split(/[,\s]+/).filter(Boolean).join(','));
     if (b.pages !== undefined) { const n = Number(b.pages); if (!Number.isInteger(n) || n < 1 || n > 30) throw new HttpError(400, 'Pages must be 1 to 30.'); q.setSetting('fastmoss_pull_pages', String(n)); }
     if (b.enabled !== undefined) q.setSetting('fastmoss_pull_enabled', bool(b.enabled, true) ? '1' : '0');

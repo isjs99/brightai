@@ -9,7 +9,7 @@ import { SEED_PLAYBOOK } from '../src/playbook/seed';
 import { looksLikeQuestion, searchEvidence, tokens, Copilot } from '../src/copilot/index';
 import { pickBestContact, bulkCandidates } from '../src/bd/bulk';
 import { ApolloClient, ApolloCreditsError, isCreditsError } from '../src/bd/apollo';
-import { DEFAULT_FASTMOSS_PATHS, FastmossClient, fastmossStatus, pullFastMoss, unwrapShops } from '../src/bd/fastmoss';
+import { FastmossClient, FastmossQuotaError, fastmossStatus, pullFastMoss, toolResultJson, unwrapShops } from '../src/bd/fastmoss';
 import { existsSync, rmSync } from 'node:fs';
 import { apolloStatus, EnrichJob, enrichProspect, markApolloExhausted, personAtCompany, refreshApolloCredits } from '../src/bd/enrich';
 import { dropExclamations, tailoredOpener, templateDraft, renderOutreachPrompt } from '../src/bd/outreach';
@@ -326,66 +326,83 @@ describe('apollo credits and deeper enrichment', () => {
   });
 });
 
-describe('fastmoss openapi client and pull', () => {
-  const fake = (opts: { tokenPath?: string; searchPath?: string; rowsFor?: (region: string, page: number) => Record<string, unknown>[]; quotaAfter?: number; envelope?: 'shops' | 'data.list' } = {}) => {
-    const calls: { path: string; body: Record<string, unknown>; auth: string | null }[] = [];
+describe('fastmoss mcp client and pull', () => {
+  const fake = (opts: { rowsFor?: (region: string, page: number) => Record<string, unknown>[]; quotaAfter?: number; sse?: boolean; rejectKey?: boolean; credits?: number } = {}) => {
+    const calls: { method: string; params: Record<string, unknown>; headers: Record<string, string> }[] = [];
     let n = 0;
-    const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
-      const path = String(url).replace('https://openapi.fastmoss.com', '');
+    const reply = (id: unknown, result: unknown) => {
+      const body = JSON.stringify({ jsonrpc: '2.0', id, result });
+      return opts.sse ? new Response(`event: message\ndata: ${body}\n\n`, { headers: { 'content-type': 'text/event-stream', 'mcp-session-id': 'sess-1' } }) : new Response(body, { headers: { 'content-type': 'application/json', 'mcp-session-id': 'sess-1' } });
+    };
+    const fetchFn = (async (_url: string | URL | Request, init?: RequestInit) => {
       const headers = (init?.headers ?? {}) as Record<string, string>;
-      const ct = headers['content-type'] ?? '';
-      const body = ct.includes('json') ? (JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>) : Object.fromEntries(new URLSearchParams(String(init?.body ?? '')));
-      calls.push({ path, body, auth: headers.authorization ?? null });
-      if (path === (opts.tokenPath ?? '/oauth/token')) return body.client_id === 'id' && body.client_secret === 'secret' ? new Response(JSON.stringify({ code: 0, data: { access_token: 'tok123', expires_in: 3600 } })) : new Response('{"message":"bad client"}', { status: 401 });
-      if (path === (opts.searchPath ?? '/shop/v1/search')) {
-        if (headers.authorization !== 'Bearer tok123') return new Response('{"message":"unauthorized"}', { status: 401 });
+      const msg = JSON.parse(String(init?.body ?? '{}')) as { id?: number; method: string; params: Record<string, unknown> };
+      calls.push({ method: msg.method, params: msg.params, headers });
+      if (opts.rejectKey || headers.authorization !== 'Bearer key-1') return new Response('unauthorized', { status: 401 });
+      if (msg.method === 'initialize') return reply(msg.id, { protocolVersion: '2025-03-26', serverInfo: { name: 'fastmoss-mcp', version: '1.0.5' } });
+      if (msg.method === 'notifications/initialized') return new Response('', { status: 202 });
+      if (msg.method === 'tools/list') return reply(msg.id, { tools: [{ name: 'shop_search' }, { name: 'credit_usage_summary' }] });
+      if (msg.method === 'tools/call') {
+        const { name, arguments: a } = msg.params as { name: string; arguments: Record<string, unknown> };
+        if (name === 'credit_usage_summary') return reply(msg.id, { content: [{ type: 'text', text: JSON.stringify({ balance: { available_credits: opts.credits ?? 756, total_granted_credits: 5500, total_consumed_credits: 3390 }, entitlements: { monthly_credits: 1800, plan_expire_at: '2026-10-03 00:16:30' }, subscriptions: [{ package_name: 'Pro' }] }) }] });
         n += 1;
-        if (opts.quotaAfter && n > opts.quotaAfter) return new Response(JSON.stringify({ code: 40201, message: 'Insufficient credits' }), { status: 402 });
-        const f = (body.filter as { region: string }).region;
-        const rows = opts.rowsFor ? opts.rowsFor(f, Number(body.page)) : [];
-        return new Response(JSON.stringify(opts.envelope === 'data.list' ? { code: 0, data: { list: rows, total: 500 } } : { code: 0, data: { shops: rows } }));
+        if (opts.quotaAfter !== undefined && n > opts.quotaAfter) return reply(msg.id, { isError: true, content: [{ type: 'text', text: 'Insufficient credits, please recharge' }] });
+        const region = (a.filter as { region: string }).region;
+        const rows = opts.rowsFor ? opts.rowsFor(region, Number(a.page ?? 1)) : [];
+        return reply(msg.id, { content: [{ type: 'text', text: JSON.stringify({ shops: rows, total: 500 }) }] });
       }
-      return new Response('{"message":"not found"}', { status: 404 });
+      return new Response('{"jsonrpc":"2.0","error":{"code":-32601,"message":"no such method"}}', { status: 200 });
     }) as typeof fetch;
-    return { calls, client: new FastmossClient('id', 'secret', 'https://openapi.fastmoss.com', fetchFn, { ...DEFAULT_FASTMOSS_PATHS }) };
+    return { calls, client: new FastmossClient('key-1', 'https://mcp.fastmoss.com/mcp', fetchFn, 'http') };
   };
   const shop = (region: string, i: number, rise: number) => ({ shop_name: `${region} Shop ${i}`, seller_id: `${region}${i}`, region, gmv_last_7d: 1000 * rise, total_gmv: 1000, units_sold_last_7d: 10, total_units_sold: 100, currency_code: region === 'UK' ? 'GBP' : 'EUR', main_category: { name: 'Beauty' } });
-  it('gets a token, searches shops with the MCP-shaped body, and unwraps both envelopes', async () => {
-    const { calls, client } = fake({ rowsFor: (r, p) => [shop(r, p, 0.2)], envelope: 'data.list' });
-    const rows = await client.shopSearch({ region: 'DE', page: 2 });
-    expect(rows).toHaveLength(1);
-    expect(calls[0].path).toBe('/oauth/token');
-    expect(calls[1]).toMatchObject({ path: '/shop/v1/search', auth: 'Bearer tok123', body: { filter: { region: 'DE' }, orderby: [{ field: 'day7_gmv', order: 'desc' }], page: 2, pagesize: 10 } });
-    await client.shopSearch({ region: 'FR' });
-    expect(calls.filter((c) => c.path === '/oauth/token')).toHaveLength(1); // cached
-    expect(unwrapShops({ data: { shops: [{ shop_name: 'x' }] } })).toHaveLength(1);
-    expect(unwrapShops({ result: { items: [] } })).toEqual([]);
+  it('initialises once, keeps the session id, calls shop_search with the tool arguments, parses JSON and SSE replies', async () => {
+    for (const sse of [false, true]) {
+      const { calls, client } = fake({ rowsFor: (r, p) => [shop(r, p, 0.2)], sse });
+      const rows = await client.shopSearch({ region: 'DE', page: 2 });
+      expect(rows).toHaveLength(1);
+      expect(calls.map((c) => c.method)).toEqual(['initialize', 'notifications/initialized', 'tools/call']);
+      expect(calls[2].params).toMatchObject({ name: 'shop_search', arguments: { filter: { region: 'DE' }, orderby: [{ field: 'day7_gmv', order: 'desc' }], page: 2, pagesize: 10 } });
+      expect(calls[2].headers['mcp-session-id']).toBe('sess-1');
+      expect(calls[2].headers['x-api-key']).toBe('key-1');
+      await client.shopSearch({ region: 'FR' });
+      expect(calls.filter((c) => c.method === 'initialize')).toHaveLength(1);
+      expect(await client.credits()).toMatchObject({ available: 756, monthly: 1800, plan: 'Pro' });
+    }
+    expect(toolResultJson({ content: [{ type: 'text', text: 'Result:\n{"a":1}' }] })).toEqual({ a: 1 });
+    expect(unwrapShops({ data: { list: [{ seller_id: 'x' }] } })).toHaveLength(1);
   });
-  it('discovers the token and shop paths when the defaults are wrong', async () => {
-    const { client } = fake({ tokenPath: '/oauth/v1/token', searchPath: '/shop/v1/list', rowsFor: (r) => [shop(r, 1, 0.1)] });
-    expect(await client.discoverTokenPath()).toBe('/oauth/v1/token');
-    expect(await client.discoverShopSearchPath('DE')).toEqual({ path: '/shop/v1/list', rows: 1 });
+  it('reports a rejected key and quota errors', async () => {
+    const { client } = fake({ rejectKey: true });
+    const t = await client.test();
+    expect(t.ok).toBe(false);
+    expect(t.error).toMatch(/401/);
+    const { client: c2 } = fake({ rowsFor: (r) => [shop(r, 1, 0.5)], quotaAfter: 0 });
+    await expect(c2.shopSearch({ region: 'DE' })).rejects.toBeInstanceOf(FastmossQuotaError);
+    const { client: c3 } = fake({ rowsFor: (r) => [shop(r, 1, 0.5)] });
+    expect(await c3.test()).toMatchObject({ ok: true, transport: 'http', server: 'fastmoss-mcp 1.0.5', tools: 2, rows: 1 });
   });
-  it('pulls the risers plus the top three pages, writes the file, upserts, and stops on quota', async () => {
+  it('pulls the risers plus the top three pages, writes the file, upserts, records credits, and stops on quota', async () => {
     const q = new Queries(openTestDb());
     const dir = `${process.cwd()}/tests/.tmp-pulls-${Date.now()}`;
     process.env.BD_PULLS_DIR = dir;
     try {
       const { client, calls } = fake({ rowsFor: (r, p) => Array.from({ length: 10 }, (_, i) => shop(r, p * 10 + i, p <= 3 ? 0.01 : i === 0 ? 0.3 : 0.01)) });
-      const r = await pullFastMoss(q, client, { markets: ['DE', 'UK'], pages: 5, date: '2026-09-21' });
+      const r = await pullFastMoss(q, client, { markets: ['DE', 'UK'], pages: 5, date: '2026-09-21', delayMs: 0 });
       expect(r.markets.map((m) => [m.market, m.pages, m.kept])).toEqual([['DE', 5, 32], ['UK', 5, 32]]);
       expect(r.added).toBe(64);
       expect(r.file).toBe('2026-09-21.json');
       expect(existsSync(`${dir}/2026-09-21.json`)).toBe(true);
-      expect(calls.filter((c) => c.path === '/shop/v1/search')).toHaveLength(10);
+      expect(calls.filter((c) => c.method === 'tools/call' && (c.params as { name: string }).name === 'shop_search')).toHaveLength(10);
       const p = q.listProspects(false).find((x) => x.shop_name === 'UK Shop 40')!;
       expect(p).toMatchObject({ market: 'UK', currency: 'GBP', category: 'Beauty', source: 'fastmoss' });
       expect(JSON.parse(q.getSetting('bd_pulls_imported', '[]'))).toContain('2026-09-21.json');
       const st = fastmossStatus(q, client);
       expect(st.last_pull?.added).toBe(64);
+      expect(st.credits?.available).toBe(756);
       expect(st.quota_hit_at).toBeNull();
       const { client: c2 } = fake({ rowsFor: (r, p) => [shop(r, p, 0.5)], quotaAfter: 1 });
-      const r2 = await pullFastMoss(q, c2, { markets: ['DE', 'FR'], pages: 3, date: '2026-09-22' });
+      const r2 = await pullFastMoss(q, c2, { markets: ['DE', 'FR'], pages: 3, date: '2026-09-22', delayMs: 0 });
       expect(r2.quota_hit).toBe(true);
       expect(r2.markets[0].kept).toBe(1);
       expect(fastmossStatus(q, c2).quota_hit_at).not.toBeNull();

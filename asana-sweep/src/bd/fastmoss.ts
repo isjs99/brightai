@@ -1,29 +1,23 @@
 import { writeFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { execFile } from 'node:child_process';
 import type { Queries } from '../db/queries.js';
 import type { BdProspectInput, FastmossStatus } from '../sweep/types.js';
-import { parseProspectInput, pullsDir } from './import.js';
-import { applyEnrichedSeed } from './import.js';
+import { parseProspectInput, pullsDir, applyEnrichedSeed } from './import.js';
 import { liveEvents } from '../live/events.js';
 import { log } from '../logger.js';
 
 /**
- * FastMoss OpenAPI client (openapi.fastmoss.com). Auth is OAuth client credentials: client_id +
- * client_secret from developers.fastmoss.com, exchanged for a bearer access_token that is cached
- * and refreshed. The developer docs were not reachable from the build environment, so the token
- * path and the shop endpoints are configurable (Settings on the BD page or FASTMOSS_* env vars);
- * the defaults follow the documented REST naming (POST /shop/v1/rank/topSelling) and the request
- * body mirrors the MCP tool arguments (filter / orderby / page / pagesize), which the same API
- * serves. "Test FastMoss" tries the candidate token paths and reports which one worked.
+ * FastMoss client. FastMoss exposes its data over MCP (https://mcp.fastmoss.com/mcp, Streamable
+ * HTTP JSON-RPC) with an API key from developers.fastmoss.com > MCP&CLI > API Keys; the same key
+ * drives their CLI (@fastmoss/cli). This client speaks the MCP protocol directly (initialize,
+ * tools/call) so the server pulls the fast risers on its own schedule with no Claude session in
+ * the loop. The key is sent as a bearer token and as X-API-Key (servers ignore the one they do not
+ * use); if the HTTP transport is refused, the official CLI is used as a fallback when installed
+ * (`npx -y @fastmoss/cli@latest call ...`).
  */
 
-export const DEFAULT_FASTMOSS_PATHS = {
-  token: '/oauth/token',
-  shop_search: '/shop/v1/search',
-  credits: '/user/v1/credit/summary',
-};
-export const TOKEN_PATH_CANDIDATES = ['/oauth/token', '/oauth/v1/token', '/api/oauth/token', '/auth/token', '/v1/oauth/token', '/openapi/oauth/token'];
-export const SHOP_SEARCH_CANDIDATES = ['/shop/v1/search', '/shop/v1/list', '/shop/v1/shopSearch', '/api/shop/v1/search'];
+export const FASTMOSS_MCP_URL = 'https://mcp.fastmoss.com/mcp';
 
 export class FastmossQuotaError extends Error {
   constructor(message: string) {
@@ -31,150 +25,190 @@ export class FastmossQuotaError extends Error {
     this.name = 'FastmossQuotaError';
   }
 }
-export const isQuotaError = (err: unknown): boolean => err instanceof FastmossQuotaError || /insufficient|quota|credit|balance|402/i.test((err as Error)?.message ?? '');
-
-export interface FastmossPaths { token: string; shop_search: string; credits: string }
-
-export function fastmossPaths(q?: Queries | null): FastmossPaths {
-  const out = { ...DEFAULT_FASTMOSS_PATHS };
-  const env = process.env.FASTMOSS_PATHS?.trim();
-  for (const src of [env, q?.getSetting('fastmoss_paths', '') || '']) {
-    if (!src) continue;
-    try { for (const [k, v] of Object.entries(JSON.parse(src) as Record<string, string>)) if (k in out && typeof v === 'string' && v.startsWith('/')) (out as Record<string, string>)[k] = v; } catch { /* ignore */ }
-  }
-  return out;
-}
+export const isQuotaError = (err: unknown): boolean => err instanceof FastmossQuotaError || /insufficient|quota|credits? (exhausted|used up|remaining)|balance|402|recharge/i.test((err as Error)?.message ?? '');
 
 export interface FastmossShopRow extends Record<string, unknown> { shop_name?: string; seller_id?: string; region?: string; gmv_last_7d?: number; total_gmv?: number }
 
 type Any = Record<string, unknown>;
 
-/** Pull the shop list out of whatever envelope the API uses. */
+/** Pull the shop list out of whatever envelope the tool result uses. */
 export function unwrapShops(body: unknown): FastmossShopRow[] {
   const seen = new Set<unknown>();
   const walk = (v: unknown, depth: number): FastmossShopRow[] | null => {
-    if (!v || typeof v !== 'object' || depth > 4 || seen.has(v)) return null;
+    if (!v || typeof v !== 'object' || depth > 5 || seen.has(v)) return null;
     seen.add(v);
-    if (Array.isArray(v)) return v.length && typeof v[0] === 'object' && v[0] && ('shop_name' in (v[0] as Any) || 'seller_id' in (v[0] as Any) || 'shop' in (v[0] as Any)) ? (v as FastmossShopRow[]) : v.length === 0 ? [] : null;
+    if (Array.isArray(v)) return v.length && typeof v[0] === 'object' && v[0] && ('shop_name' in (v[0] as Any) || 'seller_id' in (v[0] as Any) || 'shop' in (v[0] as Any)) ? (v as FastmossShopRow[]) : null;
     const o = v as Any;
-    for (const k of ['shops', 'list', 'items', 'rows', 'data', 'result']) { const r = walk(o[k], depth + 1); if (r) return r; }
+    for (const k of ['shops', 'list', 'items', 'rows', 'data', 'result', 'structuredContent']) { const r = walk(o[k], depth + 1); if (r) return r; }
     return null;
   };
   return walk(body, 0) ?? [];
 }
 
+/** The JSON payload of an MCP tool result: structuredContent, else the first text block parsed as JSON. */
+export function toolResultJson(result: unknown): unknown {
+  const r = (result ?? {}) as Any;
+  if (r.structuredContent) return r.structuredContent;
+  const content = (r.content as { type?: string; text?: string }[] | undefined) ?? [];
+  const text = content.filter((c) => c.type === 'text' && typeof c.text === 'string').map((c) => c.text as string).join('\n').trim();
+  if (!text) return r;
+  try { return JSON.parse(text); } catch { /* not JSON */ }
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start >= 0 && end > start) { try { return JSON.parse(text.slice(start, end + 1)); } catch { /* fall through */ } }
+  return { text };
+}
+
+export type FastmossTransport = 'http' | 'cli';
+
 export class FastmossClient {
-  private token: { value: string; expires_at: number } | null = null;
+  private sessionId: string | null = null;
+  private initialised = false;
+  private nextId = 1;
 
   constructor(
-    private clientId = process.env.FASTMOSS_CLIENT_ID?.trim() ?? '',
-    private clientSecret = process.env.FASTMOSS_CLIENT_SECRET?.trim() ?? '',
-    private baseUrl = (process.env.FASTMOSS_BASE_URL?.trim() || 'https://openapi.fastmoss.com').replace(/\/+$/, ''),
+    private apiKey = process.env.FASTMOSS_API_KEY?.trim() ?? '',
+    private url = process.env.FASTMOSS_MCP_URL?.trim() || FASTMOSS_MCP_URL,
     private fetchFn: typeof fetch = fetch,
-    private paths: FastmossPaths = fastmossPaths(null),
+    public transport: FastmossTransport = (process.env.FASTMOSS_TRANSPORT === 'cli' ? 'cli' : 'http'),
   ) {}
 
   get configured(): boolean {
-    return Boolean(this.clientId && this.clientSecret);
+    return Boolean(this.apiKey);
   }
 
-  setPaths(p: FastmossPaths): void {
-    this.paths = p;
-    this.token = null;
+  private headers(): Record<string, string> {
+    const h: Record<string, string> = { 'content-type': 'application/json', accept: 'application/json, text/event-stream', authorization: `Bearer ${this.apiKey}`, 'x-api-key': this.apiKey, 'user-agent': 'brightform-am-ops/1.0 (fastmoss-mcp client)' };
+    if (this.sessionId) h['mcp-session-id'] = this.sessionId;
+    return h;
   }
 
-  private async raw(method: 'GET' | 'POST', path: string, body?: unknown, auth = true): Promise<{ status: number; data: Any | null; text: string }> {
-    const headers: Record<string, string> = { 'content-type': 'application/json', accept: 'application/json' };
-    if (auth) headers.authorization = `Bearer ${await this.accessToken()}`;
-    const res = await this.fetchFn(`${this.baseUrl}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
+  /** One JSON-RPC round trip; the server may answer with plain JSON or an SSE stream carrying the JSON message. */
+  private async rpc<T>(method: string, params: Any, notification = false): Promise<T> {
+    if (!this.apiKey) throw new Error('FASTMOSS_API_KEY is not set (developers.fastmoss.com > MCP&CLI > API Keys).');
+    const id = notification ? undefined : this.nextId++;
+    const res = await this.fetchFn(this.url, { method: 'POST', headers: this.headers(), body: JSON.stringify({ jsonrpc: '2.0', ...(id !== undefined ? { id } : {}), method, params }) });
+    const sid = res.headers.get('mcp-session-id');
+    if (sid) this.sessionId = sid;
     const text = await res.text();
-    let data: Any | null = null;
-    try { data = text ? (JSON.parse(text) as Any) : null; } catch { data = null; }
-    return { status: res.status, data, text };
-  }
-
-  /** Try one token path with the two common client-credential encodings (JSON body, then form). */
-  private async fetchToken(path: string): Promise<{ value: string; expires_in: number } | null> {
-    const attempts: { headers: Record<string, string>; body: string }[] = [
-      { headers: { 'content-type': 'application/json' }, body: JSON.stringify({ client_id: this.clientId, client_secret: this.clientSecret, grant_type: 'client_credentials' }) },
-      { headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ client_id: this.clientId, client_secret: this.clientSecret, grant_type: 'client_credentials' }).toString() },
-    ];
-    for (const a of attempts) {
-      const res = await this.fetchFn(`${this.baseUrl}${path}`, { method: 'POST', headers: { accept: 'application/json', ...a.headers }, body: a.body });
-      const text = await res.text();
-      let data: Any | null = null;
-      try { data = text ? (JSON.parse(text) as Any) : null; } catch { data = null; }
-      const inner = (data?.data as Any | undefined) ?? data;
-      const value = String(inner?.access_token ?? inner?.token ?? '');
-      if (res.ok && value) return { value, expires_in: Number(inner?.expires_in ?? inner?.expire_in ?? 7200) || 7200 };
-      if (res.status === 404 || res.status === 405) return null; // wrong path, no point trying the other encoding
-    }
-    return null;
-  }
-
-  async accessToken(force = false): Promise<string> {
-    if (!this.configured) throw new Error('FASTMOSS_CLIENT_ID / FASTMOSS_CLIENT_SECRET are not set.');
-    if (!force && this.token && this.token.expires_at > Date.now() + 60000) return this.token.value;
-    const t = await this.fetchToken(this.paths.token);
-    if (!t) throw new Error(`FastMoss token request failed at ${this.paths.token}. Check the client id / secret, or set the token path from the developer docs in BD > FastMoss settings.`);
-    this.token = { value: t.value, expires_at: Date.now() + t.expires_in * 1000 };
-    return t.value;
-  }
-
-  /** Find which token path the API answers on (used by "Test FastMoss"). Returns the working path or null. */
-  async discoverTokenPath(): Promise<string | null> {
-    for (const p of [this.paths.token, ...TOKEN_PATH_CANDIDATES.filter((x) => x !== this.paths.token)]) {
-      try { const t = await this.fetchToken(p); if (t) { this.paths.token = p; this.token = { value: t.value, expires_at: Date.now() + t.expires_in * 1000 }; return p; } } catch { /* next */ }
-    }
-    return null;
-  }
-
-  private async call(path: string, body: unknown, retry = true): Promise<Any | null> {
-    const r = await this.raw('POST', path, body);
-    if (r.status === 401 && retry) { await this.accessToken(true); return this.call(path, body, false); }
-    const code = Number(r.data?.code ?? r.data?.errcode ?? (r.status >= 200 && r.status < 300 ? 0 : r.status));
-    const msg = String(r.data?.message ?? r.data?.msg ?? r.data?.error ?? r.text.slice(0, 200));
-    if (r.status === 402 || (code !== 0 && /quota|credit|balance|insufficient/i.test(msg))) throw new FastmossQuotaError(`FastMoss ${r.status}: ${msg}`);
-    if (r.status === 404) throw new Error(`FastMoss endpoint ${path} not found (404): set the right path from the developer docs in BD > FastMoss settings.`);
-    if (r.status >= 400 || (code !== 0 && code !== 200)) throw new Error(`FastMoss ${r.status}${code ? ` (code ${code})` : ''}: ${msg}`);
-    return r.data;
-  }
-
-  /** Shops in a region ordered by 7-day GMV; same arguments as the MCP shop_search tool. */
-  async shopSearch(opts: { region: string; page?: number; pagesize?: number; orderby?: { field: string; order: 'asc' | 'desc' }[]; keywords?: string }): Promise<FastmossShopRow[]> {
-    const body = { filter: { region: opts.region }, orderby: opts.orderby ?? [{ field: 'day7_gmv', order: 'desc' }], page: opts.page ?? 1, pagesize: Math.min(opts.pagesize ?? 10, 10), ...(opts.keywords ? { keywords: opts.keywords } : {}) };
-    return unwrapShops(await this.call(this.paths.shop_search, body));
-  }
-
-  /** Try the candidate shop-search paths until one answers (used by "Test FastMoss"). */
-  async discoverShopSearchPath(region = 'DE'): Promise<{ path: string; rows: number } | null> {
-    for (const p of [this.paths.shop_search, ...SHOP_SEARCH_CANDIDATES.filter((x) => x !== this.paths.shop_search)]) {
-      try {
-        const data = await this.call(p, { filter: { region }, orderby: [{ field: 'day7_gmv', order: 'desc' }], page: 1, pagesize: 1 });
-        const rows = unwrapShops(data);
-        this.paths.shop_search = p;
-        return { path: p, rows: rows.length };
-      } catch (err) {
-        if (isQuotaError(err)) throw err;
-        if (!/404/.test((err as Error).message)) { this.paths.shop_search = p; return { path: p, rows: 0 }; }
+    if (res.status === 401 || res.status === 403) throw new Error(`FastMoss MCP ${res.status}: ${text.slice(0, 160) || 'API key rejected'}`);
+    if (res.status === 402) throw new FastmossQuotaError(`FastMoss 402: ${text.slice(0, 160) || 'insufficient credits'}`);
+    if (res.status === 404 && this.sessionId) { this.sessionId = null; this.initialised = false; throw new Error('FastMoss MCP session expired'); }
+    if (!res.ok && res.status !== 202) throw new Error(`FastMoss MCP ${res.status}: ${text.slice(0, 200)}`);
+    if (notification) return undefined as T;
+    // SSE: take the last "data:" JSON message with our id.
+    let msg: Any | null = null;
+    if (/^\s*(event:|data:)/m.test(text) && !text.trim().startsWith('{')) {
+      for (const line of text.split('\n')) {
+        if (!line.startsWith('data:')) continue;
+        try { const j = JSON.parse(line.slice(5).trim()) as Any; if (j.id === id || (j.result !== undefined || j.error !== undefined)) msg = j; } catch { /* skip */ }
       }
+    } else {
+      try { msg = JSON.parse(text) as Any; } catch { throw new Error(`FastMoss MCP returned non-JSON: ${text.slice(0, 120)}`); }
     }
-    return null;
+    if (!msg) throw new Error('FastMoss MCP returned no message');
+    if (msg.error) {
+      const e = msg.error as { code?: number; message?: string };
+      const m = `FastMoss MCP error${e.code !== undefined ? ` ${e.code}` : ''}: ${e.message ?? 'unknown'}`;
+      if (isQuotaError(new Error(m))) throw new FastmossQuotaError(m);
+      throw new Error(m);
+    }
+    return msg.result as T;
   }
 
-  /** Credit balance when the API exposes it (same shape as the MCP credit_usage_summary tool). Null when the path is unknown. */
-  async credits(): Promise<{ available: number; granted: number; consumed: number; plan: string | null; expires_at: string | null } | null> {
+  async initialise(force = false): Promise<{ name: string; version: string } | null> {
+    if (this.initialised && !force) return null;
+    this.sessionId = null;
+    const r = await this.rpc<{ serverInfo?: { name: string; version: string } }>('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'brightform-am-ops', version: '1.0' } });
+    try { await this.rpc('notifications/initialized', {}, true); } catch { /* some servers reject the notification; harmless */ }
+    this.initialised = true;
+    return r.serverInfo ?? null;
+  }
+
+  async listTools(): Promise<string[]> {
+    await this.initialise();
+    const r = await this.rpc<{ tools?: { name: string }[] }>('tools/list', {});
+    return (r.tools ?? []).map((t) => t.name);
+  }
+
+  /** Call a FastMoss tool and return its JSON payload. */
+  async callTool(name: string, args: Any): Promise<unknown> {
+    if (this.transport === 'cli') return this.callViaCli(name, args);
+    await this.initialise();
+    let result: Any;
     try {
-      const r = await this.raw('GET', this.paths.credits);
-      if (r.status === 404 || !r.data) return null;
-      const d = ((r.data.data as Any | undefined) ?? r.data) as Any;
-      const bal = (d.balance as Any | undefined) ?? d;
-      const available = Number(bal.available_credits ?? bal.remaining_credits ?? bal.available ?? NaN);
-      if (!Number.isFinite(available)) return null;
-      const ent = (d.entitlements as Any | undefined) ?? {};
-      return { available, granted: Number(bal.total_granted_credits ?? bal.granted ?? 0) || 0, consumed: Number(bal.total_consumed_credits ?? bal.consumed ?? 0) || 0, plan: ((d.subscriptions as Any[] | undefined)?.[0]?.package_name as string | undefined) ?? null, expires_at: (ent.plan_expire_at as string | undefined) ?? null };
-    } catch {
-      return null;
+      result = await this.rpc<Any>('tools/call', { name, arguments: args });
+    } catch (err) {
+      if (/session expired/.test((err as Error).message)) { await this.initialise(true); result = await this.rpc<Any>('tools/call', { name, arguments: args }); } else throw err;
+    }
+    const payload = toolResultJson(result);
+    if (result.isError) {
+      const m = `FastMoss ${name}: ${typeof payload === 'object' && payload && 'text' in (payload as Any) ? String((payload as Any).text) : JSON.stringify(payload).slice(0, 200)}`;
+      if (isQuotaError(new Error(m))) throw new FastmossQuotaError(m);
+      throw new Error(m);
+    }
+    return payload;
+  }
+
+  /** Fallback through the official CLI (npx -y @fastmoss/cli@latest call ...), which handles the protocol itself. */
+  private callViaCli(name: string, args: Any): Promise<unknown> {
+    return new Promise((resolve, reject) => {
+      const bin = process.env.FASTMOSS_CLI?.trim() || 'npx';
+      const argv = bin === 'npx' ? ['-y', '@fastmoss/cli@latest'] : [];
+      execFile(bin, [...argv, 'call', '--tool', name, '--args', JSON.stringify(args), '--output', 'data'], { env: { ...process.env, FASTMOSS_API_KEY: this.apiKey }, timeout: 120000, maxBuffer: 20 * 1024 * 1024 }, (err, stdout, stderr) => {
+        const out = String(stdout ?? '').trim();
+        if (err && !out) { const m = `FastMoss CLI: ${String(stderr || err.message).trim().slice(0, 300)}`; reject(isQuotaError(new Error(m)) ? new FastmossQuotaError(m) : new Error(m)); return; }
+        try { resolve(JSON.parse(out)); } catch { const start = out.indexOf('{'); const end = out.lastIndexOf('}'); if (start >= 0 && end > start) { try { resolve(JSON.parse(out.slice(start, end + 1))); return; } catch { /* fall through */ } } reject(new Error(`FastMoss CLI returned non-JSON: ${out.slice(0, 160)}`)); }
+      });
+    });
+  }
+
+  /** Shops in a region ordered by 7-day GMV; the shop_search tool arguments. */
+  async shopSearch(opts: { region: string; page?: number; pagesize?: number; orderby?: { field: string; order: 'asc' | 'desc' }[]; keywords?: string }): Promise<FastmossShopRow[]> {
+    const args: Any = { filter: { region: opts.region }, orderby: opts.orderby ?? [{ field: 'day7_gmv', order: 'desc' }], page: opts.page ?? 1, pagesize: Math.min(opts.pagesize ?? 10, 10) };
+    if (opts.keywords) args.keywords = opts.keywords;
+    return unwrapShops(await this.callTool('shop_search', args));
+  }
+
+  /** Credit balance from the credit_usage_summary tool (free). */
+  async credits(): Promise<{ available: number; granted: number; consumed: number; plan: string | null; expires_at: string | null; monthly: number | null } | null> {
+    const d = (await this.callTool('credit_usage_summary', {})) as Any;
+    const bal = (d.balance as Any | undefined) ?? d;
+    const available = Number(bal.available_credits ?? bal.remaining_credits ?? NaN);
+    if (!Number.isFinite(available)) return null;
+    const ent = (d.entitlements as Any | undefined) ?? {};
+    return { available, granted: Number(bal.total_granted_credits ?? 0) || 0, consumed: Number(bal.total_consumed_credits ?? 0) || 0, plan: ((d.subscriptions as Any[] | undefined)?.[0]?.package_name as string | undefined) ?? null, expires_at: (ent.plan_expire_at as string | undefined) ?? null, monthly: ent.monthly_credits !== undefined ? Number(ent.monthly_credits) : null };
+  }
+
+  /** Connection test: initialise, list tools, one-row shop search, balance. Falls back to the CLI transport on an auth refusal. */
+  async test(): Promise<{ ok: boolean; transport: FastmossTransport; server: string | null; tools: number; rows: number; error: string | null }> {
+    const out = { ok: false, transport: this.transport, server: null as string | null, tools: 0, rows: 0, error: null as string | null };
+    const tryHttp = async () => {
+      const info = await this.initialise(true);
+      out.server = info ? `${info.name} ${info.version}` : 'mcp';
+      out.tools = (await this.listTools()).length;
+      out.rows = (await this.shopSearch({ region: 'DE', pagesize: 1 })).length;
+      out.ok = true;
+    };
+    try {
+      if (this.transport === 'cli') { out.rows = (await this.shopSearch({ region: 'DE', pagesize: 1 })).length; out.ok = true; return out; }
+      await tryHttp();
+      return out;
+    } catch (err) {
+      out.error = (err as Error).message;
+      if (isQuotaError(err)) throw err;
+      if (/401|403|rejected|unauthori/i.test(out.error)) {
+        try {
+          this.transport = 'cli';
+          out.rows = (await this.shopSearch({ region: 'DE', pagesize: 1 })).length;
+          out.ok = true; out.transport = 'cli'; out.error = null;
+          return out;
+        } catch (err2) {
+          this.transport = 'http';
+          out.error = `${out.error} (CLI fallback: ${(err2 as Error).message.slice(0, 160)})`;
+        }
+      }
+      return out;
     }
   }
 }
@@ -190,13 +224,13 @@ export interface PullResult { date: string; file: string | null; markets: { mark
  * lifetime GMV at or above minRise) plus the first three pages for refreshed numbers, save the raw rows
  * to data/bd-pulls/<date>.json for the record, and upsert them into the pipeline.
  */
-export async function pullFastMoss(q: Queries, client: FastmossClient = fastmoss, opts: { markets?: string[]; pages?: number; minRise?: number; date?: string } = {}): Promise<PullResult> {
-  if (!client.configured) throw new Error('FastMoss is not configured: set FASTMOSS_CLIENT_ID and FASTMOSS_CLIENT_SECRET.');
-  client.setPaths(fastmossPaths(q));
+export async function pullFastMoss(q: Queries, client: FastmossClient = fastmoss, opts: { markets?: string[]; pages?: number; minRise?: number; date?: string; delayMs?: number } = {}): Promise<PullResult> {
+  if (!client.configured) throw new Error('FastMoss is not configured: set FASTMOSS_API_KEY.');
   const date = opts.date ?? new Date().toISOString().slice(0, 10);
   const pages = Math.min(Math.max(opts.pages ?? (Number(q.getSetting('fastmoss_pull_pages', '10')) || 10), 1), 30);
   const minRise = opts.minRise ?? 0.05;
-  const markets = opts.markets ?? (q.getSetting('fastmoss_pull_markets', '').split(',').map((m) => m.trim().toUpperCase()).filter(Boolean).length ? q.getSetting('fastmoss_pull_markets', '').split(',').map((m) => m.trim().toUpperCase()).filter(Boolean) : PULL_MARKETS);
+  const configured = q.getSetting('fastmoss_pull_markets', '').split(',').map((m) => m.trim().toUpperCase()).filter(Boolean);
+  const markets = opts.markets ?? (configured.length ? configured : PULL_MARKETS);
   const result: PullResult = { date, file: null, markets: [], added: 0, updated: 0, quota_hit: false };
   const kept: FastmossShopRow[] = [];
   const seen = new Set<string>();
@@ -223,7 +257,7 @@ export async function pullFastMoss(q: Queries, client: FastmossClient = fastmoss
         if (page <= 3 || rise >= minRise) { seen.add(key); kept.push({ ...r, region: r.region ?? market }); m.kept += 1; }
       }
       if (rows.length < 10) break;
-      await new Promise((r) => setTimeout(r, 250)); // 80 calls a minute on the Pro plan
+      if (opts.delayMs !== 0) await new Promise((r) => setTimeout(r, opts.delayMs ?? 800)); // 80 calls a minute on the Pro plan
     }
   }
   if (kept.length) {
@@ -231,9 +265,8 @@ export async function pullFastMoss(q: Queries, client: FastmossClient = fastmoss
     try {
       if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
       const file = `${date}.json`;
-      writeFileSync(join(dir, file), JSON.stringify({ pulled_at: date, source: 'fastmoss-api', shops: kept.map((r) => { const { linked_creator, ...rest } = r; const lc = linked_creator as Any | undefined; return lc ? { ...rest, linked_creator: { ...lc, avatar_url: undefined } } : rest; }) }, null, 1));
+      writeFileSync(join(dir, file), JSON.stringify({ pulled_at: date, source: 'fastmoss-mcp', shops: kept.map((r) => { const { linked_creator, ...rest } = r; const lc = linked_creator as Any | undefined; return lc ? { ...rest, linked_creator: { ...lc, avatar_url: undefined } } : rest; }) }, null, 1));
       result.file = file;
-      // Mark the file as imported so the folder scan does not import it a second time.
       let done: string[] = [];
       try { done = JSON.parse(q.getSetting('bd_pulls_imported', '[]')) as string[]; } catch { done = []; }
       if (!done.includes(file)) q.setSetting('bd_pulls_imported', JSON.stringify([...done, file].slice(-365)));
@@ -250,6 +283,7 @@ export async function pullFastMoss(q: Queries, client: FastmossClient = fastmoss
   q.setSetting('fastmoss_last_pull_at', new Date().toISOString());
   q.setSetting('fastmoss_last_pull_json', JSON.stringify(result));
   q.setSetting('fastmoss_last_error', result.markets.map((m) => m.error).filter(Boolean).join(' · ').slice(0, 500));
+  try { const c = await client.credits(); if (c) q.setSetting('fastmoss_credits_json', JSON.stringify({ ...c, checked_at: new Date().toISOString() })); } catch { /* balance is optional */ }
   log.info(`FastMoss pull ${date}: ${kept.length} shops kept across ${result.markets.length} market(s), +${result.added} new, ${result.updated} refreshed${result.quota_hit ? ' (quota hit)' : ''}`);
   liveEvents.emitUpdate({ kind: 'bd' });
   return result;
@@ -262,13 +296,13 @@ export function fastmossStatus(q: Queries, client: FastmossClient = fastmoss): F
   try { credits = JSON.parse(q.getSetting('fastmoss_credits_json', '') || 'null'); } catch { credits = null; }
   return {
     configured: client.configured,
+    transport: client.transport,
     last_pull_at: q.getSetting('fastmoss_last_pull_at', '') || null,
     last_error: q.getSetting('fastmoss_last_error', '') || null,
     last_test: q.getSetting('fastmoss_last_test', '') || null,
     quota_hit_at: q.getSetting('fastmoss_quota_hit_at', '') || null,
     last_pull: last,
     credits,
-    paths: fastmossPaths(q),
     markets: q.getSetting('fastmoss_pull_markets', '') || PULL_MARKETS.join(','),
     pages: Number(q.getSetting('fastmoss_pull_pages', '10')) || 10,
     pull_hour: q.getSetting('fastmoss_pull_cron', '30 5 * * *'),
