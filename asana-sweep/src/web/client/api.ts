@@ -231,6 +231,7 @@ export const api = {
   saveTtsSettings: (service_id: string) => call<TtsStatus>('PUT', '/tts/settings', { service_id }),
   linkTtsShop: (id: string, account_id: number | null, market: string | null) => call<TtsStatus>('PUT', `/tts/shops/${id}/link`, { account_id, market }),
   removeTtsShop: (id: string) => call<TtsStatus>('DELETE', `/tts/shops/${id}`),
+  ttsShopAnalytics: (id: string, days = 7) => call<{ shop: { id: string; name: string; region: string }; start: string; end: string; latest_available_date: string | null; days: number; gmv: number; currency: string; orders: number; units: number; last_interval: Record<string, string>; raw: unknown }>('GET', `/tts/shops/${id}/analytics?days=${days}`),
   ttsShopProducts: (id: string) => call<{ products: { id: string; title: string; status: string }[] }>('GET', `/tts/shops/${id}/products`),
   listPromotions: () => call<{ promotions: Promotion[]; tts: TtsStatus }>('GET', '/promotions'),
   createPromotion: (p: PromotionInput) => call<{ promotion: Promotion }>('POST', '/promotions', p),

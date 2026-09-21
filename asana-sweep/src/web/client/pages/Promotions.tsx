@@ -190,7 +190,12 @@ function PromotionForm({ initial, accounts, tts, onSave, onCancel }: { initial: 
 function ConnectionPanel({ tts, accounts, onChange }: { tts: TtsStatus; accounts: Account[]; onChange: (s: TtsStatus) => void }) {
   const [serviceId, setServiceId] = useState(tts.service_id);
   const [error, setError] = useState<string | null>(null);
+  const [test, setTest] = useState<{ id: string; busy: boolean; result: Awaited<ReturnType<typeof api.ttsShopAnalytics>> | null; error: string | null } | null>(null);
   const isAdmin = useIsAdmin();
+  const testAnalytics = async (id: string) => {
+    setTest({ id, busy: true, result: null, error: null });
+    try { setTest({ id, busy: false, result: await api.ttsShopAnalytics(id, 7), error: null }); } catch (e) { setTest({ id, busy: false, result: null, error: (e as Error).message }); }
+  };
   const save = async () => { try { onChange(await api.saveTtsSettings(serviceId)); } catch (e) { setError((e as Error).message); } };
   return (
     <div className="card" style={{ marginBottom: 18 }}>
@@ -233,11 +238,24 @@ function ConnectionPanel({ tts, accounts, onChange }: { tts: TtsStatus; accounts
                   ) : s.market}
                 </td>
                 <td>{s.token_ok ? <span className="badge good">ok</span> : <span className="badge crit">expired, re-authorise</span>}<div className="sub">since {fmtDate(s.authorized_at)}</div></td>
-                <td>{isAdmin && <button className="small danger" onClick={async () => { if (window.confirm(`Remove ${s.name}?`)) onChange(await api.removeTtsShop(s.id)); }}>Remove</button>}</td>
+                <td><div className="actions"><button className="small" disabled={test?.busy} onClick={() => testAnalytics(s.id)} title="Call the Analytics API for the last 7 days">{test?.id === s.id && test.busy ? 'Calling…' : 'Test analytics'}</button>{isAdmin && <button className="small danger" onClick={async () => { if (window.confirm(`Remove ${s.name}?`)) onChange(await api.removeTtsShop(s.id)); }}>Remove</button>}</div></td>
               </tr>
             ))}
           </tbody>
         </table>
+      )}
+      {test && !test.busy && (
+        <div className={`banner ${test.error ? 'crit' : 'good'}`} style={{ marginTop: 12 }}>
+          {test.error ? <><b>Analytics call failed.</b> {test.error}</> : test.result && (
+            <>
+              <b>{test.result.shop.name}</b> · last 7 days ({test.result.start} to {test.result.end}, {test.result.days} day(s) of data{test.result.latest_available_date ? `, data ready up to ${test.result.latest_available_date}` : ''}):{' '}
+              GMV <b>{test.result.gmv.toLocaleString('en-GB')} {test.result.currency}</b>{test.result.orders ? <> · {test.result.orders} orders</> : null}{test.result.units ? <> · {test.result.units} units</> : null}
+              <details style={{ marginTop: 6 }}><summary className="sub">Last day, every field</summary>
+                <table style={{ marginTop: 6 }}><tbody>{Object.entries(test.result.last_interval).map(([k, v]) => <tr key={k}><td className="mono sub">{k}</td><td>{v}</td></tr>)}</tbody></table>
+              </details>
+            </>
+          )}
+        </div>
       )}
     </div>
   );

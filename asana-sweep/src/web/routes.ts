@@ -691,6 +691,38 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     res.json(ttsStatus());
   });
 
+  /** Quick analytics test: last N days of shop performance straight from the Analytics API, flattened for display. */
+  r.get('/tts/shops/:id/analytics', async (req, res) => {
+    const shop = q.getTtsShop(String(req.params.id));
+    if (!shop) throw new HttpError(404, 'Shop not found');
+    const days = Math.min(90, Math.max(1, int(req.query.days, 7)));
+    const creds = await shopCredentials(q, shop.id);
+    // Yesterday is the last full day; the API takes [start, end).
+    const end = new Date(); end.setUTCDate(end.getUTCDate());
+    const endIso = end.toISOString().slice(0, 10);
+    const startIso = new Date(end.getTime() - days * 86400000).toISOString().slice(0, 10);
+    const data = await tts.shopPerformance(creds, startIso, endIso, days > 1 ? '1D' : 'ALL');
+    const intervals = data.performance?.intervals ?? [];
+    const flat: Record<string, string> = {};
+    const walk = (v: unknown, prefix: string) => {
+      if (v === null || v === undefined) return;
+      if (Array.isArray(v)) { v.forEach((x, i) => walk(x, `${prefix}[${i}]`)); return; }
+      if (typeof v === 'object') { for (const [k, x] of Object.entries(v as Record<string, unknown>)) walk(x, prefix ? `${prefix}.${k}` : k); return; }
+      flat[prefix] = String(v);
+    };
+    // Totals over the period from the daily intervals (GMV and order counts), plus the raw last interval for inspection.
+    let gmv = 0; let currency = ''; let orders = 0; let units = 0;
+    for (const iv of intervals) {
+      const sales = (iv as { sales?: Record<string, unknown> }).sales ?? {};
+      const g = (sales.gmv as { overall?: { amount?: string; currency?: string } } | undefined)?.overall;
+      if (g?.amount) { gmv += Number(g.amount) || 0; currency = g.currency ?? currency; }
+      orders += Number((sales as { orders_count?: unknown; sku_orders_count?: unknown }).orders_count ?? (sales as { sku_orders_count?: unknown }).sku_orders_count ?? 0) || 0;
+      units += Number((sales as { items_sold?: unknown }).items_sold ?? 0) || 0;
+    }
+    if (intervals.length) walk(intervals[intervals.length - 1], '');
+    res.json({ shop: { id: shop.id, name: shop.name, region: shop.region }, start: startIso, end: endIso, latest_available_date: data.latest_available_date ?? null, days: intervals.length, gmv: Math.round(gmv * 100) / 100, currency, orders, units, last_interval: flat, raw: data });
+  });
+
   r.get('/tts/shops/:id/products', async (req, res) => {
     const creds = await shopCredentials(q, String(req.params.id));
     const out: { id: string; title: string; status: string }[] = [];

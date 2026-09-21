@@ -139,6 +139,12 @@ export class TtsClient {
     return data.shops ?? [];
   }
 
+  // ---- Analytics ----
+  /** Shop performance (GMV, orders, traffic) for [start, end) in the shop's local currency. Dates are YYYY-MM-DD in the shop's timezone. */
+  async shopPerformance(shop: { accessToken: string; cipher: string }, start: string, end: string, granularity: 'ALL' | '1D' = 'ALL'): Promise<{ latest_available_date?: string; performance?: { intervals?: Record<string, unknown>[] } }> {
+    return this.call('GET', '/analytics/202509/shop/performance', { accessToken: shop.accessToken, shopCipher: shop.cipher, query: { start_date_ge: start, end_date_lt: end, granularity, currency: 'LOCAL' } });
+  }
+
   // ---- Promotions (activities) ----
   async createActivity(shop: { accessToken: string; cipher: string }, body: Record<string, unknown>): Promise<{ activity_id: string; status?: string }> {
     return this.call('POST', '/promotion/202309/activities', { accessToken: shop.accessToken, shopCipher: shop.cipher, body });
