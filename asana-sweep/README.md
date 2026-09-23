@@ -119,6 +119,10 @@ Analytics page, top section. Each account and AM gets a score out of 100 and a l
 
 The dashboard follows brightform.agency: white canvas, near-black type, Archivo Black uppercase headings, Manrope body text, black pill buttons, rounded cards with hairline borders and electric blue as the one accent. Light is the default; the toggle top right switches to dark or follows the OS.
 
+## Connections
+
+Setup › Connections lists every integration (Windsor.ai, Cruva, the TikTok Shop Partner app, Apollo, FastMoss, Gmail, Slack, tl;dv, the Anthropic API, the lead sheet) with a live / check / not set status, the reason, and a Test button where the service can be pinged. The Windsor.ai shop panel sits on the same page: account management runs on Windsor, so every client shop should be discovered and linked there.
+
 ## Roles
 
 Two passwords, two roles. `DASHBOARD_PASSWORD` signs in as **admin** (everything editable). `AM_PASSWORD` signs in as **account manager**: every page is visible, nothing can be changed (the API refuses non-GET requests with 403 and the editing controls are hidden). Leave `AM_PASSWORD` blank to disable the read-only login.

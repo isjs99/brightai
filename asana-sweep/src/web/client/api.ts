@@ -166,6 +166,8 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
   return data as T;
 }
 
+export interface ConnectionRow { key: string; name: string; role: string; configured: boolean; ok: boolean; detail: string; link: string; testable: boolean }
+
 export interface Status {
   public_url: string;
   retention_days: number;
@@ -226,6 +228,7 @@ export const api = {
   importGmv: (rows: unknown[]) => call<{ imported: number; skipped: number }>('POST', '/gmv/import', { rows }),
   addShop: (account_id: number, shop_id: string, shop_name: string) => call<{ shop: AccountShop }>('POST', '/gmv/shops', { account_id, shop_id, shop_name }),
   removeShop: (id: number) => call<{ ok: true }>('DELETE', `/gmv/shops/${id}`),
+  connections: () => call<{ connections: ConnectionRow[] }>('GET', '/connections'),
   windsorStatus: () => call<WindsorStatus>('GET', '/windsor/status'),
   windsorDiscover: () => call<WindsorStatus & { found: number; linked: number }>('POST', '/windsor/discover'),
   windsorLink: (shop_id: string, account_id: number, shop_name?: string) => call<WindsorStatus>('POST', '/windsor/shops', { shop_id, account_id, shop_name }),

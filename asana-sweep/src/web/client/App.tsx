@@ -21,6 +21,7 @@ import ReportsPage from './pages/Reports';
 import PlaybookPage from './pages/Playbook';
 import CopilotPage from './pages/Copilot';
 import ChecklistTemplatePage from './pages/ChecklistTemplate';
+import ConnectionsPage from './pages/Connections';
 
 type Theme = 'system' | 'light' | 'dark';
 
@@ -140,6 +141,7 @@ const NAV: { section: string; items: { to: string; label: string; end?: boolean 
     items: [
       { to: '/accounts', label: 'Accounts' },
       { to: '/checklist-template', label: 'Checklist items' },
+      { to: '/connections', label: 'Connections' },
       { to: '/people', label: 'Team' },
     ],
   },
@@ -215,6 +217,7 @@ export default function App() {
             <Routes>
               <Route path="/accounts" element={<Accounts />} />
               <Route path="/checklist-template" element={<ChecklistTemplatePage />} />
+              <Route path="/connections" element={<ConnectionsPage />} />
               <Route path="/checklists" element={<Checklists />} />
               <Route path="/analytics" element={<AnalyticsPage />} />
               <Route path="/calendar" element={<CalendarPage />} />

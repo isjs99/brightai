@@ -416,7 +416,7 @@ export default function GmvPage() {
 
 
 /** Windsor.ai: the TikTok Shop connector that holds the shop authorisations. Discover shops, link them to accounts, sync orders into daily GMV. */
-function WindsorPanel({ onSynced }: { onSynced: () => void }) {
+export function WindsorPanel({ onSynced }: { onSynced: () => void }) {
   const [st, setSt] = useState<WindsorStatus | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [busy, setBusy] = useState<string | null>(null);

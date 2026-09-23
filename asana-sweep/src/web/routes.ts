@@ -10,6 +10,7 @@ import { slackBot } from '../notify/slackbot.js';
 import { liveEvents } from '../live/events.js';
 import { buildCalendar, buildGmv, buildGrades } from '../reports/index.js';
 import { syncGmv } from '../gmv/sync.js';
+import { cruva } from '../gmv/cruva.js';
 import { discoverWindsorShops, syncWindsorGmv, windsor, windsorStatus } from '../gmv/windsor.js';
 import type { WindsorStatus } from '../sweep/types.js';
 import { currencyForShop } from '../gmv/currency.js';
@@ -636,6 +637,32 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     q.setSetting('bonus_growth_above', String(above));
     res.json(buildGmv(q, String(body.month ?? '') || todayIn(checkTz()).slice(0, 7)));
   });
+  // ---- Connections: one place to see every integration and whether it is live ----
+  r.get('/connections', (_req, res) => {
+    const w = windsorStatus(q);
+    const wShops = q.listShops('windsor');
+    const ttsShops = q.listTtsShops();
+    const ap = apolloStatus(q);
+    const fm = fastmossStatus(q);
+    const gm = q.lastGmvSync();
+    const leads = leadsSyncStatus(q);
+    const gmailClient = scheduler.gmail;
+    res.json({
+      connections: [
+        { key: 'windsor', name: 'Windsor.ai (TikTok Shop data)', role: 'Shops, orders, stock and payouts for account management and GMV', configured: w.configured, ok: w.configured && !w.last_error, detail: !w.configured ? 'WINDSOR_API_KEY not set' : w.last_error ? `Last sync error: ${w.last_error}` : `${w.discovered.length} shop(s) discovered, ${wShops.length} linked to accounts${w.last_sync_at ? `, last sync ${w.last_sync_at}` : ', never synced'}`, link: '/gmv', testable: w.configured },
+        { key: 'cruva', name: 'Cruva', role: 'Affiliate GMV and creator data', configured: cruva.configured, ok: cruva.configured && gm?.status !== 'error', detail: !cruva.configured ? 'CRUVA_API_KEY not set' : gm ? `Last GMV sync ${gm.status} at ${gm.finished_at ?? gm.started_at}${gm.error_message ? `: ${gm.error_message}` : ''}` : 'never synced', link: '/gmv', testable: false },
+        { key: 'tts', name: 'TikTok Shop Partner app', role: 'Promotions push and the CS / affiliate inbox (needs Partner Center approval)', configured: tts.configured, ok: tts.configured && ttsShops.length > 0 && ttsShops.every((s) => s.token_ok), detail: !tts.configured ? 'TTS_APP_KEY / TTS_APP_SECRET not set' : ttsShops.length ? `${ttsShops.length} shop(s) authorised${ttsShops.some((s) => !s.token_ok) ? ', some tokens expired' : ''}` : 'app configured, no shop authorised yet', link: '/promotions', testable: false },
+        { key: 'apollo', name: 'Apollo.io', role: 'Decision makers for the BD pipeline', configured: ap.configured, ok: ap.configured && ap.ok && !ap.exhausted, detail: !ap.configured ? 'APOLLO_API_KEY not set' : ap.exhausted ? 'out of credits' : ap.error ? ap.error : `${ap.remaining ?? '?'} credits left`, link: '/bd', testable: true },
+        { key: 'fastmoss', name: 'FastMoss', role: 'Daily pull of fast-rising shops', configured: fm.configured, ok: fm.configured && !fm.last_error, detail: !fm.configured ? 'FASTMOSS_API_KEY not set' : fm.last_error ? fm.last_error : fm.last_pull_at ? `last pull ${fm.last_pull_at}` : 'no pull yet', link: '/bd', testable: true },
+        { key: 'gmail', name: 'Gmail', role: 'Outreach drafts and the TikTok Shop contact import', configured: gmailClient.configured, ok: gmailClient.connected, detail: !gmailClient.configured ? 'GOOGLE_CLIENT_ID / SECRET not set' : gmailClient.connected ? `connected as ${gmailClient.email ?? 'unknown'}` : 'not connected: Outreach emails › Settings › Connect Gmail', link: '/outreach?tab=settings', testable: false },
+        { key: 'slack', name: 'Slack bot', role: 'AM reminders, incident alerts, client reports', configured: slackBot.configured, ok: slackBot.configured, detail: slackBot.configured ? 'SLACK_BOT_TOKEN set' : 'SLACK_BOT_TOKEN not set', link: '/people', testable: false },
+        { key: 'tldv', name: 'tl;dv', role: 'Follow-up emails after calls', configured: tldv.configured, ok: tldv.configured, detail: tldv.configured ? 'TLDV_API_KEY set' : 'TLDV_API_KEY not set', link: '/outreach', testable: false },
+        { key: 'anthropic', name: 'Anthropic API', role: 'Drafting replies, reports and the copilot', configured: Boolean(config.anthropicApiKey), ok: Boolean(config.anthropicApiKey), detail: config.anthropicApiKey ? `model ${config.replyModel}` : 'ANTHROPIC_API_KEY not set', link: '/inbox', testable: false },
+        { key: 'leads', name: 'Lead sheet', role: 'Leads dashboard', configured: leads.status !== 'never', ok: leads.status === 'ok', detail: leads.error ? leads.error : leads.last_sync_at ? `${leads.rows} rows, last sync ${leads.last_sync_at}` : 'not synced yet', link: '/leads', testable: false },
+      ],
+    });
+  });
+
   // ---- Windsor.ai (TikTok Shop data without our own Partner Center app) ----
   const windsorPayload = (): WindsorStatus => ({ ...windsorStatus(q), shops: q.listShops('windsor') });
   r.get('/windsor/status', (_req, res) => res.json(windsorPayload()));
