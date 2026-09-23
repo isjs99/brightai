@@ -8,7 +8,7 @@ import { isDue } from '../checklist/evaluate.js';
 import { DEFAULT_REMINDER_TEXT, incompleteByPerson, notifyAms, renderReminder } from '../checklist/reminders.js';
 import { slackBot } from '../notify/slackbot.js';
 import { liveEvents } from '../live/events.js';
-import { buildCalendar, buildGmv, buildGrades } from '../reports/index.js';
+import { buildCalendar, buildGmv, buildGmvExplore, buildGrades } from '../reports/index.js';
 import { syncGmv } from '../gmv/sync.js';
 import { cruva } from '../gmv/cruva.js';
 import { discoverWindsorShops, syncWindsorGmv, windsor, windsorStatus } from '../gmv/windsor.js';
@@ -43,6 +43,8 @@ import { generateDraft as generateOutreachDraft } from '../bd/draft.js';
 import { bulkCandidates, pickBestLinkedin } from '../bd/bulk.js';
 import { projectionCsv } from '../stock/index.js';
 import { periodBounds } from '../reports/client.js';
+import type { IngestPayload } from '../health/index.js';
+import { THRESHOLD_LABELS } from '../health/rules.js';
 import type { PlaybookKind, PlaybookSetupCell } from '../sweep/types.js';
 import type { BdEmailDraft, OutreachData, OutreachExample } from '../sweep/types.js';
 import type { BdCountryRow, BdData, BdProspectInput, BdProspectPatch, BdStatus } from '../sweep/types.js';
@@ -157,6 +159,27 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     liveEvents.emitUpdate({ kind: 'bd' });
     if (result.added) { scheduler.autoEnrich(); scanEnterpriseAlerts(q); }
     res.json({ result });
+  });
+
+  // ---- Account health: the daily Claude routine reads the context and posts Cruva metrics, findings and assessments ----
+  const viaTokenOrAdmin = (req: Request): boolean => {
+    const bearer = String(req.headers.authorization ?? '').replace(/^Bearer\s+/i, '');
+    const viaToken = Boolean(config.ingestToken) && bearer === config.ingestToken;
+    const viaAdmin = auth instanceof SharedPasswordAuth ? auth.roleOf(req) === 'admin' : auth.isAuthenticated(req);
+    return viaToken || viaAdmin;
+  };
+  r.get('/flags/context', (req, res) => {
+    if (!viaTokenOrAdmin(req)) return res.status(401).json({ error: 'Send a valid INGEST_TOKEN bearer token or sign in as admin.' });
+    res.json(scheduler.health.routineContext());
+  });
+  r.post('/flags/ingest', async (req, res) => {
+    if (!viaTokenOrAdmin(req)) return res.status(401).json({ error: 'Send a valid INGEST_TOKEN bearer token or sign in as admin.' });
+    const body = (req.body ?? {}) as Partial<IngestPayload>;
+    if (!Array.isArray(body.accounts) || !body.accounts.length) throw new HttpError(400, 'Send { accounts: [{ account, shops: [{ shop_id, metrics }], findings: [...], assessment: {...} }] }.');
+    const result = scheduler.health.ingest(body as IngestPayload);
+    // The rules run straight away so the flags and Slack alerts follow the routine's numbers without waiting for the next scan.
+    const scan = await scheduler.monitor.scan();
+    res.json({ ...result, scan });
   });
 
   // ---- Everything below needs a session ----
@@ -538,6 +561,14 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
 
   // ---- GMV ----
   r.get('/gmv', (req, res) => res.json(buildGmv(q, monthParam(req))));
+  r.get('/gmv/explore', (req, res) => {
+    const iso = /^\d{4}-\d{2}-\d{2}$/;
+    const to = String(req.query.to ?? '').trim() || new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+    const from = String(req.query.from ?? '').trim() || new Date(Date.parse(to + 'T12:00:00Z') - 29 * 86400000).toISOString().slice(0, 10);
+    if (!iso.test(from) || !iso.test(to) || from > to) throw new HttpError(400, 'Give from and to as YYYY-MM-DD with from on or before to.');
+    const accountId = req.query.account_id ? Number(req.query.account_id) : null;
+    res.json(buildGmvExplore(q, from, to, { accountId: Number.isFinite(accountId) ? accountId : null }));
+  });
 
   r.put('/gmv/targets', (req, res) => {
     const body = (req.body ?? {}) as { month?: string; targets?: Record<string, unknown> };
@@ -641,6 +672,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   r.get('/connections', (_req, res) => {
     const w = windsorStatus(q);
     const wShops = q.listShops('windsor');
+    const hs = scheduler.health.data();
     const ttsShops = q.listTtsShops();
     const ap = apolloStatus(q);
     const fm = fastmossStatus(q);
@@ -650,11 +682,13 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     res.json({
       connections: [
         { key: 'windsor', name: 'Windsor.ai (TikTok Shop data)', role: 'Shops, orders, stock and payouts for account management and GMV', configured: w.configured, ok: w.configured && !w.last_error, detail: !w.configured ? 'WINDSOR_API_KEY not set' : w.last_error ? `Last sync error: ${w.last_error}` : `${w.discovered.length} shop(s) discovered, ${wShops.length} linked to accounts${w.last_sync_at ? `, last sync ${w.last_sync_at}` : ', never synced'}`, link: '/gmv', testable: w.configured },
-        { key: 'cruva', name: 'Cruva', role: 'Affiliate GMV and creator data', configured: cruva.configured, ok: cruva.configured && gm?.status !== 'error', detail: !cruva.configured ? 'CRUVA_API_KEY not set' : gm ? `Last GMV sync ${gm.status} at ${gm.finished_at ?? gm.started_at}${gm.error_message ? `: ${gm.error_message}` : ''}` : 'never synced', link: '/gmv', testable: false },
+        { key: 'cruva', name: 'Cruva (REST API)', role: 'Affiliate GMV per shop for the GMV page; optional, the daily review routine covers the creator side over MCP', configured: cruva.configured, ok: cruva.configured && gm?.status !== 'error', detail: !cruva.configured ? `CRUVA_API_KEY not set (separate Cruva subscription); ${q.listShops('cruva').length} Cruva shop(s) linked to accounts for the routine` : gm ? `Last GMV sync ${gm.status} at ${gm.finished_at ?? gm.started_at}${gm.error_message ? `: ${gm.error_message}` : ''}` : 'never synced', link: '/gmv', testable: false },
         { key: 'tts', name: 'TikTok Shop Partner app', role: 'Promotions push and the CS / affiliate inbox (needs Partner Center approval)', configured: tts.configured, ok: tts.configured && ttsShops.length > 0 && ttsShops.every((s) => s.token_ok), detail: !tts.configured ? 'TTS_APP_KEY / TTS_APP_SECRET not set' : ttsShops.length ? `${ttsShops.length} shop(s) authorised${ttsShops.some((s) => !s.token_ok) ? ', some tokens expired' : ''}` : 'app configured, no shop authorised yet', link: '/promotions', testable: false },
         { key: 'apollo', name: 'Apollo.io', role: 'Decision makers for the BD pipeline', configured: ap.configured, ok: ap.configured && ap.ok && !ap.exhausted, detail: !ap.configured ? 'APOLLO_API_KEY not set' : ap.exhausted ? 'out of credits' : ap.error ? ap.error : `${ap.remaining ?? '?'} credits left`, link: '/bd', testable: true },
         { key: 'fastmoss', name: 'FastMoss', role: 'Daily pull of fast-rising shops', configured: fm.configured, ok: fm.configured && !fm.last_error, detail: !fm.configured ? 'FASTMOSS_API_KEY not set' : fm.last_error ? fm.last_error : fm.last_pull_at ? `last pull ${fm.last_pull_at}` : 'no pull yet', link: '/bd', testable: true },
         { key: 'gmail', name: 'Gmail', role: 'Outreach drafts and the TikTok Shop contact import', configured: gmailClient.configured, ok: gmailClient.connected, detail: !gmailClient.configured ? 'GOOGLE_CLIENT_ID / SECRET not set' : gmailClient.connected ? `connected as ${gmailClient.email ?? 'unknown'}` : 'not connected: Outreach emails › Settings › Connect Gmail', link: '/outreach?tab=settings', testable: false },
+        { key: 'health', name: 'Account health (Windsor daily pull)', role: 'Orders, ship-by deadlines, stock, payouts, statements and unsettled money per shop, daily at 06:30, feeding the Monitor flags and the AI review', configured: w.configured && wShops.length > 0, ok: w.configured && wShops.length > 0 && Boolean(hs.last_pull_at) && !hs.last_pull_error, detail: !w.configured ? 'Needs Windsor.ai' : !wShops.length ? 'Link shops to accounts below' : hs.last_pull_at ? `${hs.pulls.filter((p) => p.source === 'windsor').length} shop(s) pulled, last ${hs.last_pull_at}${hs.last_pull_error ? `; ${hs.last_pull_error}` : ''}` : 'No pull yet (runs at 06:30, or press Run daily pass on the Monitor page)', link: '/monitor', testable: false },
+        { key: 'routine', name: 'Daily review routine (Cruva via Claude)', role: 'A scheduled Claude routine reads Cruva over MCP for every linked shop and posts the metrics, its findings and an assessment per account to /api/flags/ingest', configured: Boolean(config.ingestToken), ok: Boolean(config.ingestToken) && Boolean(hs.last_ingest_at) && Date.now() - Date.parse(hs.last_ingest_at ?? '') < 2 * 86400000, detail: !config.ingestToken ? 'INGEST_TOKEN not set in .env' : hs.last_ingest_at ? `Last post ${hs.last_ingest_at}, ${hs.pulls.filter((p) => p.source === 'cruva').length} shop(s) with metrics` : 'Token set, nothing posted yet: the routine needs DASHBOARD_URL and INGEST_TOKEN in its environment (README › Daily review routine)', link: '/monitor?tab=review', testable: false },
         { key: 'slack', name: 'Slack bot', role: 'AM reminders, incident alerts, client reports', configured: slackBot.configured, ok: slackBot.configured, detail: slackBot.configured ? 'SLACK_BOT_TOKEN set' : 'SLACK_BOT_TOKEN not set', link: '/people', testable: false },
         { key: 'tldv', name: 'tl;dv', role: 'Follow-up emails after calls', configured: tldv.configured, ok: tldv.configured, detail: tldv.configured ? 'TLDV_API_KEY set' : 'TLDV_API_KEY not set', link: '/outreach', testable: false },
         { key: 'anthropic', name: 'Anthropic API', role: 'Drafting replies, reports and the copilot', configured: Boolean(config.anthropicApiKey), ok: Boolean(config.anthropicApiKey), detail: config.anthropicApiKey ? `model ${config.replyModel}` : 'ANTHROPIC_API_KEY not set', link: '/inbox', testable: false },
@@ -1813,6 +1847,34 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     res.json(monitor.data());
   });
 
+  r.get('/flags', (_req, res) => res.json(scheduler.health.data()));
+  r.post('/flags/pull', async (_req, res) => {
+    const r2 = await scheduler.health.pullWindsor();
+    const scan = await monitor.scan();
+    res.json({ ...r2, scan, ...monitor.data() });
+  });
+  r.post('/flags/review', async (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const accountId = b.account_id === undefined || b.account_id === null || b.account_id === '' ? undefined : Number(b.account_id);
+    const r2 = await scheduler.health.review(accountId);
+    if (r2.reviewed) await monitor.scan();
+    res.json({ ...r2, ...monitor.data() });
+  });
+  r.post('/flags/daily', async (_req, res) => {
+    const r2 = await scheduler.dailyHealth();
+    res.json({ ...r2, ...monitor.data() });
+  });
+  r.get('/flags/thresholds', (_req, res) => res.json({ thresholds: scheduler.health.thresholds(), labels: THRESHOLD_LABELS }));
+  r.put('/flags/thresholds', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const thresholds = b.reset ? scheduler.health.resetThresholds() : scheduler.health.setThresholds(b);
+    res.json({ thresholds, labels: THRESHOLD_LABELS });
+  });
+  r.get('/flags/accounts/:id/context', (req, res) => {
+    const a = q.getAccount(idParam(req));
+    if (!a) throw new HttpError(404, 'Account not found');
+    res.json(scheduler.health.accountContext(a));
+  });
   r.post('/monitor/flags/:id/ack', (req, res) => {
     if (!q.acknowledgeFlag(idParam(req))) throw new HttpError(404, 'Flag not found');
     res.json(monitor.data());

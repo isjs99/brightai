@@ -275,6 +275,9 @@ export interface GmvAccountRow {
   projected: number | null;
   projected_attainment: number | null;
   growth_pct: number | null;
+  /** GMV over the same number of elapsed days last month, and the month-to-date change against it. */
+  prev_same_days: number | null;
+  pace_pct: number | null;
   bonus: BonusStatus;
   daily: { date: string; gmv: number }[];
   /** Commission deal for the month, in the report currency. */
@@ -344,6 +347,30 @@ export interface GmvData {
   last_sync: GmvSync | null;
   cruva_configured: boolean;
   windsor_configured: boolean;
+}
+
+export interface GmvExploreRow {
+  account_id: number | null;
+  account_name: string;
+  shops: { shop_id: string; shop_name: string; source: 'cruva' | 'windsor'; gmv: number; prev_gmv: number; units: number }[];
+  gmv: number;
+  affiliate_gmv: number;
+  units: number;
+  prev_gmv: number;
+  change_pct: number | null;
+  daily: { date: string; gmv: number }[];
+}
+
+export interface GmvExplore {
+  from: string;
+  to: string;
+  prev_from: string;
+  prev_to: string;
+  days: number;
+  currency: string;
+  rows: GmvExploreRow[];
+  totals: { gmv: number; prev_gmv: number; change_pct: number | null; units: number; daily: { date: string; gmv: number; prev_gmv: number }[] };
+  last_synced: string | null;
 }
 
 export interface GmvSync {
@@ -810,24 +837,108 @@ export interface MonitorFlag {
   acknowledged_at: string | null;
 }
 
+export type MonitorSource = 'tts' | 'dashboard' | 'cruva' | 'checklist' | 'windsor' | 'ai';
+
 export interface MonitorRule {
   code: string;
   title: string;
   description: string;
   severity: 'crit' | 'warn' | 'info';
-  source: 'tts' | 'dashboard' | 'cruva' | 'checklist';
+  source: MonitorSource;
+  /** Checklist section the flag belongs to (shown against the AM's daily lines). */
+  section?: string | null;
   enabled: boolean;
 }
 
 export interface MonitorData {
   flags: MonitorFlag[];
   rules: MonitorRule[];
+  health: HealthSummary;
   accounts: { id: number; name: string; open: number; crit: number; warn: number }[];
   last_scan_at: string | null;
   last_scan_error: string | null;
   scanning: boolean;
   interval_minutes: number;
   tts_configured: boolean;
+}
+
+// ---- Account health (daily Windsor and Cruva pulls, rules with thresholds, AI review) ----
+
+export interface HealthThresholds {
+  /** Orders */
+  ship_grace_hours: number;
+  ship_due_within_hours: number;
+  auto_cancel_within_hours: number;
+  pickup_late_hours: number;
+  delivery_late_days: number;
+  cancel_rate_pct: number;
+  refund_rate_pct: number;
+  order_drop_pct: number;
+  aov_shift_pct: number;
+  min_orders_for_rates: number;
+  /** Products */
+  low_stock_units: number;
+  drafts_max: number;
+  /** Finance */
+  payout_missing_days: number;
+  reserve_share_pct: number;
+  adjustment_share_pct: number;
+  unsettled_age_days: number;
+  fee_share_pct: number;
+  data_stale_hours: number;
+  /** Cruva */
+  sps_min: number;
+  sps_drop: number;
+  dms_drop_pct: number;
+  samples_drop_pct: number;
+  samples_review_hours: number;
+  content_pending_max: number;
+  affiliate_share_drop_pts: number;
+  affiliate_gmv_drop_pct: number;
+}
+
+export type HealthRisk = 'green' | 'amber' | 'red';
+
+export interface HealthAssessment {
+  id: number;
+  account_id: number;
+  account_name: string | null;
+  assess_date: string;
+  assessed_at: string;
+  source: 'ai' | 'routine' | 'manual';
+  risk: HealthRisk;
+  summary: string;
+  action: string;
+  watch: string[];
+}
+
+export interface HealthPullSummary {
+  shop_id: string;
+  shop_name: string;
+  account_id: number | null;
+  account_name: string | null;
+  source: 'windsor' | 'cruva';
+  pull_date: string;
+  pulled_at: string;
+  ok: boolean;
+  error: string | null;
+  metrics: Record<string, number | string | null>;
+}
+
+export interface HealthSummary {
+  windsor_configured: boolean;
+  llm_configured: boolean;
+  ingest_configured: boolean;
+  last_pull_at: string | null;
+  last_pull_error: string | null;
+  last_review_at: string | null;
+  last_review_error: string | null;
+  last_ingest_at: string | null;
+  pulling: boolean;
+  reviewing: boolean;
+  thresholds: HealthThresholds;
+  pulls: HealthPullSummary[];
+  assessments: HealthAssessment[];
 }
 
 export interface BdCountryRow {

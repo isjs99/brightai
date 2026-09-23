@@ -293,3 +293,10 @@ tr.dim td, .card.dim { opacity: .55; }
 .tpl-subs { list-style: none; margin: 10px 0 0; padding: 8px 0 0; border-top: 1px solid var(--border-2); }
 .tpl-subs li { padding: 4px 0 4px 14px; }
 .tpl-subs li.off { opacity: .55; }
+
+/* Monitor flags shown against a checklist section */
+.flaglist { list-style: none; margin: 6px 0 8px; padding: 0; display: grid; gap: 4px; }
+.flaglist li { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--border); background: var(--surface-2); }
+.flaglist li.crit { border-color: var(--crit-border); background: var(--crit-bg); }
+.flaglist li.warn { border-color: var(--warn-border); background: var(--warn-bg); }
+.flaglist .badge { flex: none; }

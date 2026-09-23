@@ -5,6 +5,8 @@ import { shopCredentials } from '../tts/promotions.js';
 import { todayIn } from '../checklist/checker.js';
 import { liveEvents } from '../live/events.js';
 import { log } from '../logger.js';
+import { CUSTOM_RULE, HealthEngine } from '../health/index.js';
+import { HEALTH_RULES } from '../health/rules.js';
 
 /**
  * Account monitor: a rolling scan of every managed account for the flags the team keeps
@@ -38,12 +40,14 @@ export class AccountMonitor {
   private timer: NodeJS.Timeout | null = null;
   /** Called after every scan (the incident engine turns flags into Slack alerts). */
   afterScan: (() => Promise<void>) | null = null;
+  /** The account health engine (Windsor pulls, Cruva metrics, AI review); its rules run inside every scan. */
+  health: HealthEngine | null = null;
 
   constructor(private q: Queries, private client: TtsClient = tts) {}
 
   rules(): MonitorRule[] {
     const off = new Set(this.q.getSetting('monitor_rules_off', '').split(',').filter(Boolean));
-    return RULES.map((r) => ({ ...r, enabled: !off.has(r.code) }));
+    return [...RULES, ...HEALTH_RULES, CUSTOM_RULE].map((r) => ({ ...r, enabled: !off.has(r.code) }));
   }
 
   setRule(code: string, enabled: boolean): void {
@@ -62,7 +66,7 @@ export class AccountMonitor {
       const mine = flags.filter((f) => f.account_id === a.id);
       return { id: a.id, name: a.name, open: mine.length, crit: mine.filter((f) => f.severity === 'crit').length, warn: mine.filter((f) => f.severity === 'warn').length };
     });
-    return { flags, rules: this.rules(), accounts, last_scan_at: this.q.getSetting('monitor_last_scan_at', '') || null, last_scan_error: this.q.getSetting('monitor_last_scan_error', '') || null, scanning: this.scanning, interval_minutes: this.intervalMinutes, tts_configured: this.client.configured };
+    return { flags, rules: this.rules(), health: this.health ? this.health.data() : new HealthEngine(this.q).data(), accounts, last_scan_at: this.q.getSetting('monitor_last_scan_at', '') || null, last_scan_error: this.q.getSetting('monitor_last_scan_error', '') || null, scanning: this.scanning, interval_minutes: this.intervalMinutes, tts_configured: this.client.configured };
   }
 
   start(): void {
@@ -86,7 +90,13 @@ export class AccountMonitor {
     try {
       found.push(...this.dashboardRules(enabled));
       found.push(...(await this.ttsRules(enabled)));
-      const r = this.q.applyScan(found);
+      if (this.health) {
+        found.push(...this.health.windsorFlags(enabled));
+        found.push(...this.health.cruvaFlags(enabled));
+        found.push(...this.health.aiFlags(enabled));
+      }
+      // Findings posted by the daily routine are not re-evaluated here, so they are left out of the resolve pass.
+      const r = this.q.applyScan(found, { codes: [...RULES.map((x) => x.code), ...(this.health ? this.health.ownedCodes() : [])] });
       this.q.setSetting('monitor_last_scan_at', new Date().toISOString());
       this.q.setSetting('monitor_last_scan_error', '');
       if (r.opened || r.resolved) log.info(`Account monitor: ${found.length} flag(s), ${r.opened} new, ${r.resolved} resolved`);

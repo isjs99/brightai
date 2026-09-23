@@ -32,6 +32,12 @@ export const INCIDENT_KINDS: IncidentKind[] = [
   { kind: 'inbox_sla', title: 'Buyers or creators waiting over 24h', severity: 'warn', source: 'monitor', description: 'CS or affiliate conversations unanswered for more than 24 hours.', action: 'Clear the inbox from Account management > CS & affiliate inbox (auto-replies can be switched on per account).' },
   { kind: 'ad_account_disconnected', title: 'Ad account disconnected', severity: 'crit', source: 'ingest', description: 'The TikTok Ads account lost its link to the shop or the agency BC.', action: 'Reconnect the ad account in TikTok Ads Manager > Assets > Shop, confirm the agency partner access, and check that GMV Max campaigns resumed.' },
   { kind: 'campaign_issue', title: 'Campaign issue', severity: 'warn', source: 'ingest', description: 'A GMV Max or ads campaign was rejected, paused or stopped delivering.', action: 'Open the campaign in Ads Manager, read the rejection or delivery notice, fix the creative or product and relaunch. Note the change on the GMV Max page.' },
+  { kind: 'auto_cancel_risk', title: 'Orders about to auto-cancel', severity: 'crit', source: 'monitor', description: 'Unshipped orders inside the platform auto-cancel window (Windsor).', action: 'Ship or mark the orders now; if stock is the problem, cancel them yourself with the right reason before the platform does, so the cancellation does not count against the shop.' },
+  { kind: 'cancel_requests', title: 'Buyer cancellation requests waiting', severity: 'warn', source: 'monitor', description: 'Buyers asked to cancel and nobody has responded (Windsor).', action: 'Open Seller Center > Orders > Cancellations and approve or reject each request today; unanswered requests auto-approve and hurt the shop score.' },
+  { kind: 'unsettled_backlog', title: 'Unsettled money ageing', severity: 'warn', source: 'monitor', description: 'Settlement outstanding on orders older than the threshold (Windsor).', action: 'Check the unsettled reasons in Seller Center > Finance > Unsettled; if they are delivery confirmations, chase the carrier; if they are disputes, answer them. Tell the client the amount and expected release.' },
+  { kind: 'sps_restricted', title: 'Shop performance score restricts outreach', severity: 'crit', source: 'monitor', description: 'The shop performance score is under 3.5, so creator DMs are blocked (Cruva).', action: 'Read the score breakdown in Seller Center > Shop health, fix the driver (late dispatch, cancellations, negative reviews) and switch Cruva outreach to target invites until the score recovers.' },
+  { kind: 'outreach_stopped', title: 'Creator outreach stopped', severity: 'warn', source: 'monitor', description: 'DMs sent collapsed week on week or are at zero with automations active (Cruva).', action: 'Open Cruva > Automations, check the status (throttled, outreach cap, sensitive text, bad product) and fix or restart the campaign. Confirm the target list still has creators left.' },
+  { kind: 'account_at_risk', title: 'Daily review: account at risk', severity: 'crit', source: 'monitor', description: 'The AI review rated the account red for today.', action: 'Read the summary and the action on Monitor > Daily review and do the action today; reply in the Slack thread with what was done.' },
 ];
 
 export type Detected = { account_id: number | null; shop_id: string | null; kind: string; severity?: Incident['severity']; message: string; fingerprint?: string; source?: string; action?: string };
@@ -45,7 +51,11 @@ export function incidentSettings(q: Queries): IncidentSettings {
 
 /** Map account monitor flags to incident kinds (low stock is handled by the stock module). */
 export function incidentsFromFlags(flags: MonitorFlag[]): Detected[] {
-  const map: Record<string, string> = { tts_unshipped: 'overdue_shipment', tts_product_deactivated: 'violation', tts_auth_expiring: 'auth_expiring', gmv_drop_wow: 'gmv_drop', inbox_unanswered: 'inbox_sla' };
+  const map: Record<string, string> = {
+    tts_unshipped: 'overdue_shipment', tts_product_deactivated: 'violation', tts_auth_expiring: 'auth_expiring', gmv_drop_wow: 'gmv_drop', inbox_unanswered: 'inbox_sla',
+    w_ship_sla_breach: 'overdue_shipment', w_auto_cancel_risk: 'auto_cancel_risk', w_buyer_cancel_requests: 'cancel_requests', w_product_deactivated: 'violation', w_listing_failed: 'listing_failed', w_out_of_stock: 'stock_out',
+    w_payout_failed: 'payout_issue', w_negative_statement: 'negative_balance', w_unsettled_backlog: 'unsettled_backlog', c_sps_low: 'sps_restricted', c_dms_stopped: 'outreach_stopped', ai_risk_red: 'account_at_risk',
+  };
   return flags.filter((f) => !f.resolved_at && map[f.code]).map((f) => ({ account_id: f.account_id, shop_id: f.shop_id, kind: map[f.code], message: f.detail ? `${f.message}. ${f.detail}` : f.message, fingerprint: `flag:${f.code}`, source: 'monitor' }));
 }
 

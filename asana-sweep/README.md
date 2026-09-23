@@ -96,7 +96,9 @@ One row per AM with their accounts underneath, one column per working day of the
 
 GMV page. Every account is mapped to its shops. Figures come in three ways:
 
-- **Windsor.ai** (`WINDSOR_API_KEY`): Windsor's TikTok Shop connector already holds the shop authorisations, so the dashboard reads the shop list, orders, products and payouts through it without a Partner Center app of its own. GMV › "Windsor.ai shops" › Discover lists the shops on the connector and links the ones whose name matches a roster account (the rest by hand); Sync writes the last 40 days of orders into daily GMV per shop (orders placed that day, cancelled ones excluded; affiliate share is not available from Windsor). The daily 07:15 sync covers Windsor shops too. Note: Windsor's "shop performance" table is US-only, so EU GMV is built from orders.
+- **Windsor.ai** (`WINDSOR_API_KEY`): Windsor's TikTok Shop connector already holds the shop authorisations, so the dashboard reads the shop list, orders, products and payouts through it without a Partner Center app of its own. GMV › "Windsor.ai shops" › Discover lists the shops on the connector and links the ones whose name matches a roster account (the rest by hand); Sync writes the last 40 days of orders into daily GMV per shop (orders placed that day, cancelled ones excluded; affiliate share is not available from Windsor). The daily 07:15 sync covers Windsor shops too and goes 45 days back, so last month is always complete in the record without anyone pressing Sync. Note: Windsor's "shop performance" table is US-only, so EU GMV is built from orders.
+
+**Explore by date.** Under the account table: pick a preset (last 7, 14, 30, 90 days, this month, last month) or any custom range and an account, and the page shows GMV, units and affiliate GMV for the range against the same number of days just before it, with the % up or down, a daily line with the previous period dotted behind it, and per-shop rows on click. The account table also carries a "vs same days" column: month to date against the same number of days last month, up or down in %, next to the projected growth.
 
 - **Daily sync** at 07:15 from the Cruva REST API when `CRUVA_API_KEY` is set. The endpoint path defaults to `/v1/shop/stats` on `https://api.cruva.com`; override with `CRUVA_STATS_PATH` if Cruva's docs say otherwise. "Sync from Cruva" pulls the last 40 days on demand.
 - **Import**: paste JSON rows of `{ shop_id, date, total_gmv, affiliate_gmv, units }`.
@@ -171,6 +173,41 @@ Growth > BD pipeline holds fast-rising TikTok Shops per EU market, the decision 
 ## Account monitor
 
 Account management > Account monitor scans every managed account on a schedule (15 minutes by default) for the things that go wrong quietly and clears each flag when the condition goes away. Dashboard rules use what the app already knows: checklist not done after 14:00, checklist check errors, buyers or creators waiting over 24 hours, no live promotion, GMV down 30%+ week on week or stale, TikTok authorisation expiring, no commission terms. TikTok rules call the Shop OpenAPI per authorised shop: orders waiting to ship over 48 hours, orders down 40%+ week on week, cancellation rate over 15%, return rate over 12%, products deactivated or frozen by the platform, active SKUs under 10 units. Rules can be switched off individually; flags can be acknowledged. Add rules in `src/monitor/index.ts`.
+
+### Account health: the daily Windsor pull, Cruva metrics and the AI review
+
+This is the flagging system that goes through every check daily, alongside the checklist.
+
+**Windsor pull (06:30 Madrid, or "Run daily pass now").** For every shop linked to an account on the Connections page, the server pulls the last 60 days of orders with every SLA timestamp, the product catalogue with SKU stock, 60 days of payouts, 45 days of statements and 120 days of unsettled transactions from Windsor.ai, stores one pull per shop per day (`health_pulls`), and computes the shop's metrics. The Windsor rules then run over the stored pull on every monitor scan, so a threshold change takes effect without a new pull:
+
+- Orders: past the ship-by deadline, due to ship within 12h, inside the auto-cancel window, buyer cancellation requests pending, on hold, unshipped orders with a buyer note, cancellation rate over 15% (with reasons and who cancelled), orders down 40% week on week, average order value moved 25%.
+- Logistics: shipped but not collected past the collection deadline, deliveries past the delivery deadline or in transit over 7 days, grouped by carrier.
+- Products: live SKUs out of stock or under 10 units, platform-deactivated or frozen listings, failed listing reviews, no live listings at all, drafts piling up, listings rated POOR.
+- Finance: payout failed, no payout for 14 days while orders are paid, reserve over 20% of payouts, statements settled negative, adjustments over 10% of revenue, unsettled money on orders older than 30 days, fees over 35% of revenue.
+- Data freshness: the pull failed or the rows Windsor returned are older than 36 hours.
+
+**Cruva metrics.** Cruva's data (shop performance score, DMs, samples, affiliate GMV, automations) is reachable over the Cruva MCP, which only a Claude session can call, so a daily Claude routine reads it and posts the numbers to the dashboard (see *Daily review routine* below). The Cruva rules run over those numbers: score under 3.5 (DMs restricted) or dropped 0.3, outreach stopped, sample approvals or shipping down 30%, requests waiting on review over 48h, creators owing content, affiliate share of GMV down 15 points, affiliate GMV down 30%, videos posting with no sales, no active automations, metrics stale for 2 days. Anything else the routine notices lands as a "Daily routine finding" flag, replaced on the next run.
+
+**Thresholds.** Every number above is editable from Monitor > Thresholds (grouped by area, with a reset to defaults). Rules can be switched off individually under Monitor > Rules, which also shows the checklist section each rule belongs to.
+
+**AI review (Monitor > Daily review).** After the pull, with `ANTHROPIC_API_KEY` set, Claude reads each account: the shop metrics and their 14-day trend, the Cruva numbers, the open flags and what was resolved in the last 14 days, checklist completion for the week, the inbox backlog and the previous assessments. It rates the account red, amber or green, writes two or three sentences on what matters and one action for today. Red and amber ratings also appear as flags (so they reach the Checklists page and the weekly report) and red ones go to Slack as an incident. "What it saw" shows the exact input. Without the key, the routine's own assessment is stored instead.
+
+**Where the flags show.** Monitor > Flags (filter by source: Windsor, Cruva, AI review, TikTok API, dashboard, checklist); the Checklists page, where each open flag sits under the section it belongs to (Orders, Products, Finance, Logistics, Affiliate, Cruva, Analytics, Account health) and the account row carries a critical / warning count; Slack, through the incident kinds (orders overdue or about to auto-cancel, cancellation requests, violations, listing failures, stock-outs, payout issues, negative statements, unsettled backlog, score restricting outreach, outreach stopped, account at risk); and the client reports, which already list the period's incidents.
+
+### Daily review routine (Cruva via Claude)
+
+A scheduled Claude routine runs every morning before the AMs start. It reads `GET /api/flags/context` (every enabled account with its shops, today's Windsor metrics, open flags and last assessments), calls the Cruva MCP for each linked Cruva shop (`get_shop_stats` for the last 7 days and the 7 before, `get_performance_score`, `get_sample_request_funnel`, `list_automations`), and posts to `POST /api/flags/ingest` with the `INGEST_TOKEN` bearer:
+
+```json
+{ "source": "routine", "accounts": [ {
+  "account": "Clearly",
+  "shops": [ { "shop_id": "6973a15e06f8df59ef3f02eb", "shop_name": "Clearly DE", "metrics": { "sps": 2.9, "affiliate_gmv_7d": 807, "affiliate_gmv_prev_7d": 940, "total_gmv_7d": 933, "total_gmv_prev_7d": 1038, "dms_sent_7d": 284, "dms_sent_prev_7d": 79000, "samples_approved_7d": 69, "samples_approved_prev_7d": 106, "samples_shipped_7d": 66, "samples_shipped_prev_7d": 113, "videos_posted_7d": 194, "videos_with_sales_7d": 5, "samples_pending_review": 12, "samples_pending_review_oldest_hours": 96, "content_pending": 76, "automations_active": 3, "automations_total": 5 } } ],
+  "findings": [ { "message": "Two automations are throttled by TikTok", "severity": "warn" } ],
+  "assessment": { "risk": "red", "summary": "...", "action": "...", "watch": ["SPS"] }
+} ] }
+```
+
+Metric keys are listed in `GET /api/flags/context` (`metric_keys`); any key can be left out and its rule is skipped. The routine's environment needs two variables: `DASHBOARD_URL` (a stable public URL for the dashboard: a named Cloudflare tunnel or a hosted instance, since the quick tunnel's URL changes on every start) and `INGEST_TOKEN` (the same value as in `.env`). Connections shows when the routine last posted; Monitor > Flags shows "Cruva data stale" per shop when it stops.
 
 ### Instant issue alerts to Slack
 

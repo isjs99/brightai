@@ -89,7 +89,61 @@ export class WindsorClient {
   payments(from: string, to: string): Promise<WindsorPayment[]> {
     return this.query<WindsorPayment>(['account_id', 'account_name', 'payment_id', 'payment_status', 'payment_settlement_amount_value', 'payment_settlement_amount_currency', 'payment_paid_datetime'], { from, to });
   }
+
+  // ---- Account health pulls: the detail tables behind the daily flags ----
+
+  ordersDetailed(from: string, to: string): Promise<WindsorOrderDetail[]> {
+    return this.query<WindsorOrderDetail>(ORDER_DETAIL_FIELDS, { from, to });
+  }
+
+  productsDetailed(): Promise<WindsorProductDetail[]> {
+    return this.query<WindsorProductDetail>(PRODUCT_DETAIL_FIELDS, { from: '2024-01-01', to: new Date().toISOString().slice(0, 10) });
+  }
+
+  paymentsDetailed(from: string, to: string): Promise<WindsorPaymentDetail[]> {
+    return this.query<WindsorPaymentDetail>(PAYMENT_DETAIL_FIELDS, { from, to });
+  }
+
+  statements(from: string, to: string): Promise<WindsorStatement[]> {
+    return this.query<WindsorStatement>(STATEMENT_FIELDS, { from, to });
+  }
+
+  unsettled(from: string, to: string): Promise<WindsorUnsettled[]> {
+    return this.query<WindsorUnsettled>(UNSETTLED_FIELDS, { from, to });
+  }
 }
+
+export interface WindsorOrderDetail {
+  account_id: string; order_id: string; order_status: string; order_create_datetime: string | null; order_paid_datetime: string | null; order_rts_datetime: string | null; order_rts_sla_datetime: string | null;
+  order_collection_datetime: string | null; order_collection_due_datetime: string | null; order_delivery_datetime: string | null; order_delivery_sla_datetime: string | null; order_cancel_sla_datetime: string | null;
+  order_cancel_reason: string | null; order_cancellation_initiator: string | null; order_is_buyer_request_cancel: boolean | null; order_is_on_hold: boolean | null; order_is_sample_order: boolean | null;
+  order_shipping_provider: string | null; order_tracking_number: string | null; order_payment_total_amount: number | null; order_payment_currency: string | null; order_buyer_message: string | null; order_seller_note: string | null; data_fetched_at: string | null;
+}
+export const ORDER_DETAIL_FIELDS = ['account_id', 'order_id', 'order_status', 'order_create_datetime', 'order_paid_datetime', 'order_rts_datetime', 'order_rts_sla_datetime', 'order_collection_datetime', 'order_collection_due_datetime', 'order_delivery_datetime', 'order_delivery_sla_datetime', 'order_cancel_sla_datetime', 'order_cancel_reason', 'order_cancellation_initiator', 'order_is_buyer_request_cancel', 'order_is_on_hold', 'order_is_sample_order', 'order_shipping_provider', 'order_tracking_number', 'order_payment_total_amount', 'order_payment_currency', 'order_buyer_message', 'order_seller_note', 'data_fetched_at'];
+
+export interface WindsorProductDetail {
+  account_id: string; product_id: string; product_title: string; product_status: string; product_is_not_for_sale: boolean | null; product_has_draft: boolean | null; product_listing_quality_tier: string | null;
+  product_sku_id: string | null; product_sku_seller_sku: string | null; product_sku_inventory_quantity: number | null; product_sku_inventory_backorder_quantity: number | null; product_sku_price_sale_price: number | null; product_update_datetime: string | null;
+}
+export const PRODUCT_DETAIL_FIELDS = ['account_id', 'product_id', 'product_title', 'product_status', 'product_is_not_for_sale', 'product_has_draft', 'product_listing_quality_tier', 'product_sku_id', 'product_sku_seller_sku', 'product_sku_inventory_quantity', 'product_sku_inventory_backorder_quantity', 'product_sku_price_sale_price', 'product_update_datetime'];
+
+export interface WindsorPaymentDetail {
+  account_id: string; payment_id: string; payment_status: string | null; payment_create_datetime: string | null; payment_paid_datetime: string | null; payment_amount_value: number | null; payment_reserve_amount_value: number | null; payment_settlement_amount_value: number | null; payment_settlement_amount_currency: string | null; payment_bank_account: string | null;
+}
+export const PAYMENT_DETAIL_FIELDS = ['account_id', 'payment_id', 'payment_status', 'payment_create_datetime', 'payment_paid_datetime', 'payment_amount_value', 'payment_reserve_amount_value', 'payment_settlement_amount_value', 'payment_settlement_amount_currency', 'payment_bank_account'];
+
+export interface WindsorStatement {
+  account_id: string; statement_id: string; statement_statement_datetime: string | null; statement_payment_status: string | null; statement_payment_datetime: string | null; statement_currency: string | null;
+  statement_revenue_amount: number | null; statement_fee_amount: number | null; statement_adjustment_amount: number | null; statement_shipping_cost_amount: number | null; statement_net_sales_amount: number | null; statement_settlement_amount: number | null;
+  statement_transaction_fee_affiliate_commission_amount?: number | null; statement_transaction_fee_gmv_max_ad_fee_amount?: number | null; statement_transaction_fee_tsp_commission_amount?: number | null; statement_transaction_fee_platform_commission_amount?: number | null;
+}
+export const STATEMENT_FIELDS = ['account_id', 'statement_id', 'statement_statement_datetime', 'statement_payment_status', 'statement_payment_datetime', 'statement_currency', 'statement_revenue_amount', 'statement_fee_amount', 'statement_adjustment_amount', 'statement_shipping_cost_amount', 'statement_net_sales_amount', 'statement_settlement_amount'];
+
+export interface WindsorUnsettled {
+  account_id: string; unsettled_transaction_id: string; unsettled_transaction_status: string | null; unsettled_transaction_type: string | null; unsettled_transaction_currency: string | null; unsettled_transaction_est_settlement_amount: number | null;
+  unsettled_transaction_unsettled_reason: string | null; unsettled_transaction_estimated_settlement: string | null; unsettled_transaction_order_id: string | null; unsettled_transaction_order_create_datetime: string | null;
+}
+export const UNSETTLED_FIELDS = ['account_id', 'unsettled_transaction_id', 'unsettled_transaction_status', 'unsettled_transaction_type', 'unsettled_transaction_currency', 'unsettled_transaction_est_settlement_amount', 'unsettled_transaction_unsettled_reason', 'unsettled_transaction_estimated_settlement', 'unsettled_transaction_order_id', 'unsettled_transaction_order_create_datetime'];
 
 export const windsor = new WindsorClient();
 

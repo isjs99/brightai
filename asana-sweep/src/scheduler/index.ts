@@ -13,6 +13,7 @@ import { importPullFiles } from '../bd/import.js';
 import { apolloStatus, EnrichJob, refreshApolloCredits } from '../bd/enrich.js';
 import { fastmoss, pullFastMoss } from '../bd/fastmoss.js';
 import { AccountMonitor } from '../monitor/index.js';
+import { HealthEngine } from '../health/index.js';
 import { draftCallFollowups, tldv } from '../bd/tldv.js';
 import { scanEnterpriseAlerts } from '../bd/alerts.js';
 import { GmailClient } from '../bd/gmail.js';
@@ -44,6 +45,8 @@ export class Scheduler {
   readonly inbox: InboxWatcher;
   readonly enrich: EnrichJob;
   readonly monitor: AccountMonitor;
+  readonly health: HealthEngine;
+  private healthTask: ScheduledTask | null = null;
   readonly gmail: GmailClient;
   readonly bulkDrafts: BulkDraftJob;
   readonly stock: StockTracker;
@@ -60,6 +63,8 @@ export class Scheduler {
     this.inbox = new InboxWatcher(q);
     this.enrich = new EnrichJob(q);
     this.monitor = new AccountMonitor(q);
+    this.health = new HealthEngine(q);
+    this.monitor.health = this.health;
     this.gmail = new GmailClient(q);
     this.bulkDrafts = new BulkDraftJob(q, this.gmail);
     this.stock = new StockTracker(q);
@@ -75,6 +80,8 @@ export class Scheduler {
     this.pruneTask = cron.schedule('15 3 * * *', () => {
       const n = this.q.pruneChecks(config.runRetentionDays) + this.q.pruneTicks(config.runRetentionDays);
       if (n) log.info(`Pruned ${n} checklist rows older than ${config.runRetentionDays} days`);
+      this.q.pruneHealthPulls(45);
+      this.q.pruneAssessments(180);
     });
     this.q.pruneChecks(config.runRetentionDays);
     this.q.pruneTicks(config.runRetentionDays);
@@ -98,6 +105,9 @@ export class Scheduler {
     this.pullsLateTask = cron.schedule('0 11 * * *', () => void this.dailyPull(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Account monitor: rolling scan of every account for the flags the team otherwise catches by hand.
     this.monitor.start();
+    // Account health: the daily Windsor pull, the rules and the AI review, before the AMs start (06:30 Madrid).
+    this.reloadHealthSchedule();
+    setTimeout(() => void this.dailyHealth({ onlyIfMissing: true }), 60000);
     // Stock countdown (products + 30 days of orders per shop), Cruva playbook library, client question copilot.
     this.stock.start();
     this.playbook.seed();
@@ -203,6 +213,27 @@ export class Scheduler {
     return { sent };
   }
 
+  reloadHealthSchedule(): void {
+    this.healthTask?.destroy();
+    this.healthTask = null;
+    const expr = this.q.getSetting('health_cron', '30 6 * * *');
+    const tz = this.q.getSetting('check_timezone', 'Europe/Madrid');
+    if (!cron.validate(expr)) { log.error(`Health cron "${expr}" is invalid`); return; }
+    this.healthTask = cron.schedule(expr, () => void this.dailyHealth(), { timezone: tz, name: 'health-daily' });
+    log.info(`Account health pull scheduled: "${expr}" ${tz}`);
+  }
+
+  /** The daily health pass: Windsor pull, a monitor scan (rules + incidents), then the AI review. */
+  async dailyHealth(opts: { onlyIfMissing?: boolean } = {}): Promise<{ pulled: number; errors: string[]; reviewed: number }> {
+    const today = this.q.getSetting('health_last_pull_at', '').slice(0, 10);
+    if (opts.onlyIfMissing && today === new Date().toISOString().slice(0, 10)) return { pulled: 0, errors: [], reviewed: 0 };
+    const pull = await this.health.pullWindsor();
+    await this.monitor.scan();
+    const review = await this.health.review();
+    if (review.reviewed) await this.monitor.scan();
+    return { pulled: pull.shops, errors: [...pull.errors, ...review.errors], reviewed: review.reviewed };
+  }
+
   /** (Re)register the daily checklist completion check from settings. */
   reloadCheckSchedule(): void {
     this.checkTask?.destroy();
@@ -253,7 +284,8 @@ export class Scheduler {
       log.error(`GMV sync cron "${expr}" is invalid, not scheduled`);
       return;
     }
-    this.gmvTask = cron.schedule(expr, () => syncGmv(this.q, { days: 10 }), { timezone: tz, name: 'gmv-sync' });
+    // 45 days back every day, so last month is always complete in the record and the bonus base never goes stale.
+    this.gmvTask = cron.schedule(expr, () => syncGmv(this.q, { days: 45 }), { timezone: tz, name: 'gmv-sync' });
     // Once a month, re-pull the whole previous month so last month's base for the bonus rule is final.
     const monthly = this.q.getSetting('gmv_monthly_cron', '30 7 1 * *');
     if (cron.validate(monthly)) {
@@ -280,6 +312,8 @@ export class Scheduler {
     this.tldvTask?.destroy();
     this.followupTask?.destroy();
     this.monitor.stop();
+    this.healthTask?.destroy();
+    this.healthTask = null;
     this.pullsTask?.destroy();
     this.pullsTask = null;
     this.pullsLateTask?.destroy();

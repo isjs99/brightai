@@ -1139,6 +1139,40 @@ const migrations: Migration[] = [
       db.exec(`ALTER TABLE account_shops ADD COLUMN source TEXT NOT NULL DEFAULT 'cruva'`);
     },
   },
+  {
+    version: 24,
+    name: 'account health: daily Windsor and Cruva pulls, AI assessments',
+    up(db) {
+      db.exec(`
+        CREATE TABLE health_pulls (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          shop_id TEXT NOT NULL,
+          account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+          source TEXT NOT NULL,
+          pull_date TEXT NOT NULL,
+          pulled_at TEXT NOT NULL,
+          ok INTEGER NOT NULL DEFAULT 1,
+          error TEXT,
+          metrics_json TEXT NOT NULL DEFAULT '{}',
+          rows_json TEXT NOT NULL DEFAULT '{}',
+          UNIQUE(shop_id, source, pull_date)
+        );
+        CREATE INDEX health_pulls_shop ON health_pulls(shop_id, source, pull_date);
+        CREATE TABLE health_assessments (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          assess_date TEXT NOT NULL,
+          assessed_at TEXT NOT NULL,
+          source TEXT NOT NULL,
+          risk TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          action TEXT NOT NULL,
+          watch_json TEXT NOT NULL DEFAULT '[]',
+          UNIQUE(account_id, assess_date)
+        );
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

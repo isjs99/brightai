@@ -28,6 +28,7 @@ import type {
   CruvaOutreach,
   StockSku,
   Incident,
+  HealthAssessment,
   ClientReport,
   ReportData,
   PlaybookItem,
@@ -52,6 +53,8 @@ import type {
 } from '../sweep/types.js';
 import { isSignedStage, leadKey, matchPerson, type SheetLead } from '../leads/sheet.js';
 import { fastmossShopUrl, launchFlags, matchesAccountName, outreachComplete, riseScore } from '../bd/score.js';
+
+export interface HealthPullRow { id: number; shop_id: string; account_id: number | null; source: 'windsor' | 'cruva'; pull_date: string; pulled_at: string; ok: boolean; error: string | null; metrics: Record<string, unknown>; rows: Record<string, unknown> }
 
 type Row = Record<string, unknown>;
 
@@ -1343,9 +1346,11 @@ export class Queries {
   }
 
   /** Replace the open flags found by a scan: matching open ones get last_seen bumped, missing ones are resolved, new ones inserted. */
-  applyScan(found: { account_id: number | null; shop_id: string | null; code: string; severity: MonitorFlag['severity']; message: string; detail?: string | null }[], scope: { account_ids?: number[] } = {}): { opened: number; resolved: number } {
+  applyScan(found: { account_id: number | null; shop_id: string | null; code: string; severity: MonitorFlag['severity']; message: string; detail?: string | null }[], scope: { account_ids?: number[]; codes?: string[] } = {}): { opened: number; resolved: number } {
     const now = new Date().toISOString();
-    const open = this.listFlags(false).filter((f) => !scope.account_ids || (f.account_id !== null && scope.account_ids.includes(f.account_id)));
+    // Only flags inside the scope (these accounts, these rule codes) can be resolved by this scan; the rest are left as they are.
+    const codes = scope.codes ? new Set(scope.codes) : null;
+    const open = this.listFlags(false).filter((f) => (!scope.account_ids || (f.account_id !== null && scope.account_ids.includes(f.account_id))) && (!codes || codes.has(f.code)));
     const key = (f: { account_id: number | null; shop_id: string | null; code: string }) => `${f.account_id ?? ''}|${f.shop_id ?? ''}|${f.code}`;
     const seen = new Set<string>();
     let opened = 0;
@@ -1366,6 +1371,68 @@ export class Queries {
 
   acknowledgeFlag(id: number): boolean {
     return this.db.prepare('UPDATE monitor_flags SET acknowledged_at = ? WHERE id = ?').run(new Date().toISOString(), id).changes > 0;
+  }
+
+  listFlagsBetween(from: string, to: string): MonitorFlag[] {
+    return (this.db.prepare('SELECT f.*, a.name AS account_name FROM monitor_flags f LEFT JOIN accounts a ON a.id = f.account_id WHERE substr(f.first_seen_at, 1, 10) <= ? AND (f.resolved_at IS NULL OR substr(f.resolved_at, 1, 10) >= ?) ORDER BY f.first_seen_at').all(to, from) as Row[]).map((r) => this.rowToFlag(r));
+  }
+
+  // ---- Account health: daily pulls and AI assessments ----
+
+  upsertHealthPull(p: { shop_id: string; account_id: number | null; source: 'windsor' | 'cruva'; pull_date: string; ok: boolean; error?: string | null; metrics: Record<string, unknown>; rows?: Record<string, unknown> }): void {
+    this.db.prepare(`INSERT INTO health_pulls (shop_id, account_id, source, pull_date, pulled_at, ok, error, metrics_json, rows_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(shop_id, source, pull_date) DO UPDATE SET account_id = excluded.account_id, pulled_at = excluded.pulled_at, ok = excluded.ok, error = excluded.error, metrics_json = excluded.metrics_json, rows_json = excluded.rows_json`)
+      .run(p.shop_id, p.account_id, p.source, p.pull_date, new Date().toISOString(), p.ok ? 1 : 0, p.error ?? null, JSON.stringify(p.metrics), JSON.stringify(p.rows ?? {}));
+  }
+
+  private rowToPull(r: Row): HealthPullRow {
+    const parse = <T,>(v: unknown, fallback: T): T => { try { return JSON.parse(String(v ?? '')) as T; } catch { return fallback; } };
+    return { id: r.id as number, shop_id: r.shop_id as string, account_id: (r.account_id as number | null) ?? null, source: r.source as 'windsor' | 'cruva', pull_date: r.pull_date as string, pulled_at: r.pulled_at as string, ok: Boolean(r.ok), error: (r.error as string | null) ?? null, metrics: parse<Record<string, unknown>>(r.metrics_json, {}), rows: parse<Record<string, unknown>>(r.rows_json, {}) };
+  }
+
+  /** The most recent pull per shop for a source (any date). */
+  latestHealthPulls(source: 'windsor' | 'cruva'): HealthPullRow[] {
+    return (this.db.prepare('SELECT p.* FROM health_pulls p WHERE p.source = ? AND p.pull_date = (SELECT MAX(pull_date) FROM health_pulls x WHERE x.shop_id = p.shop_id AND x.source = p.source) ORDER BY p.shop_id').all(source) as Row[]).map((r) => this.rowToPull(r));
+  }
+
+  /** Metrics history for a shop (no row payloads), newest last. */
+  healthMetricsHistory(shopId: string, source: 'windsor' | 'cruva', days: number): { pull_date: string; metrics: Record<string, unknown> }[] {
+    const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+    return (this.db.prepare('SELECT pull_date, metrics_json FROM health_pulls WHERE shop_id = ? AND source = ? AND pull_date >= ? AND ok = 1 ORDER BY pull_date').all(shopId, source, from) as Row[]).map((r) => { let m: Record<string, unknown> = {}; try { m = JSON.parse(String(r.metrics_json)); } catch { m = {}; } return { pull_date: r.pull_date as string, metrics: m }; });
+  }
+
+  pruneHealthPulls(olderThanDays: number): number {
+    const cut = new Date(Date.now() - olderThanDays * 86400000).toISOString().slice(0, 10);
+    // Row payloads are only needed for the latest pulls; older rows keep their metrics for the trend and lose the payload.
+    this.db.prepare(`UPDATE health_pulls SET rows_json = '{}' WHERE pull_date < ? AND rows_json != '{}'`).run(new Date(Date.now() - 3 * 86400000).toISOString().slice(0, 10));
+    return this.db.prepare('DELETE FROM health_pulls WHERE pull_date < ?').run(cut).changes;
+  }
+
+  private rowToAssessment(r: Row): HealthAssessment {
+    let watch: string[] = [];
+    try { watch = JSON.parse(String(r.watch_json ?? '[]')); } catch { watch = []; }
+    return { id: r.id as number, account_id: r.account_id as number, account_name: (r.account_name as string | null) ?? null, assess_date: r.assess_date as string, assessed_at: r.assessed_at as string, source: r.source as HealthAssessment['source'], risk: r.risk as HealthAssessment['risk'], summary: r.summary as string, action: r.action as string, watch: Array.isArray(watch) ? watch.map(String) : [] };
+  }
+
+  upsertAssessment(a: { account_id: number; assess_date: string; source: HealthAssessment['source']; risk: HealthAssessment['risk']; summary: string; action: string; watch?: string[] }): HealthAssessment {
+    this.db.prepare(`INSERT INTO health_assessments (account_id, assess_date, assessed_at, source, risk, summary, action, watch_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(account_id, assess_date) DO UPDATE SET assessed_at = excluded.assessed_at, source = excluded.source, risk = excluded.risk, summary = excluded.summary, action = excluded.action, watch_json = excluded.watch_json`)
+      .run(a.account_id, a.assess_date, new Date().toISOString(), a.source, a.risk, a.summary, a.action, JSON.stringify(a.watch ?? []));
+    return this.rowToAssessment(this.db.prepare('SELECT h.*, a.name AS account_name FROM health_assessments h LEFT JOIN accounts a ON a.id = h.account_id WHERE h.account_id = ? AND h.assess_date = ?').get(a.account_id, a.assess_date) as Row);
+  }
+
+  /** Latest assessment per account. */
+  latestAssessments(): HealthAssessment[] {
+    return (this.db.prepare('SELECT h.*, a.name AS account_name FROM health_assessments h LEFT JOIN accounts a ON a.id = h.account_id WHERE h.assess_date = (SELECT MAX(assess_date) FROM health_assessments x WHERE x.account_id = h.account_id) ORDER BY CASE h.risk WHEN \'red\' THEN 0 WHEN \'amber\' THEN 1 ELSE 2 END, a.name').all() as Row[]).map((r) => this.rowToAssessment(r));
+  }
+
+  listAssessments(accountId: number, days: number): HealthAssessment[] {
+    const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+    return (this.db.prepare('SELECT h.*, a.name AS account_name FROM health_assessments h LEFT JOIN accounts a ON a.id = h.account_id WHERE h.account_id = ? AND h.assess_date >= ? ORDER BY h.assess_date DESC').all(accountId, from) as Row[]).map((r) => this.rowToAssessment(r));
+  }
+
+  pruneAssessments(olderThanDays: number): number {
+    return this.db.prepare('DELETE FROM health_assessments WHERE assess_date < ?').run(new Date(Date.now() - olderThanDays * 86400000).toISOString().slice(0, 10)).changes;
   }
 
   deleteProspect(id: number): boolean {

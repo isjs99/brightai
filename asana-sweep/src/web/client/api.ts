@@ -14,6 +14,9 @@ import type {
   TtsContact,
   BdActivity,
   MonitorData,
+  HealthSummary,
+  HealthThresholds,
+  GmvExplore,
   StockData,
   StockProjection,
   IncidentsData,
@@ -219,6 +222,7 @@ export const api = {
   // Calendar, GMV, grades
   calendar: (month: string) => call<CalendarData>('GET', `/calendar?month=${month}`),
   gmv: (month: string) => call<GmvData>('GET', `/gmv?month=${month}`),
+  gmvExplore: (from: string, to: string, accountId?: number | null) => call<GmvExplore>('GET', `/gmv/explore?from=${from}&to=${to}${accountId ? `&account_id=${accountId}` : ''}`),
   saveTargets: (month: string, targets: Record<number, number | null>) => call<GmvData>('PUT', '/gmv/targets', { month, targets }),
   copyTargets: (from: string, to: string) => call<{ copied: number }>('POST', '/gmv/targets/copy', { from, to }),
   syncGmv: () => call<{ sync: GmvSync }>('POST', '/gmv/sync'),
@@ -311,6 +315,14 @@ export const api = {
   monitorRule: (code: string, enabled: boolean) => call<MonitorData>('PUT', `/monitor/rules/${code}`, { enabled }),
   monitorSettings: (s: { interval_minutes?: number; enabled?: boolean }) => call<MonitorData>('PUT', '/monitor/settings', s),
   ackFlag: (id: number) => call<MonitorData>('POST', `/monitor/flags/${id}/ack`),
+  // Account health (daily Windsor pull, Cruva metrics from the routine, thresholds, AI review)
+  health: () => call<HealthSummary>('GET', '/flags'),
+  healthPull: () => call<MonitorData & { shops: number; errors: string[] }>('POST', '/flags/pull'),
+  healthReview: (account_id?: number) => call<MonitorData & { reviewed: number; errors: string[] }>('POST', '/flags/review', { account_id }),
+  healthDaily: () => call<MonitorData & { pulled: number; errors: string[]; reviewed: number }>('POST', '/flags/daily'),
+  healthThresholds: () => call<{ thresholds: HealthThresholds; labels: Record<string, { label: string; unit: string; group: string }> }>('GET', '/flags/thresholds'),
+  saveHealthThresholds: (patch: Partial<HealthThresholds> & { reset?: boolean }) => call<{ thresholds: HealthThresholds; labels: Record<string, { label: string; unit: string; group: string }> }>('PUT', '/flags/thresholds', patch),
+  healthContext: (accountId: number) => call<Record<string, unknown>>('GET', `/flags/accounts/${accountId}/context`),
   // Stock
   stock: () => call<StockData>('GET', '/stock'),
   stockScan: (shop_id?: string) => call<StockData & { shops: number; skus: number; errors: string[] }>('POST', '/stock/scan', { shop_id }),

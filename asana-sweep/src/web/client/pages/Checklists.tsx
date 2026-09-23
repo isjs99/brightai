@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { AccountStatusRow, Check, CheckItem, CheckSettings, CheckWithItems } from '../../../sweep/types';
+import type { AccountStatusRow, Check, CheckItem, CheckSettings, CheckWithItems, MonitorData, MonitorFlag } from '../../../sweep/types';
 import { api, currentActor, fmtDate, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
 
@@ -27,7 +27,35 @@ const DAY_NAMES = ['', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
  * The checklist itself: every line due on the date with a checkbox, the AA action items underneath.
  * Ticks go straight to the server and the status updates live for everyone.
  */
-function TickList({ accountId, check, date, editable, onChange }: { accountId: number; check: CheckWithItems; date: string; editable: boolean; onChange: (c: CheckWithItems) => void }) {
+/** Open monitor flags for one account, keyed by the checklist section their rule belongs to. */
+type SectionFlags = Map<string, { flag: MonitorFlag; title: string }[]>;
+
+function flagsBySection(monitor: MonitorData | null, accountId: number): SectionFlags {
+  const out: SectionFlags = new Map();
+  if (!monitor) return out;
+  for (const f of monitor.flags) {
+    if (f.account_id !== accountId) continue;
+    const rule = monitor.rules.find((r) => r.code === f.code);
+    const section = rule?.section ?? 'Account health';
+    out.set(section, [...(out.get(section) ?? []), { flag: f, title: rule?.title ?? f.code }]);
+  }
+  return out;
+}
+
+function SectionFlagList({ items }: { items: { flag: MonitorFlag; title: string }[] }) {
+  return (
+    <ul className="flaglist">
+      {items.map(({ flag, title }) => (
+        <li key={flag.id} className={flag.severity}>
+          <span className={`badge ${flag.severity === 'crit' ? 'crit' : flag.severity === 'warn' ? 'warn' : 'muted'}`}>{flag.severity === 'crit' ? 'Critical' : flag.severity === 'warn' ? 'Warning' : 'Info'}</span>
+          <span><b>{title}.</b> {flag.message}{flag.detail ? <span className="sub"> · {flag.detail}</span> : null}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function TickList({ accountId, check, date, editable, onChange, flags }: { accountId: number; check: CheckWithItems; date: string; editable: boolean; onChange: (c: CheckWithItems) => void; flags: SectionFlags }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const toggle = async (itemId: string, done: boolean) => {
@@ -75,12 +103,13 @@ function TickList({ accountId, check, date, editable, onChange }: { accountId: n
       )}
       {due.length === 0 ? <p className="sub">Nothing is due on this day.</p> : (
         <ul className="item-list">
-          {due.map((it: CheckItem) => (
+          {due.map((it: CheckItem, idx: number) => (
             <li key={it.task_gid}>
               <span className={`badge ${it.state === 'done' ? 'good' : it.completed_at ? 'warn' : 'crit'}`}>{label(it)}</span>
               <div>
                 {box(it.task_gid, Boolean(it.completed_at), <b>{it.name}</b>, <span className="sub"> · {it.role.toUpperCase()}{it.section_name ? ` · ${it.section_name}` : ''}{it.frequency === 'weekly' ? ' · weekly' : ''}{it.completed_at ? ` · ${it.assignee_name ?? 'someone'} ${fmtRelative(it.completed_at)}` : ''}</span>)}
                 {it.guidance && <div className="guidance">{it.guidance}</div>}
+                {it.section_name && flags.has(it.section_name) && due.findIndex((x) => x.section_name === it.section_name) === idx && <SectionFlagList items={flags.get(it.section_name)!} />}
                 {it.subtasks.length > 0 && (
                   <ul>
                     {it.subtasks.map((s) => (
@@ -94,11 +123,14 @@ function TickList({ accountId, check, date, editable, onChange }: { accountId: n
         </ul>
       )}
       {later.length > 0 && <p className="sub" style={{ marginTop: 8 }}>Not due today: {later.map((i) => i.name).join(' · ')}</p>}
+      {[...flags.entries()].filter(([section]) => !due.some((i) => i.section_name === section)).map(([section, items]) => (
+        <div key={section} style={{ marginTop: 8 }}><div className="sub" style={{ fontWeight: 700 }}>Flags · {section}</div><SectionFlagList items={items} /></div>
+      ))}
     </div>
   );
 }
 
-function CheckDetail({ accountId, checkId, date, isToday, version, editable }: { accountId: number; checkId: number; date: string; isToday: boolean; version: string; editable: boolean }) {
+function CheckDetail({ accountId, checkId, date, isToday, version, editable, monitor }: { accountId: number; checkId: number; date: string; isToday: boolean; version: string; editable: boolean; monitor: MonitorData | null }) {
   const [check, setCheck] = useState<CheckWithItems | null>(null);
   useEffect(() => {
     // Today: the live picture (negative ids are live rows). Past days: the recorded check.
@@ -106,7 +138,7 @@ function CheckDetail({ accountId, checkId, date, isToday, version, editable }: {
     p.then((r) => setCheck(r.check)).catch(() => setCheck(null));
   }, [checkId, accountId, version, isToday]);
   if (!check) return <p className="sub">Loading…</p>;
-  return <TickList accountId={accountId} check={check} date={date} editable={editable} onChange={setCheck} />;
+  return <TickList accountId={accountId} check={check} date={date} editable={editable} onChange={setCheck} flags={isToday ? flagsBySection(monitor, accountId) : new Map()} />;
 }
 
 function SettingsPanel({ settings, onSaved }: { settings: CheckSettings; onSaved: (s: CheckSettings) => void }) {
@@ -152,13 +184,17 @@ export default function Checklists() {
   const [open, setOpen] = useState<Set<number>>(new Set());
   const [filterAm, setFilterAm] = useState(() => currentActor());
   const [version, setVersion] = useState(0);
+  const [monitor, setMonitor] = useState<MonitorData | null>(null);
 
   const load = useCallback(() => {
     api.listChecks(date).then((d) => { setData(d); setVersion((v) => v + 1); }).catch((e) => setError((e as Error).message));
     api.getCheckSettings().then((r) => setSettings(r.settings)).catch(() => undefined);
+    // Open monitor flags, shown against the section they belong to so the AM sees the problem while ticking the line.
+    api.monitor().then(setMonitor).catch(() => setMonitor(null));
   }, [date]);
   useEffect(() => { load(); }, [load]);
   const connected = useLiveUpdates(() => load());
+  const openFlags = (accountId: number) => (monitor?.flags ?? []).filter((f) => f.account_id === accountId);
 
   const runAll = async () => {
     setRunning(true);
@@ -233,8 +269,8 @@ export default function Checklists() {
               const isOpen = open.has(a.id);
               const toggleOpen = () => { const n = new Set(open); if (isOpen) n.delete(a.id); else n.add(a.id); setOpen(n); };
               return (
-                <RowGroup key={a.id} a={a} c={c} source={checklist_source} items={checklist_items} snapshot={isToday && snapshot?.final ? snapshot : null} open={isOpen} onToggle={toggleOpen}>
-                  {isOpen && c && <CheckDetail accountId={a.id} checkId={c.id} date={data.date} isToday={isToday} version={String(version)} editable={editable} />}
+                <RowGroup key={a.id} a={a} c={c} source={checklist_source} items={checklist_items} snapshot={isToday && snapshot?.final ? snapshot : null} open={isOpen} onToggle={toggleOpen} flags={isToday ? openFlags(a.id) : []}>
+                  {isOpen && c && <CheckDetail accountId={a.id} checkId={c.id} date={data.date} isToday={isToday} version={String(version)} editable={editable} monitor={monitor} />}
                   {isOpen && !c && <p className="sub">No status recorded for this day.</p>}
                 </RowGroup>
               );
@@ -249,12 +285,14 @@ export default function Checklists() {
   );
 }
 
-function RowGroup({ a, c, source, items, snapshot, open, onToggle, children }: { a: AccountStatusRow['account']; c: Check | null; source: AccountStatusRow['checklist_source']; items: number; snapshot: Check | null; open: boolean; onToggle: () => void; children?: React.ReactNode }) {
+function RowGroup({ a, c, source, items, snapshot, open, onToggle, children, flags }: { a: AccountStatusRow['account']; c: Check | null; source: AccountStatusRow['checklist_source']; items: number; snapshot: Check | null; open: boolean; onToggle: () => void; children?: React.ReactNode; flags: MonitorFlag[] }) {
+  const crit = flags.filter((f) => f.severity === 'crit').length;
+  const warn = flags.filter((f) => f.severity === 'warn').length;
   return (
     <>
       <tr className="clickable" onClick={onToggle}>
         <td style={{ width: 24 }}><button className="small" onClick={(e) => { e.stopPropagation(); onToggle(); }} aria-label={open ? 'Collapse' : 'Expand'}>{open ? '−' : '+'}</button></td>
-        <td><b>{a.name}</b><div className="sub">{source === 'custom' ? `own list · ${items} lines` : source === 'template' ? `${items} lines` : 'no checklist items'}</div></td>
+        <td><b>{a.name}</b>{crit > 0 && <span className="badge crit" style={{ marginLeft: 6 }} title={flags.filter((f) => f.severity === 'crit').map((f) => f.message).join('\n')}>{crit} critical</span>}{warn > 0 && <span className="badge warn" style={{ marginLeft: 6 }} title={flags.filter((f) => f.severity === 'warn').map((f) => f.message).join('\n')}>{warn} warn</span>}<div className="sub">{source === 'custom' ? `own list · ${items} lines` : source === 'template' ? `${items} lines` : 'no checklist items'}</div></td>
         <td>{a.am_name ?? <span className="sub">none</span>}</td>
         <td>
           <StatusPill check={c} />

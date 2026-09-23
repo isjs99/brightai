@@ -16,6 +16,8 @@ import type {
   GmvAccountRow,
   GmvAmRow,
   GmvData,
+  GmvExplore,
+  GmvExploreRow,
   GmvSettings,
   GmvShopRow,
   GradeRow,
@@ -122,6 +124,9 @@ export function buildGmv(q: Queries, month: string): GmvData {
   for (const r of rows) byShop.set(r.shop_id, [...(byShop.get(r.shop_id) ?? []), r]);
   const prevByShop = new Map<string, number>();
   for (const r of prevRows) prevByShop.set(r.shop_id, (prevByShop.get(r.shop_id) ?? 0) + r.total_gmv);
+  // Same number of elapsed days last month, for the like-for-like pace (month to date vs the same days last month).
+  const prevSameByShop = new Map<string, number>();
+  for (const r of prevRows) if (Number(r.date.slice(8, 10)) <= elapsed) prevSameByShop.set(r.shop_id, (prevSameByShop.get(r.shop_id) ?? 0) + r.total_gmv);
 
   const bonusStatus = (gmv: number, projected: number | null, target: number | null, hasData: boolean): BonusStatus => {
     if (target === null) return hasData ? 'no_base' : 'no_data';
@@ -152,6 +157,7 @@ export function buildGmv(q: Queries, month: string): GmvData {
       const gmv = round2(sum(shopRows.map((s) => s.gmv_report)));
       const hasPrev = mine.some((s) => prevByShop.has(s.shop_id));
       const prev_gmv = hasPrev ? round2(sum(shopRows.map((s) => s.prev_gmv))) : null;
+      const prev_same_days = hasPrev && elapsed > 0 ? round2(sum(mine.map((s) => toReportCurrency(prevSameByShop.get(s.shop_id) ?? 0, s.currency, fx)))) : null;
       const manual = manualTargets.get(account.id) ?? null;
       const ruleTarget = bonusTarget(prev_gmv, rule);
       const target = manual ?? ruleTarget;
@@ -198,6 +204,8 @@ export function buildGmv(q: Queries, month: string): GmvData {
         projected,
         projected_attainment: projected === null ? null : attainmentOf(projected, target),
         growth_pct: growthPct(closed ? gmv : (projected ?? gmv), prev_gmv),
+        prev_same_days,
+        pace_pct: prev_same_days !== null && prev_same_days > 0 ? round2(((gmv - prev_same_days) / prev_same_days) * 100) : null,
         bonus: bonusStatus(gmv, projected, target, hasData),
         daily: [...dailyMap.entries()].sort().map(([date, g]) => ({ date, gmv: round2(g) })),
       };
@@ -250,6 +258,53 @@ export function buildGmv(q: Queries, month: string): GmvData {
     cruva_configured: cruva.configured,
     windsor_configured: windsor.configured,
   };
+}
+
+// ---- GMV explorer: any date range, per account and shop, against the same-length period before ----
+
+export function buildGmvExplore(q: Queries, from: string, to: string, opts: { accountId?: number | null } = {}): GmvExplore {
+  const settings = gmvSettings(q);
+  const fx = settings.fx_to_eur;
+  const day = (s: string) => Date.parse(s + 'T12:00:00Z');
+  const iso = (t: number) => new Date(t).toISOString().slice(0, 10);
+  const days = Math.round((day(to) - day(from)) / 86400000) + 1;
+  const prevTo = iso(day(from) - 86400000);
+  const prevFrom = iso(day(prevTo) - (days - 1) * 86400000);
+  const shops = q.listShops().filter((s) => opts.accountId === null || opts.accountId === undefined || s.account_id === opts.accountId);
+  const cur = q.listGmvBetween(from, to);
+  const prev = q.listGmvBetween(prevFrom, prevTo);
+  const accounts = q.listAccounts();
+  const conv = (v: number, shop: { currency: string }) => toReportCurrency(v, shop.currency, fx);
+  const change = (a: number, b: number): number | null => (b > 0 ? round2(((a - b) / b) * 100) : null);
+  const rows: GmvExploreRow[] = accounts
+    .filter((a) => opts.accountId === null || opts.accountId === undefined || a.id === opts.accountId)
+    .map((a) => {
+      const mine = shops.filter((s) => s.account_id === a.id);
+      const shopRows = mine.map((s) => {
+        const c = cur.filter((r) => r.shop_id === s.shop_id);
+        const p = prev.filter((r) => r.shop_id === s.shop_id);
+        return { shop_id: s.shop_id, shop_name: s.shop_name, source: s.source, gmv: round2(conv(sum(c.map((r) => r.total_gmv)), s)), prev_gmv: round2(conv(sum(p.map((r) => r.total_gmv)), s)), units: sum(c.map((r) => r.units)) };
+      });
+      const daily = new Map<string, number>();
+      for (const s of mine) for (const r of cur.filter((x) => x.shop_id === s.shop_id)) daily.set(r.date, (daily.get(r.date) ?? 0) + conv(r.total_gmv, s));
+      const gmv = round2(sum(shopRows.map((s) => s.gmv)));
+      const prev_gmv = round2(sum(shopRows.map((s) => s.prev_gmv)));
+      return { account_id: a.id, account_name: a.name, shops: shopRows, gmv, affiliate_gmv: round2(sum(mine.map((s) => conv(sum(cur.filter((r) => r.shop_id === s.shop_id).map((r) => r.affiliate_gmv)), s)))), units: sum(shopRows.map((s) => s.units)), prev_gmv, change_pct: change(gmv, prev_gmv), daily: [...daily.entries()].sort().map(([date, g]) => ({ date, gmv: round2(g) })) };
+    })
+    .filter((r) => r.shops.length > 0)
+    .sort((a, b) => b.gmv - a.gmv);
+  const totalDaily = new Map<string, { gmv: number; prev_gmv: number }>();
+  for (let i = 0; i < days; i += 1) {
+    const d = iso(day(from) + i * 86400000);
+    const pd = iso(day(prevFrom) + i * 86400000);
+    const g = sum(shops.map((s) => conv(sum(cur.filter((r) => r.shop_id === s.shop_id && r.date === d).map((r) => r.total_gmv)), s)));
+    const pg = sum(shops.map((s) => conv(sum(prev.filter((r) => r.shop_id === s.shop_id && r.date === pd).map((r) => r.total_gmv)), s)));
+    totalDaily.set(d, { gmv: round2(g), prev_gmv: round2(pg) });
+  }
+  const gmv = round2(sum(rows.map((r) => r.gmv)));
+  const prev_gmv = round2(sum(rows.map((r) => r.prev_gmv)));
+  const synced = cur.map((r) => r.synced_at).sort().at(-1) ?? null;
+  return { from, to, prev_from: prevFrom, prev_to: prevTo, days, currency: settings.report_currency, rows, totals: { gmv, prev_gmv, change_pct: change(gmv, prev_gmv), units: sum(rows.map((r) => r.units)), daily: [...totalDaily.entries()].map(([date, v]) => ({ date, ...v })) }, last_synced: synced };
 }
 
 // ---- Grades ----
