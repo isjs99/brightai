@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import type { BonusStatus, GmvData } from '../../../sweep/types';
+import type { Account, BonusStatus, GmvData, WindsorStatus } from '../../../sweep/types';
 import { api, currentMonth, fmtDate, fmtMoney, fmtPct, fmtRelative, monthLabel, shiftMonth } from '../api';
 
 function Attain({ value }: { value: number | null }) {
@@ -166,6 +166,7 @@ export default function GmvPage() {
 
   const cur = data?.currency ?? 'EUR';
   const running = data ? !data.month_closed && data.month === currentMonth() : true;
+  const [showWindsor, setShowWindsor] = useState(false);
 
   return (
     <>
@@ -181,15 +182,17 @@ export default function GmvPage() {
           <button className="small" onClick={() => setMonth(shiftMonth(month, -1))}>‹</button>
           <b>{monthLabel(month)}</b>
           <button className="small" onClick={() => setMonth(shiftMonth(month, 1))} disabled={month >= currentMonth()}>›</button>
-          <button className="admin-only" onClick={sync} disabled={busy === 'sync' || !data?.cruva_configured} title={data?.cruva_configured ? '' : 'Set CRUVA_API_KEY in .env'}>{busy === 'sync' ? 'Syncing…' : 'Sync from Cruva'}</button>
+          <button className="admin-only" onClick={sync} disabled={busy === 'sync' || !(data?.cruva_configured || data?.windsor_configured)} title={data?.cruva_configured || data?.windsor_configured ? '' : 'Set CRUVA_API_KEY or WINDSOR_API_KEY in .env'}>{busy === 'sync' ? 'Syncing…' : data?.windsor_configured && !data?.cruva_configured ? 'Sync from Windsor' : 'Sync'}</button>
+          <button className="admin-only" onClick={() => setShowWindsor((s) => !s)}>{showWindsor ? 'Hide Windsor' : 'Windsor.ai shops'}</button>
           <button className="admin-only" onClick={() => setShowImport((s) => !s)}>Import</button>
         </div>
       </div>
       {error && <div className="banner crit">{error}</div>}
       {notice && <div className="banner info">{notice}</div>}
-      {data && !data.cruva_configured && (
-        <div className="banner warn"><b>Cruva API key not set.</b> Add <code>CRUVA_API_KEY</code> to <code>.env</code> and restart for the daily sync, or use Import to paste figures.</div>
+      {data && !data.cruva_configured && !data.windsor_configured && (
+        <div className="banner warn"><b>No GMV source set.</b> Add <code>WINDSOR_API_KEY</code> (Windsor.ai › API key) or <code>CRUVA_API_KEY</code> to <code>.env</code> and restart for the daily sync, or use Import to paste figures.</div>
       )}
+      {showWindsor && <WindsorPanel onSynced={load} />}
       {showSettings && data && (
         <div className="card" style={{ marginBottom: 16 }}>
           <div className="grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 14 }}>
@@ -282,7 +285,7 @@ export default function GmvPage() {
                     <tr key={`${a.account.id}-shops`} className="expand">
                       <td colSpan={10}>
                         <table>
-                          <thead><tr><th>Shop</th><th className="mono">Cruva id</th><th>Currency</th><th className="num">GMV (local)</th><th className="num">GMV ({cur})</th><th className="num">Last month ({cur})</th><th className="num">Affiliate (local)</th><th className="num">Units</th><th>Last synced</th></tr></thead>
+                          <thead><tr><th>Shop</th><th className="mono">Source id</th><th>Currency</th><th className="num">GMV (local)</th><th className="num">GMV ({cur})</th><th className="num">Last month ({cur})</th><th className="num">Affiliate (local)</th><th className="num">Units</th><th>Last synced</th></tr></thead>
                           <tbody>
                             {a.shops.map((s) => (
                               <tr key={s.shop.id}>
@@ -408,5 +411,64 @@ export default function GmvPage() {
         </>
       )}
     </>
+  );
+}
+
+
+/** Windsor.ai: the TikTok Shop connector that holds the shop authorisations. Discover shops, link them to accounts, sync orders into daily GMV. */
+function WindsorPanel({ onSynced }: { onSynced: () => void }) {
+  const [st, setSt] = useState<WindsorStatus | null>(null);
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ kind: 'info' | 'crit'; text: string } | null>(null);
+  useEffect(() => {
+    api.windsorStatus().then(setSt).catch((e) => setMsg({ kind: 'crit', text: (e as Error).message }));
+    api.listAccounts().then((r) => setAccounts(r.accounts.map((x) => x.account))).catch(() => undefined);
+  }, []);
+  const run = async (key: string, fn: () => Promise<WindsorStatus | void>, done?: (r: WindsorStatus | void) => string) => {
+    setBusy(key); setMsg(null);
+    try { const r = await fn(); if (r) setSt(r); if (done) setMsg({ kind: 'info', text: done(r) }); } catch (e) { setMsg({ kind: 'crit', text: (e as Error).message }); } finally { setBusy(null); }
+  };
+  if (!st) return <div className="card" style={{ marginBottom: 16 }}><p className="sub">Loading Windsor status…</p></div>;
+  const linkedIds = new Map(st.shops.map((s) => [s.shop_id, s]));
+  return (
+    <div className="card" style={{ marginBottom: 16 }}>
+      <h3 style={{ marginTop: 0 }}>Windsor.ai · TikTok Shop connector</h3>
+      {!st.configured ? (
+        <div className="banner warn"><b>WINDSOR_API_KEY is not set.</b> Windsor.ai › API key, paste it into <code>.env</code>, restart. Windsor already holds the shop authorisations, so no Partner Center app is needed for reading.</div>
+      ) : (
+        <p className="hint">Key set{st.last_sync_at ? `, last sync ${fmtRelative(st.last_sync_at)}` : ', never synced'}. Discover reads the shop list from the connector and links the ones whose name matches an account; Sync writes the last 40 days of orders into daily GMV for every linked shop (orders placed that day, cancelled ones excluded).</p>
+      )}
+      {st.last_error && <div className="banner crit">Last sync error: {st.last_error}</div>}
+      {msg && <div className={`banner ${msg.kind}`}>{msg.text}</div>}
+      <div className="actions" style={{ marginBottom: 10 }}>
+        <button className="small" disabled={!st.configured || busy !== null} onClick={() => run('test', async () => { const r = await api.windsorTest(); setMsg({ kind: 'info', text: `Connected: ${r.shops} shop(s) on the connector${r.sample.length ? `, e.g. ${r.sample.join(', ')}` : ''}.` }); })}>{busy === 'test' ? 'Testing…' : 'Test connection'}</button>
+        <button className="small" disabled={!st.configured || busy !== null} onClick={() => run('disc', () => api.windsorDiscover(), (r) => `${(r as WindsorStatus & { found: number; linked: number }).found} shop(s) found, ${(r as WindsorStatus & { linked: number }).linked} newly linked by name.`)}>{busy === 'disc' ? 'Discovering…' : 'Discover shops'}</button>
+        <button className="small primary" disabled={!st.configured || busy !== null || st.shops.length === 0} onClick={() => run('sync', async () => { const r = await api.windsorSync(40); onSynced(); return r; }, (r) => `Synced ${(r as WindsorStatus & { synced_shops: number; rows: number }).synced_shops} shop(s), ${(r as WindsorStatus & { rows: number }).rows} daily rows.`)}>{busy === 'sync' ? 'Syncing…' : 'Sync GMV now'}</button>
+      </div>
+      {st.discovered.length === 0 ? <p className="sub">No shops discovered yet.</p> : (
+        <table>
+          <thead><tr><th>Shop on Windsor</th><th>Market</th><th>Linked account</th><th></th></tr></thead>
+          <tbody>
+            {st.discovered.map((d) => {
+              const link = linkedIds.get(d.account_id);
+              return (
+                <tr key={d.account_id}>
+                  <td><b>{d.shop_name || d.account_name}</b><div className="sub mono">{d.account_id}</div></td>
+                  <td>{d.market}</td>
+                  <td>
+                    <select value={link?.account_id ?? ''} disabled={busy !== null} onChange={(e) => { const id = Number(e.target.value); if (id) void run('link', () => api.windsorLink(d.account_id, id, d.shop_name || d.account_name)); else if (link) void run('unlink', () => api.windsorUnlink(link.id)); }} style={{ width: 'auto' }}>
+                      <option value="">not linked</option>
+                      {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+                    </select>
+                  </td>
+                  <td className="sub">{link ? `${link.currency} · counted in GMV` : 'not counted'}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      )}
+    </div>
   );
 }

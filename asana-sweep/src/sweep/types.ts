@@ -229,9 +229,21 @@ export interface CalendarData {
 export interface AccountShop {
   id: number;
   account_id: number;
+  /** Cruva shop id, or the Windsor.ai account id (e.g. DEESLCN8QWCV) for shops read through Windsor. */
   shop_id: string;
   shop_name: string;
   currency: string;
+  source: 'cruva' | 'windsor';
+}
+
+export interface WindsorShopInfo { account_id: string; account_name: string; shop_id: string; shop_name: string; shop_region: string; shop_seller_type: string; market: string; account_id_linked?: number | null; account_name_linked?: string | null }
+
+export interface WindsorStatus {
+  configured: boolean;
+  last_sync_at: string | null;
+  last_error: string | null;
+  discovered: WindsorShopInfo[];
+  shops: AccountShop[];
 }
 
 export interface GmvShopRow {
@@ -331,6 +343,7 @@ export interface GmvData {
   };
   last_sync: GmvSync | null;
   cruva_configured: boolean;
+  windsor_configured: boolean;
 }
 
 export interface GmvSync {

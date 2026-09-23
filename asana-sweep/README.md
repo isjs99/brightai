@@ -94,7 +94,9 @@ One row per AM with their accounts underneath, one column per working day of the
 
 ### GMV (Cruva)
 
-GMV page. Every account is mapped to its Cruva shops (Accounts › shops, or the seed mapping). Figures come in two ways:
+GMV page. Every account is mapped to its shops. Figures come in three ways:
+
+- **Windsor.ai** (`WINDSOR_API_KEY`): Windsor's TikTok Shop connector already holds the shop authorisations, so the dashboard reads the shop list, orders, products and payouts through it without a Partner Center app of its own. GMV › "Windsor.ai shops" › Discover lists the shops on the connector and links the ones whose name matches a roster account (the rest by hand); Sync writes the last 40 days of orders into daily GMV per shop (orders placed that day, cancelled ones excluded; affiliate share is not available from Windsor). The daily 07:15 sync covers Windsor shops too. Note: Windsor's "shop performance" table is US-only, so EU GMV is built from orders.
 
 - **Daily sync** at 07:15 from the Cruva REST API when `CRUVA_API_KEY` is set. The endpoint path defaults to `/v1/shop/stats` on `https://api.cruva.com`; override with `CRUVA_STATS_PATH` if Cruva's docs say otherwise. "Sync from Cruva" pulls the last 40 days on demand.
 - **Import**: paste JSON rows of `{ shop_id, date, total_gmv, affiliate_gmv, units }`.
@@ -237,6 +239,7 @@ Auth is a single shared password behind a signed cookie, in `src/web/auth.ts` be
 | `PUBLIC_URL` | Public dashboard URL for Slack links |
 | `SESSION_SECRET` | Optional cookie signing secret, derived from the password if blank |
 | `SLACK_BOT_TOKEN` | Optional Slack bot token: DM reminders, instant incident alerts, client reports and copilot replies (chat:write, channels:history, conversations.list) |
+| `WINDSOR_API_KEY` | Optional Windsor.ai API key: TikTok Shop shops, orders and payouts through Windsor's connector |
 | `CRUVA_API_KEY` | Optional Cruva REST API key for the daily GMV sync |
 | `CRUVA_BASE_URL`, `CRUVA_STATS_PATH` | Optional overrides for the Cruva stats endpoint |
 | `CRUVA_ENDPOINTS` | Optional JSON of Cruva CRM paths for the playbook (`{"automation": "/v1/automations", ...}`) |

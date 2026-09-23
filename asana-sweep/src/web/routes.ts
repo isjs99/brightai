@@ -10,6 +10,8 @@ import { slackBot } from '../notify/slackbot.js';
 import { liveEvents } from '../live/events.js';
 import { buildCalendar, buildGmv, buildGrades } from '../reports/index.js';
 import { syncGmv } from '../gmv/sync.js';
+import { discoverWindsorShops, syncWindsorGmv, windsor, windsorStatus } from '../gmv/windsor.js';
+import type { WindsorStatus } from '../sweep/types.js';
 import { currencyForShop } from '../gmv/currency.js';
 import { authorizationUrl, tts } from '../tts/client.js';
 import { deactivatePromotion, pushPromotion, shopCredentials, syncPromotion } from '../tts/promotions.js';
@@ -634,6 +636,47 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     q.setSetting('bonus_growth_above', String(above));
     res.json(buildGmv(q, String(body.month ?? '') || todayIn(checkTz()).slice(0, 7)));
   });
+  // ---- Windsor.ai (TikTok Shop data without our own Partner Center app) ----
+  const windsorPayload = (): WindsorStatus => ({ ...windsorStatus(q), shops: q.listShops('windsor') });
+  r.get('/windsor/status', (_req, res) => res.json(windsorPayload()));
+  /** Read the shop list from the connector and auto-link the ones whose name matches a roster account. */
+  r.post('/windsor/discover', async (_req, res) => {
+    if (!windsor.configured) throw new HttpError(400, 'WINDSOR_API_KEY is not set. Add it to .env (Windsor.ai › API key) and restart.');
+    const r2 = await discoverWindsorShops(q);
+    res.json({ ...windsorPayload(), found: r2.shops.length, linked: r2.linked });
+  });
+  /** Link (or re-link) a discovered Windsor shop to a roster account. */
+  r.post('/windsor/shops', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const accountId = Number(b.account_id);
+    const shopId = String(b.shop_id ?? '').trim();
+    if (!q.getAccount(accountId)) throw new HttpError(404, 'Account not found');
+    if (!shopId) throw new HttpError(400, 'shop_id is required');
+    const known = windsorStatus(q).discovered.find((d) => d.account_id === shopId);
+    const name = String(b.shop_name ?? '').trim() || known?.shop_name || shopId;
+    const currency = String(b.currency ?? '').trim().toUpperCase() || currencyForMarket(known?.market ?? '');
+    q.addShop(accountId, shopId, name, currency, 'windsor');
+    res.status(201).json(windsorPayload());
+  });
+  r.delete('/windsor/shops/:id', (req, res) => {
+    if (!q.removeShop(idParam(req))) throw new HttpError(404, 'Shop not found');
+    res.json(windsorPayload());
+  });
+  /** Pull the last N days of orders into daily GMV for every linked Windsor shop. */
+  r.post('/windsor/sync', async (req, res) => {
+    if (!windsor.configured) throw new HttpError(400, 'WINDSOR_API_KEY is not set.');
+    const days = Math.min(120, Math.max(1, int((req.body ?? {}).days, 40)));
+    const r2 = await syncWindsorGmv(q, { days });
+    if (r2.error) throw new HttpError(502, r2.error);
+    res.json({ ...windsorPayload(), synced_shops: r2.shops, rows: r2.rows, days });
+  });
+  /** Connectivity test: one small read, the error text if it fails. */
+  r.post('/windsor/test', async (_req, res) => {
+    if (!windsor.configured) throw new HttpError(400, 'WINDSOR_API_KEY is not set.');
+    const shops = await windsor.shops();
+    res.json({ ok: true, shops: shops.length, sample: shops.slice(0, 3).map((s) => `${s.shop_name} (${s.shop_region})`) });
+  });
+
   r.delete('/gmv/shops/:id', (req, res) => {
     if (!q.removeShop(idParam(req))) throw new HttpError(404, 'Shop not found');
     res.json({ ok: true });

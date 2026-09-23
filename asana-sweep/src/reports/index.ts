@@ -3,6 +3,7 @@ import { daysInMonth, monthRange, pct, previousMonth, workdaysInMonth } from '..
 import { todayIn } from '../checklist/checker.js';
 import { attainmentOf, bonusTarget, gradeOf, growthPct, projectMonth, requiredGrowthPct, scoreOf, type BonusRule } from '../gmv/grading.js';
 import { cruva } from '../gmv/cruva.js';
+import { windsor } from '../gmv/windsor.js';
 import { DEFAULT_REPORT_CURRENCY, parseFx, toReportCurrency } from '../gmv/currency.js';
 import type {
   Account,
@@ -247,6 +248,7 @@ export function buildGmv(q: Queries, month: string): GmvData {
     totals: aggregate(accountRows),
     last_sync: q.lastGmvSync(),
     cruva_configured: cruva.configured,
+    windsor_configured: windsor.configured,
   };
 }
 

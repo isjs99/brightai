@@ -1132,6 +1132,13 @@ const migrations: Migration[] = [
       db.exec(`UPDATE checks SET final = 0 WHERE check_date >= date('now', '-1 day')`);
     },
   },
+  {
+    version: 23,
+    name: 'shop source (cruva or windsor) on account_shops',
+    up(db) {
+      db.exec(`ALTER TABLE account_shops ADD COLUMN source TEXT NOT NULL DEFAULT 'cruva'`);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

@@ -677,8 +677,11 @@ export class Queries {
 
   // ---- Cruva shops ----
 
-  listShops(): AccountShop[] {
-    return this.db.prepare('SELECT * FROM account_shops ORDER BY shop_name COLLATE NOCASE').all().map((r) => this.rowToShop(r as Row));
+  listShops(source?: 'cruva' | 'windsor'): AccountShop[] {
+    const rows = source
+      ? this.db.prepare('SELECT * FROM account_shops WHERE source = ? ORDER BY shop_name COLLATE NOCASE').all(source)
+      : this.db.prepare('SELECT * FROM account_shops ORDER BY shop_name COLLATE NOCASE').all();
+    return rows.map((r) => this.rowToShop(r as Row));
   }
 
   private rowToShop(r: Row): AccountShop {
@@ -688,16 +691,17 @@ export class Queries {
       shop_id: r.shop_id as string,
       shop_name: r.shop_name as string,
       currency: (r.currency as string) || 'EUR',
+      source: r.source === 'windsor' ? 'windsor' : 'cruva',
     };
   }
 
-  addShop(accountId: number, shopId: string, shopName: string, currency = 'EUR'): AccountShop {
+  addShop(accountId: number, shopId: string, shopName: string, currency = 'EUR', source: 'cruva' | 'windsor' = 'cruva'): AccountShop {
     this.db
       .prepare(
-        `INSERT INTO account_shops (account_id, shop_id, shop_name, currency) VALUES (?, ?, ?, ?)
-         ON CONFLICT(shop_id) DO UPDATE SET account_id = excluded.account_id, shop_name = excluded.shop_name, currency = excluded.currency`,
+        `INSERT INTO account_shops (account_id, shop_id, shop_name, currency, source) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(shop_id) DO UPDATE SET account_id = excluded.account_id, shop_name = excluded.shop_name, currency = excluded.currency, source = excluded.source`,
       )
-      .run(accountId, shopId, shopName, currency);
+      .run(accountId, shopId, shopName, currency, source);
     return this.rowToShop(this.db.prepare('SELECT * FROM account_shops WHERE shop_id = ?').get(shopId) as Row);
   }
 
