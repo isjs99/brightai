@@ -25,6 +25,9 @@ export class WindsorClient {
     return Boolean(this.apiKey);
   }
 
+  /** The last request and the head of its response, key masked, for the Connections page test. */
+  lastCall: { url: string; status: number | null; body: string } | null = null;
+
   async query<T>(fields: string[], range: { from: string; to: string } | { preset: string }, connector = WINDSOR_CONNECTOR): Promise<T[]> {
     if (!this.apiKey) throw new Error('WINDSOR_API_KEY is not set. Add it to .env (Windsor.ai › API key) and restart.');
     const url = new URL(`${this.baseUrl}/${connector}`);
@@ -40,6 +43,7 @@ export class WindsorClient {
       break;
     }
     const text = await res.text();
+    this.lastCall = { url: url.toString().replace(this.apiKey, '***'), status: res.status, body: text.slice(0, 600).replace(this.apiKey, '***') };
     if (!res.ok) throw new Error(`Windsor ${res.status}: ${text.slice(0, 300).replace(this.apiKey, '***')}`);
     let body: unknown;
     try { body = JSON.parse(text); } catch { throw new Error(`Windsor returned non-JSON: ${text.slice(0, 120)}`); }

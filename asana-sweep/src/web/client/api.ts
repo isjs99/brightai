@@ -234,7 +234,7 @@ export const api = {
   windsorLink: (shop_id: string, account_id: number, shop_name?: string) => call<WindsorStatus>('POST', '/windsor/shops', { shop_id, account_id, shop_name }),
   windsorUnlink: (id: number) => call<WindsorStatus>('DELETE', `/windsor/shops/${id}`),
   windsorSync: (days = 40) => call<WindsorStatus & { synced_shops: number; rows: number; days: number }>('POST', '/windsor/sync', { days }),
-  windsorTest: () => call<{ ok: true; shops: number; sample: string[] }>('POST', '/windsor/test'),
+  windsorTest: () => call<{ ok: true; shops: number; sample: string[]; debug?: { shops_call: { url: string; status: number | null; body: string } | null; orders_30d_rows: number | null; orders_call: { url: string; status: number | null; body: string } | null } }>('POST', '/windsor/test'),
   grades: (month: string) => call<GradesData>('GET', `/grades?month=${month}`),
   // TikTok Shop, promotions, GMV Max
   ttsStatus: () => call<TtsStatus>('GET', '/tts/status'),
