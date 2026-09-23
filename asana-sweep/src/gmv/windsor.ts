@@ -56,8 +56,26 @@ export class WindsorClient {
     return rows as T[];
   }
 
-  shops(): Promise<WindsorShop[]> {
-    return this.query<WindsorShop>(['account_id', 'account_name', 'shop_id', 'shop_name', 'shop_region', 'shop_seller_type'], { preset: 'last_7d' });
+  /**
+   * The shops on the connector. The connector's own shop table is empty over the REST endpoint, so the list is
+   * derived from the accounts that appear in orders (last 180 days) and products, with the region read from the
+   * Windsor account id (DEESLCN8QWCV → ES).
+   */
+  async shops(): Promise<WindsorShop[]> {
+    const direct = await this.query<WindsorShop>(['account_id', 'account_name', 'shop_id', 'shop_name', 'shop_region', 'shop_seller_type'], { preset: 'last_7d' }).catch(() => [] as WindsorShop[]);
+    const byId = new Map<string, WindsorShop>();
+    for (const s of direct) if (s.account_id) byId.set(s.account_id, { ...s, shop_region: (s.shop_region || s.account_id.slice(2, 4)).toUpperCase() });
+    const to = new Date().toISOString().slice(0, 10);
+    const from = new Date(Date.now() - 180 * 86400000).toISOString().slice(0, 10);
+    const seen = (rows: { account_id: string; account_name?: string }[]) => {
+      for (const r of rows) {
+        if (!r.account_id || byId.has(r.account_id)) continue;
+        byId.set(r.account_id, { account_id: r.account_id, account_name: r.account_name ?? r.account_id, shop_id: '', shop_name: r.account_name ?? r.account_id, shop_region: r.account_id.slice(2, 4).toUpperCase(), shop_seller_type: 'LOCAL' });
+      }
+    };
+    try { seen(await this.query<{ account_id: string; account_name: string }>(['account_id', 'account_name', 'date'], { from, to })); } catch (err) { if (!byId.size) throw err; }
+    try { seen(await this.query<{ account_id: string; account_name: string }>(['account_id', 'account_name', 'product_id'], { from: '2024-01-01', to })); } catch { /* products are optional for discovery */ }
+    return [...byId.values()].sort((a, b) => a.shop_name.localeCompare(b.shop_name));
   }
 
   orders(from: string, to: string): Promise<WindsorOrder[]> {

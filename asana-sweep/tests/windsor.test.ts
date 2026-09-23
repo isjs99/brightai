@@ -63,6 +63,25 @@ describe('windsor', () => {
     expect(page.windsor_configured).toBe(false); // env not set in tests
   });
 
+  it('discovers shops from orders when the connector shop table is empty', async () => {
+    const q = new Queries(openTestDb());
+    const { WindsorClient } = await import('../src/gmv/windsor');
+    const c = new WindsorClient('key', 'https://example.invalid');
+    // Shop table → nothing; orders → the two accounts; products → one more.
+    c.query = (async (fields: string[]) => {
+      if (fields.includes('shop_id')) return [];
+      if (fields.includes('order_id') || fields.includes('date')) return orders;
+      if (fields.includes('product_id')) return [{ account_id: 'DEFRLCN8QWCN', account_name: 'Clearly_France', product_id: '1' }];
+      return [];
+    }) as WindsorClient['query'];
+    const found = await c.shops();
+    expect(found.map((s) => s.account_id).sort()).toEqual(['DEESLCN8QWCV', 'DEFRLCN8QWCN', 'DEITLCCTQLXS']);
+    expect(found.find((s) => s.account_id === 'DEFRLCN8QWCN')!.shop_region).toBe('FR');
+    const d = await discoverWindsorShops(q, c);
+    expect(d.linked).toBe(2); // both Clearly shops link to the Clearly account
+    expect(q.listShops('windsor').map((s) => s.currency)).toEqual(['EUR', 'EUR']);
+  });
+
   it('the combined sync runs Windsor even when Cruva is not configured', async () => {
     const q = new Queries(openTestDb());
     await discoverWindsorShops(q, fake);
