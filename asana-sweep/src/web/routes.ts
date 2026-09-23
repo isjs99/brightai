@@ -700,7 +700,8 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   /** Connectivity test: one small read, the error text if it fails. */
   r.post('/windsor/test', async (_req, res) => {
     if (!windsor.configured) throw new HttpError(400, 'WINDSOR_API_KEY is not set.');
-    const shops = await windsor.shops();
+    // The test is also the discovery: whatever comes back is stored and linked by name, so the page reflects it.
+    const shops = (await discoverWindsorShops(q)).shops;
     const first = windsor.lastCall;
     // A second variant with an explicit date range, in case the connector ignores presets for the shop table.
     let alt = 0;
@@ -711,7 +712,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
       try { alt = (await windsor.query<Record<string, unknown>>(['account_id', 'account_name', 'date', 'order_id'], { from, to })).length; } catch (err) { alt = -1; altCall = { url: '', status: null, body: (err as Error).message }; }
       altCall = altCall ?? windsor.lastCall;
     }
-    res.json({ ok: true, shops: shops.length, sample: shops.slice(0, 3).map((s) => `${s.shop_name} (${s.shop_region})`), debug: { shops_call: first, orders_30d_rows: shops.length ? null : alt, orders_call: altCall } });
+    res.json({ ok: true, shops: shops.length, linked: q.listShops('windsor').length, sample: shops.slice(0, 3).map((s) => `${s.shop_name} (${s.shop_region})`), debug: { shops_call: first, orders_30d_rows: shops.length ? null : alt, orders_call: altCall } });
   });
 
   r.delete('/gmv/shops/:id', (req, res) => {
