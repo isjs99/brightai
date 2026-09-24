@@ -8,7 +8,7 @@ import { isDue } from '../checklist/evaluate.js';
 import { DEFAULT_REMINDER_TEXT, incompleteByPerson, notifyAms, renderReminder } from '../checklist/reminders.js';
 import { slackBot } from '../notify/slackbot.js';
 import { liveEvents } from '../live/events.js';
-import { buildCalendar, buildGmv, buildGmvExplore, buildGrades } from '../reports/index.js';
+import { buildCalendar, buildGmv, buildGmvExplore } from '../reports/index.js';
 import { syncGmv } from '../gmv/sync.js';
 import { cruva } from '../gmv/cruva.js';
 import { discoverWindsorShops, syncWindsorGmv, windsor, windsorStatus } from '../gmv/windsor.js';
@@ -969,14 +969,6 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     res.json({ rows: q.listGmvMax() });
   });
 
-  // ---- Grades ----
-  r.get('/grades', (req, res) => res.json(buildGrades(q, monthParam(req))));
-  r.put('/grade-settings', (req, res) => {
-    const w = Number((req.body ?? {}).weight_checklist);
-    if (!Number.isFinite(w) || w < 0 || w > 100) throw new HttpError(400, 'weight_checklist must be 0..100');
-    q.setSetting('grade_weight_checklist', String(Math.round(w)));
-    res.json({ weight_checklist: Math.round(w) });
-  });
 
   // ---- Analytics ----
   r.get('/analytics', (req, res) => {

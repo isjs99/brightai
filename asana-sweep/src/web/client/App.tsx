@@ -112,7 +112,7 @@ const NAV: { section: string; items: { to: string; label: string; end?: boolean 
     section: 'Performance',
     items: [
       { to: '/gmv', label: 'GMV & bonus' },
-      { to: '/analytics', label: 'Analytics & grades' },
+      { to: '/analytics', label: 'Analytics' },
     ],
   },
   {

@@ -10,7 +10,7 @@ Every account is checked against a checklist every workday. The checklist is nat
 - **Per-account lists**: "Give it its own list" on the Checklist items page copies the template for that account; lines can then be added, edited, reordered or switched off for that account alone. "Back to the template" drops the copy.
 - **Roles**: every line is AM or AA. Top-level checks default to AM, action items to AA; the Affiliate lines are AA work. AM, AA and combined completion are reported separately. A check counts as done only when its own box and every action item under it are ticked (a ticked check with open action items shows "Waiting on AA"), and an account is complete only when every box is ticked.
 - **Frequency**: every workday, or weekly on a chosen weekday. Weekly lines only show up (and only count) on their day.
-- **Ticking**: on Checklists, expand an account and tick. Ticks record who (the "You are" pick top right) and when, update the live status for everyone over SSE, and feed the Calendar, Analytics and Grades. "Tick all AM lines", "Tick all AA actions", "Tick everything" and "Clear day" do the whole account at once. Account managers signed in with the view-only password can tick; everything else stays admin only. Admins can correct past days from the date picker.
+- **Ticking**: on Checklists, expand an account and tick. Ticks record who (the "You are" pick top right) and when, update the live status for everyone over SSE, and feed the Calendar and Analytics. "Tick all AM lines", "Tick all AA actions", "Tick everything" and "Clear day" do the whole account at once. Account managers signed in with the view-only password can tick; everything else stays admin only. Admins can correct past days from the date picker.
 
 ## Run it locally
 
@@ -63,7 +63,7 @@ Use a long password. Set `PUBLIC_URL` to the https address so the login cookie i
 
 ## Daily lock (16:00 every workday)
 
-The Checklists page always shows the live picture. Once a day (weekdays 16:00 Madrid time by default, change it under Checklists › Settings) the status of every account is locked as the official record used by the Calendar, Analytics and Grades. Ticks after the lock still show live, with the locked status noted underneath. "Record status now" writes a snapshot on demand without locking it.
+The Checklists page always shows the live picture. Once a day (weekdays 16:00 Madrid time by default, change it under Checklists › Settings) the status of every account is locked as the official record used by the Calendar and Analytics. Ticks after the lock still show live, with the locked status noted underneath. "Record status now" writes a snapshot on demand without locking it.
 
 - **AM** = the account manager's lines.
 - **AA** = the action items underneath and any line marked AA.
@@ -108,13 +108,6 @@ Shops report in their market currency (UK → GBP, PL → PLN, everything else E
 **Bonus rule.** Each account's target is derived from last month's GMV: under €30k it must double (+100%), at or above €30k it needs +40%. The page shows last month, the growth needed, the target, GMV to date, growth (projected while the month runs), and a Bonus column: on track / behind while running, eligible / behind once the month closes. Threshold and percentages are editable under "Rates & rule". "Override targets" replaces the rule for an account for that month.
 
 **Commission & AM share.** Each account records the deal: commission % and whether it applies to actual GMV or to the net settlement amount (Merchant of Record). For MoR deals an estimated settlement % is used until the month's actual net settlement is entered. Agency billing = base × commission %, and each AM's share (default 10%) of that is shown per account and per AM. Edit deals on the GMV page or on the account form.
-
-### Grades
-
-Grades are a letter per person and per account (A to F), listed alphabetically with the checklist % and the GMV attainment % behind them. No numeric score column and no ranking: the letter is a signal for the person, not a leaderboard.
-
-Analytics page, top section. Behind the letter: checklist weight × compliance + (100 − weight) × GMV attainment, attainment capped at 100, default weight 50/50 (adjustable on the page); A 90+, B 80+, C 70+, D 60+, F below.
-- During the running month GMV attainment uses the projected month-end figure so mid-month grades are fair. If an account has no target, it is graded on checklist alone.
 
 ## Look and feel
 
@@ -244,7 +237,7 @@ With `SLACK_BOT_TOKEN` set: AM reminders and the "missed" note at the lock go as
 ## Things it handles on purpose
 
 - A tick on a locked day: the live status moves, the locked record does not. Admins can still correct a past day from the date picker (that rewrites the record for that day).
-- An account switched off: it keeps its history but is not checked, reminded about or graded.
+- An account switched off: it keeps its history but is not checked or reminded about.
 - An item switched off or deleted: it disappears from today onwards; past records keep what was ticked.
 - Two people ticking the same line: the first tick stands and records who did it; unticking clears it for everyone.
 
@@ -254,7 +247,7 @@ With `SLACK_BOT_TOKEN` set: AM reminders and the "missed" note at the lock go as
 src/sweep       types.ts, the shared types between server and client
 src/checklist   template.ts (the seeded checklist), evaluate.ts (pure completion logic), checker.ts (live status, daily lock, Slack digest), reminders.ts (AM DMs), calendar.ts
 src/gmv         cruva.ts (REST client), sync.ts (daily pull), grading.ts (pure score + letter)
-src/reports     calendar, GMV and grade aggregations for the dashboard
+src/reports     calendar and GMV aggregations for the dashboard
 src/leads       lead sheet CSV parsing, sync watcher and AM points
 src/bd          FastMoss seed, rise score, Apollo client
 src/inbox       TikTok inbox sync, context builder, Claude drafting, auto-reply gate

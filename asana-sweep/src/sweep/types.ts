@@ -493,27 +493,6 @@ export interface GmvMaxPatch {
 
 export type Grade = 'A' | 'B' | 'C' | 'D' | 'F';
 
-export interface GradeRow {
-  name: string;
-  am_name: string | null;
-  account_id: number | null;
-  compliance: number | null;
-  missed: number;
-  checked_days: number;
-  gmv: number;
-  target: number | null;
-  attainment: number | null;
-  score: number | null;
-  grade: Grade | null;
-}
-
-export interface GradesData {
-  month: string;
-  weight_checklist: number;
-  ams: GradeRow[];
-  accounts: GradeRow[];
-}
-
 // ---- Leads (synced from the lead sheet) ----
 
 export interface Lead {

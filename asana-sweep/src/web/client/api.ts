@@ -46,7 +46,6 @@ import type {
   GmvMaxPatch,
   GmvMaxRow,
   GmvSync,
-  GradesData,
   Lead,
   LeadsData,
   Promotion,
@@ -239,7 +238,6 @@ export const api = {
   windsorUnlink: (id: number) => call<WindsorStatus>('DELETE', `/windsor/shops/${id}`),
   windsorSync: (days = 40) => call<WindsorStatus & { synced_shops: number; rows: number; days: number }>('POST', '/windsor/sync', { days }),
   windsorTest: () => call<{ ok: true; shops: number; linked: number; sample: string[]; debug?: { shops_call: { url: string; status: number | null; body: string } | null; orders_30d_rows: number | null; orders_call: { url: string; status: number | null; body: string } | null } }>('POST', '/windsor/test'),
-  grades: (month: string) => call<GradesData>('GET', `/grades?month=${month}`),
   // TikTok Shop, promotions, GMV Max
   ttsStatus: () => call<TtsStatus>('GET', '/tts/status'),
   saveTtsSettings: (service_id: string) => call<TtsStatus>('PUT', '/tts/settings', { service_id }),
@@ -394,7 +392,6 @@ export const api = {
   addGmvMax: (account_id: number, market: string, campaign_type: 'PRODUCT' | 'LIVE') => call<{ rows: GmvMaxRow[] }>('POST', '/gmv-max', { account_id, market, campaign_type }),
   bulkGmvMax: (ids: number[], patch: GmvMaxPatch) => call<{ changed: number; rows: GmvMaxRow[] }>('PUT', '/gmv-max/bulk', { ids, patch }),
   deleteGmvMax: (id: number) => call<{ rows: GmvMaxRow[] }>('DELETE', `/gmv-max/${id}`),
-  saveGradeWeight: (weight_checklist: number) => call<{ weight_checklist: number }>('PUT', '/grade-settings', { weight_checklist }),
 };
 
 export function fmtDate(iso: string | null | undefined): string {

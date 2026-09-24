@@ -1,7 +1,7 @@
 import { Queries } from '../db/queries.js';
 import { daysInMonth, monthRange, pct, previousMonth, workdaysInMonth } from '../checklist/calendar.js';
 import { todayIn } from '../checklist/checker.js';
-import { attainmentOf, bonusTarget, gradeOf, growthPct, projectMonth, requiredGrowthPct, scoreOf, type BonusRule } from '../gmv/grading.js';
+import { attainmentOf, bonusTarget, growthPct, projectMonth, requiredGrowthPct, type BonusRule } from '../gmv/grading.js';
 import { cruva } from '../gmv/cruva.js';
 import { windsor } from '../gmv/windsor.js';
 import { DEFAULT_REPORT_CURRENCY, parseFx, toReportCurrency } from '../gmv/currency.js';
@@ -20,8 +20,6 @@ import type {
   GmvExploreRow,
   GmvSettings,
   GmvShopRow,
-  GradeRow,
-  GradesData,
 } from '../sweep/types.js';
 
 const COUNTABLE = new Set(['complete', 'partial', 'none']);
@@ -305,60 +303,6 @@ export function buildGmvExplore(q: Queries, from: string, to: string, opts: { ac
   const prev_gmv = round2(sum(rows.map((r) => r.prev_gmv)));
   const synced = cur.map((r) => r.synced_at).sort().at(-1) ?? null;
   return { from, to, prev_from: prevFrom, prev_to: prevTo, days, currency: settings.report_currency, rows, totals: { gmv, prev_gmv, change_pct: change(gmv, prev_gmv), units: sum(rows.map((r) => r.units)), daily: [...totalDaily.entries()].map(([date, v]) => ({ date, ...v })) }, last_synced: synced };
-}
-
-// ---- Grades ----
-
-export function buildGrades(q: Queries, month: string): GradesData {
-  const weight = Number(q.getSetting('grade_weight_checklist', '50')) || 50;
-  const cal = buildCalendar(q, month);
-  const gmv = buildGmv(q, month);
-  const gmvByAccount = new Map(gmv.accounts.map((r) => [r.account.id, r]));
-
-  const accounts: GradeRow[] = cal.ams.flatMap((am) =>
-    am.accounts.map((row) => {
-      const g = gmvByAccount.get(row.account.id);
-      // Use projected attainment for the current month so mid-month grades are not all F.
-      const attainment = g ? (g.projected_attainment ?? g.attainment) : null;
-      const score = scoreOf({ compliance: row.compliance, attainment, weightChecklist: weight });
-      return {
-        name: row.account.name,
-        am_name: row.account.am_name,
-        account_id: row.account.id,
-        compliance: row.compliance,
-        missed: row.missed,
-        checked_days: row.checked_days,
-        gmv: g?.gmv ?? 0,
-        target: g?.target ?? null,
-        attainment,
-        score,
-        grade: gradeOf(score),
-      };
-    }),
-  );
-
-  const ams: GradeRow[] = cal.ams.map((am) => {
-    const g = gmv.ams.find((r) => r.am_name === am.am_name);
-    const attainment = g ? (g.projected_attainment ?? g.attainment) : null;
-    const score = scoreOf({ compliance: am.compliance, attainment, weightChecklist: weight });
-    return {
-      name: am.am_name,
-      am_name: am.am_name,
-      account_id: null,
-      compliance: am.compliance,
-      missed: am.missed,
-      checked_days: am.checked_days,
-      gmv: g?.gmv ?? 0,
-      target: g?.target ?? null,
-      attainment,
-      score,
-      grade: gradeOf(score),
-    };
-  });
-
-  // Alphabetical, not ranked: the grade is a per-person signal, not a leaderboard.
-  const byName = (a: GradeRow, b: GradeRow) => a.name.localeCompare(b.name);
-  return { month, weight_checklist: weight, ams: ams.sort(byName), accounts: accounts.sort(byName) };
 }
 
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
