@@ -152,7 +152,8 @@ export default function GmvPage() {
     setError(null);
     try {
       const { sync } = await api.syncGmv();
-      setNotice(sync.status === 'ok' ? `Synced ${sync.shops_synced} shops from Cruva.${sync.error_message ? ` Some failed: ${sync.error_message}` : ''}` : `Sync failed: ${sync.error_message}`);
+      const source = data?.windsor_configured && data?.cruva_configured ? 'Windsor and Cruva' : data?.windsor_configured ? 'Windsor' : 'Cruva';
+      setNotice(sync.status === 'ok' ? `Synced ${sync.shops_synced} shop(s) from ${source}.${sync.error_message ? ` Some failed: ${sync.error_message}` : ''}` : `Sync failed: ${sync.error_message}`);
       load();
     } catch (err) { setError((err as Error).message); } finally { setBusy(null); }
   };
@@ -181,7 +182,7 @@ export default function GmvPage() {
         <div>
           <h1>GMV</h1>
           <p className="hint" style={{ margin: 0 }}>
-            Sales per account and AM from Cruva, in each shop's market currency and totalled in {cur}. {running ? 'Month to date excludes today.' : ''} Bonus: {data ? `${data.settings.bonus_growth_below}% growth on last month under ${fmtMoney(data.settings.bonus_threshold, cur)}, ${data.settings.bonus_growth_above}% at or above.` : ''}{' '}
+            Sales per account and AM from {data?.windsor_configured ? 'Windsor.ai (TikTok Shop orders)' : 'Cruva'}, in each shop's market currency and totalled in {cur}. {running ? 'Month to date excludes today.' : ''} Bonus: {data ? `${data.settings.bonus_growth_below}% growth on last month under ${fmtMoney(data.settings.bonus_threshold, cur)}, ${data.settings.bonus_growth_above}% at or above.` : ''}{' '}
             <a href="#" onClick={(e) => { e.preventDefault(); setShowSettings((s) => !s); }}>{showSettings ? 'Hide rates' : 'Rates & rule'}</a>
           </p>
         </div>

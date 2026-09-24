@@ -1,7 +1,7 @@
 import { Queries } from '../db/queries.js';
 import { log } from '../logger.js';
 import { cruva, CruvaClient } from './cruva.js';
-import { syncWindsorGmv, windsor, WindsorClient } from './windsor.js';
+import { discoverWindsorShops, syncWindsorGmv, windsor, WindsorClient } from './windsor.js';
 import type { GmvSync } from '../sweep/types.js';
 
 let syncing = false;
@@ -38,12 +38,18 @@ export async function syncGmv(q: Queries, opts: { days?: number; client?: CruvaC
           errors.push(`${shop.shop_name}: ${(err as Error).message}`);
         }
       }
-    } else if (cruvaShops.length) errors.push(`${cruvaShops.length} Cruva shop(s) skipped: CRUVA_API_KEY is not set`);
-    if (wc.configured && windsorShops.length) {
-      const w = await syncWindsorGmv(q, { days: opts.days ?? 10, client: wc });
-      if (w.error) errors.push(`Windsor: ${w.error}`);
-      else synced += w.shops;
     }
+    // Cruva shops without the REST key are not a failure: the creator side comes in through the daily review routine.
+    if (wc.configured) {
+      // Newly appeared shops whose name matches an account get linked first, so a new client shows up without a click.
+      try { await discoverWindsorShops(q, wc); } catch (err) { log.warn(`Windsor discover before sync failed: ${(err as Error).message}`); }
+      const linked = q.listShops('windsor');
+      if (linked.length) {
+        const w = await syncWindsorGmv(q, { days: opts.days ?? 10, client: wc });
+        if (w.error) errors.push(`Windsor: ${w.error}`);
+        else synced += w.shops;
+      } else errors.push('Windsor: no shop is linked to an account (Connections › Windsor.ai shops)');
+    } else if (windsorShops.length) errors.push(`${windsorShops.length} Windsor shop(s) skipped: WINDSOR_API_KEY is not set`);
     const status = errors.length && synced === 0 ? 'error' : 'ok';
     const finished = q.finishGmvSync(sync.id, status, synced, errors.length ? errors.slice(0, 5).join(' | ') + (errors.length > 5 ? ` (+${errors.length - 5} more)` : '') : null);
     log.info(`GMV sync finished: ${synced} shops ok, ${errors.length} failed`);

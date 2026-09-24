@@ -16,9 +16,7 @@ function GradeTable({ rows, showAm }: { rows: GradeRow[]; showAm: boolean }) {
           <th>{showAm ? 'Account' : 'AM'}</th>
           {showAm && <th>AM</th>}
           <th>Grade</th>
-          <th className="num">Score</th>
           <th className="num">Checklist</th>
-          <th className="num hide-sm">Missed</th>
           <th className="num">GMV</th>
           <th className="num hide-sm">Target</th>
           <th className="num">GMV %</th>
@@ -30,9 +28,7 @@ function GradeTable({ rows, showAm }: { rows: GradeRow[]; showAm: boolean }) {
             <td><b>{r.name}</b></td>
             {showAm && <td className="sub">{r.am_name ?? ''}</td>}
             <td><GradeBadge grade={r.grade} /></td>
-            <td className="num">{r.score ?? '–'}</td>
             <td className="num"><span className={`frac ${r.compliance === null ? '' : r.compliance >= 100 ? 'ok' : r.compliance >= 80 ? 'warn-ink' : 'bad'}`}>{fmtPct(r.compliance)}</span><div className="sub">{r.checked_days} day{r.checked_days === 1 ? '' : 's'}</div></td>
-            <td className="num hide-sm">{r.missed || <span className="sub">0</span>}</td>
             <td className="num">{fmtMoney(r.gmv)}</td>
             <td className="num hide-sm">{fmtMoney(r.target)}</td>
             <td className="num"><span className={`frac ${r.attainment === null ? '' : r.attainment >= 100 ? 'ok' : r.attainment >= 80 ? 'warn-ink' : 'bad'}`}>{fmtPct(r.attainment)}</span></td>
@@ -69,7 +65,7 @@ function GradesSection() {
       <div className="page-head">
         <div>
           <h2 style={{ margin: 0 }}>Grades</h2>
-          <p className="hint" style={{ margin: 0 }}>Checklist compliance (target 100%) blended with GMV against the monthly target. GMV uses the projected month-end figure while the month is running.</p>
+          <p className="hint" style={{ margin: 0 }}>A letter per person and per account from checklist completion and GMV against target, listed alphabetically. GMV uses the projected month-end figure while the month is running.</p>
         </div>
         <div className="toolbar" style={{ margin: 0 }}>
           <button className="small" onClick={() => setMonth(shiftMonth(month, -1))}>‹</button>
@@ -85,7 +81,7 @@ function GradesSection() {
       {error && <div className="banner crit">{error}</div>}
       {data === null ? <p>Loading…</p> : (
         <>
-          <div className="legend"><span className="grade A">A</span> 90+ <span className="grade B">B</span> 80+ <span className="grade C">C</span> 70+ <span className="grade D">D</span> 60+ <span className="grade F">F</span> below 60 · score = {data.weight_checklist}% checklist + {100 - data.weight_checklist}% GMV attainment (capped at 100)</div>
+          <div className="legend"><span className="grade A">A</span> <span className="grade B">B</span> <span className="grade C">C</span> <span className="grade D">D</span> <span className="grade F">F</span> · {data.weight_checklist}% checklist, {100 - data.weight_checklist}% GMV attainment</div>
           <h2>Account managers</h2>
           <GradeTable rows={data.ams} showAm={false} />
           <h2>Accounts</h2>

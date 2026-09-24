@@ -1173,6 +1173,14 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 25,
+    name: 'Nutori on the roster (its four shops are the ones with sales on the Windsor connector)',
+    up(db) {
+      const exists = db.prepare(`SELECT id FROM accounts WHERE lower(name) = 'nutori'`).get();
+      if (!exists) db.prepare(`INSERT INTO accounts (name, markets, am_name, aa_name, enabled, notes, created_at, updated_at) VALUES ('Nutori', 'ES/FR/IE/IT', NULL, NULL, 1, 'Added automatically: the Windsor connector carries Nutori España, France, Ireland and Italia. Set the AM.', datetime('now'), datetime('now'))`).run();
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

@@ -43,19 +43,21 @@ describe('windsor', () => {
     const clearly = q.listAccounts().find((a) => a.name === 'Clearly')!;
     const d = await discoverWindsorShops(q, fake);
     expect(d.shops).toHaveLength(2);
-    expect(d.linked).toBe(1); // Clearly is on the roster, Nutori is not
+    expect(d.linked).toBe(2); // Clearly and Nutori are both on the roster
     const linked = q.listShops('windsor');
-    expect(linked).toHaveLength(1);
-    expect(linked[0].account_id).toBe(clearly.id);
-    expect(linked[0].currency).toBe('EUR');
-    expect(linked[0].source).toBe('windsor');
+    expect(linked).toHaveLength(2);
+    const es = linked.find((s) => s.shop_id === 'DEESLCN8QWCV')!;
+    expect(es.account_id).toBe(clearly.id);
+    expect(es.currency).toBe('EUR');
+    expect(es.source).toBe('windsor');
+    const nutori = q.listAccounts().find((a) => a.name === 'Nutori')!;
+    expect(linked.find((s) => s.shop_id === 'DEITLCCTQLXS')!.account_id).toBe(nutori.id);
     const r = await syncWindsorGmv(q, { days: 5, client: fake });
     expect(r.error).toBeNull();
-    expect(r.shops).toBe(1);
+    expect(r.shops).toBe(2);
     const gmv = q.listGmvBetween(daysAgo(5), today);
     expect(gmv.find((g) => g.shop_id === 'DEESLCN8QWCV' && g.date === daysAgo(2))!.total_gmv).toBe(50);
-    // Nutori was not linked, so nothing is written for it.
-    expect(gmv.some((g) => g.shop_id === 'DEITLCCTQLXS')).toBe(false);
+    expect(gmv.find((g) => g.shop_id === 'DEITLCCTQLXS' && g.date === daysAgo(1))!.total_gmv).toBe(40);
     // The GMV page shows the shop under Clearly with a source id, not a Cruva id.
     const page = buildGmv(q, today.slice(0, 7));
     const row = page.accounts.find((a) => a.account.id === clearly.id)!;
@@ -78,8 +80,8 @@ describe('windsor', () => {
     expect(found.map((s) => s.account_id).sort()).toEqual(['DEESLCN8QWCV', 'DEFRLCN8QWCN', 'DEITLCCTQLXS']);
     expect(found.find((s) => s.account_id === 'DEFRLCN8QWCN')!.shop_region).toBe('FR');
     const d = await discoverWindsorShops(q, c);
-    expect(d.linked).toBe(2); // both Clearly shops link to the Clearly account
-    expect(q.listShops('windsor').map((s) => s.currency)).toEqual(['EUR', 'EUR']);
+    expect(d.linked).toBe(3); // both Clearly shops link to Clearly, Nutori Italia to Nutori
+    expect(q.listShops('windsor').filter((s) => s.account_id === q.listAccounts().find((a) => a.name === 'Clearly')!.id)).toHaveLength(2);
   });
 
   it('the combined sync runs Windsor even when Cruva is not configured', async () => {
@@ -88,6 +90,8 @@ describe('windsor', () => {
     const noCruva = { configured: false } as unknown as CruvaClient;
     const s = await syncGmv(q, { days: 5, client: noCruva, windsorClient: fake });
     expect(s?.status).toBe('ok');
-    expect(s?.shops_synced).toBe(1);
+    expect(s?.shops_synced).toBe(2);
+    // Cruva shops without the REST key are not reported as failures any more.
+    expect(s?.error_message).toBeNull();
   });
 });

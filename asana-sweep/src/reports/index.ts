@@ -356,8 +356,9 @@ export function buildGrades(q: Queries, month: string): GradesData {
     };
   });
 
-  const byScore = (a: GradeRow, b: GradeRow) => (b.score ?? -1) - (a.score ?? -1) || a.name.localeCompare(b.name);
-  return { month, weight_checklist: weight, ams: ams.sort(byScore), accounts: accounts.sort(byScore) };
+  // Alphabetical, not ranked: the grade is a per-person signal, not a leaderboard.
+  const byName = (a: GradeRow, b: GradeRow) => a.name.localeCompare(b.name);
+  return { month, weight_checklist: weight, ams: ams.sort(byName), accounts: accounts.sort(byName) };
 }
 
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);

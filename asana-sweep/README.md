@@ -111,10 +111,9 @@ Shops report in their market currency (UK → GBP, PL → PLN, everything else E
 
 ### Grades
 
-Analytics page, top section. Each account and AM gets a score out of 100 and a letter:
+Grades are a letter per person and per account (A to F), listed alphabetically with the checklist % and the GMV attainment % behind them. No numeric score column and no ranking: the letter is a signal for the person, not a leaderboard.
 
-- score = checklist weight × compliance + (100 − weight) × GMV attainment, with attainment capped at 100. Default weight 50/50, adjustable on the page.
-- A 90+, B 80+, C 70+, D 60+, F below.
+Analytics page, top section. Behind the letter: checklist weight × compliance + (100 − weight) × GMV attainment, attainment capped at 100, default weight 50/50 (adjustable on the page); A 90+, B 80+, C 70+, D 60+, F below.
 - During the running month GMV attainment uses the projected month-end figure so mid-month grades are fair. If an account has no target, it is graded on checklist alone.
 
 ## Look and feel
