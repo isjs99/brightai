@@ -49,17 +49,44 @@ TikTok (and Google) must reach the dashboard over https to complete an authorisa
 
 ## Hosting it for the team
 
-The app is one Node process plus a SQLite file, so any host that runs a Docker container with a persistent volume works. The easiest is Railway (about $5 a month):
+The app is one Node process plus a SQLite file, so any host that runs a Docker container with a persistent volume works. Running it on a laptop means it is down whenever the laptop sleeps, so for the team it lives on Fly.io (about €5 a month), which also lets you copy the existing database across with one command. Everything below is copy-paste from the `asana-sweep` folder on the machine that has the current `.env` and `data/sweep.db`.
 
-1. Push this repo to GitHub (it already is). In Railway: New project › Deploy from GitHub repo › pick `brightai`.
-2. In the service settings set **Root Directory** to `asana-sweep`. Railway picks up the Dockerfile and `railway.json`.
-3. Add a **Volume** and mount it at `/data`.
-4. Under **Variables** add `DASHBOARD_PASSWORD`, `PUBLIC_URL` (the Railway URL, e.g. `https://am-ops.up.railway.app`), and optionally `SLACK_BOT_TOKEN`, `CRUVA_API_KEY`. `PORT` and `DATABASE_PATH` are already set by the Dockerfile.
-5. Deploy. Open the URL, sign in with the password, and the daily lock and reminders run on their own.
+1. Install the Fly CLI and sign in (creates an account on first use; a card is asked for, the app costs a few euros a month):
+   ```bash
+   brew install flyctl
+   fly auth login
+   ```
+2. Create the app from the included `fly.toml` (say yes to copying the configuration, pick a name if the default is taken, do not deploy yet) and its volume in Amsterdam:
+   ```bash
+   fly launch --copy-config --no-deploy
+   fly volumes create sweep_data --size 1 --region ams --yes
+   ```
+3. Secrets: every line of `.env` except the two the container sets itself. `PUBLIC_URL` must already be the public address (`https://ops.brightform.agency`).
+   ```bash
+   grep -Ev '^(#|$|PORT=|DATABASE_PATH=)' .env | fly secrets import
+   ```
+4. Deploy, then confirm it answers:
+   ```bash
+   fly deploy
+   fly status
+   ```
+5. Copy the database from the laptop. Stop the local app first (Ctrl+C in its tab) so the file is consistent, then:
+   ```bash
+   sqlite3 data/sweep.db ".backup data/sweep-copy.db"
+   fly sftp put data/sweep-copy.db /data/sweep-import.db
+   fly ssh console -C "mv /data/sweep-import.db /data/sweep.db"
+   fly machine restart --select
+   ```
+   The `data/bd-pulls` folder is not needed on the server: the FastMoss pull runs from the API when the key is set.
+6. Point the domain at Fly. In Cloudflare › DNS delete the `ops` Tunnel record and add a CNAME `ops` → `<app-name>.fly.dev` with proxy **off** (DNS only), then let Fly issue the certificate:
+   ```bash
+   fly certs add ops.brightform.agency
+   ```
+   A minute later https://ops.brightform.agency serves from Fly. The Cloudflare tunnel on the laptop can then be removed with `sudo ~/Downloads/cloudflared service uninstall`.
 
-Fly.io works the same way with the included `fly.toml` (see the comments at the top of that file). A plain VPS works with `docker compose up -d` behind nginx or Caddy for https.
+Day to day: `fly logs` shows the server log, `fly ssh console` opens a shell, and a new version is `git pull && fly deploy` from any machine with the CLI (the database stays on the volume across deploys). Railway works too with the included `railway.json` (Root Directory `asana-sweep`, a volume at `/data`, variables from `.env`), but it has no simple way to upload the existing database. A plain VPS works with `docker compose up -d` behind Caddy for https.
 
-Use a long password. Set `PUBLIC_URL` to the https address so the login cookie is marked secure. Failed logins are rate limited (10 tries, then 15 minutes). If you later want per-person logins, the auth layer in `src/web/auth.ts` is designed to be swapped.
+Use a long password. `PUBLIC_URL` must be the https address so the login cookie is marked secure. Failed logins are rate limited (10 tries, then 15 minutes). If you later want per-person logins, the auth layer in `src/web/auth.ts` is designed to be swapped.
 
 ## Daily lock (16:00 every workday)
 
