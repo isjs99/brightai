@@ -217,7 +217,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
       ...(inq.language ? [`Site language: ${inq.language.toUpperCase()}`] : []),
       ...(inq.page ? [`Page: ${inq.page}`] : []),
       '',
-      isCall ? 'What they want to talk about:' : 'Message:',
+      isCall ? 'Their details:' : 'Message:',
       inq.message,
       '',
       `Reply to this email and it goes straight to ${inq.email}.`,
@@ -253,7 +253,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (slackBot.configured && channel) {
       try {
         const head = kind === 'call' ? `:telephone_receiver: *Call request* from *${name}*` : `:incoming_envelope: *New website enquiry* from *${name}*`;
-        const text = [`${head}${brand ? ` (${brand})` : ''}`, `*Email:* ${email}`, ...(phone ? [`*Phone:* ${phone}`] : []), ...(preferred_time ? [`*Preferred time:* ${preferred_time}`] : []), `*${kind === 'call' ? 'Wants to discuss' : 'Message'}:* ${message.slice(0, 1500)}`, `<${config.publicUrl}/inquiries|Open in the dashboard>`].join('\n');
+        const text = [`${head}${brand ? ` (${brand})` : ''}`, `*Email:* ${email}`, ...(phone ? [`*Phone:* ${phone}`] : []), ...(preferred_time ? [`*Preferred time:* ${preferred_time}`] : []), `*${kind === 'call' ? 'Details' : 'Message'}:*\n${message.slice(0, 1500)}`, `<${config.publicUrl}/inquiries|Open in the dashboard>`].join('\n');
         const posted = await slackBot.post(await slackBot.channelId(channel), text);
         q.updateInquiry(inquiry.id, { slack_ts: posted.ts });
       } catch (err) { log.warn(`Website enquiry Slack post failed: ${(err as Error).message}`); }
@@ -1951,7 +1951,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
       try {
         body = await draftWithClaude(
           isCall
-            ? 'You write short replies to people who asked for a call through the website of Brightform, a TikTok Shop Partner agency in the EU. British English, warm but plain, no hype, no exclamation marks, under 110 words. Acknowledge what they want to discuss specifically, say one relevant thing Brightform does for brands like theirs, and propose two concrete slots that match their preferred time, written as placeholders like [Tue 10:00 CET] for the sender to fill in. No booking links. Sign off with the sender name given. Output the email body only, no subject.'
+            ? 'You write short replies to people who asked for a call through the website of Brightform, a TikTok Shop Partner agency in the EU. British English, warm but plain, no hype, no exclamation marks, under 110 words. Acknowledge their brand and situation specifically from the details given (category, markets, whether they already sell on TikTok Shop), say one relevant thing Brightform does for brands like theirs, and propose two concrete slots that match their preferred time, written as placeholders like [Tue 10:00 CET] for the sender to fill in. No booking links. Sign off with the sender name given. Output the email body only, no subject.'
             : 'You write short replies to inbound enquiries for Brightform, a TikTok Shop Partner agency in the EU. British English, warm but plain, no hype, no exclamation marks, under 120 words. Acknowledge what they wrote specifically, say one relevant thing Brightform does for brands like theirs, and propose a short call with this link: https://calendly.com/isaacsinclair/brightform-2026-website-call. Sign off with the sender name given. Output the email body only, no subject.',
           `${isCall ? 'Call request' : 'Enquiry'} from ${inq.name}${inq.brand ? ` at ${inq.brand}` : ''} (${inq.email})${inq.language ? `, site language ${inq.language}` : ''}${inq.preferred_time ? `, preferred time: ${inq.preferred_time}` : ''}:\n\n${inq.message}\n\nSender name: ${actor}`,
           { maxTokens: 400 },
