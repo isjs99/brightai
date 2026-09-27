@@ -245,7 +245,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (optText(b.website)) return res.status(201).json({ ok: true });
     if (!name || !message || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Name, a valid email and a message are required.' });
     if (q.recentInquiryFrom(email, 2)) return res.status(201).json({ ok: true, duplicate: true });
-    const inquiry = q.createInquiry({ kind, name, email, brand, message, phone, preferred_time, language: optText(b.language)?.slice(0, 8) ?? null, page: optText(b.page)?.slice(0, 200) ?? null, ip });
+    const inquiry = q.createInquiry({ kind, name, email, brand, message, phone, preferred_time, language: optText(b.language)?.slice(0, 8) ?? null, page: optText(b.page)?.slice(0, 200) ?? null, gclid: optText(b.gclid)?.slice(0, 200) ?? null, ip });
     liveEvents.emitUpdate({ kind: 'inquiries' });
     // The visitor gets their answer now; Slack and the email forward follow without holding the form up.
     res.status(201).json({ ok: true });

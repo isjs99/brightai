@@ -1218,6 +1218,13 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 28,
+    name: 'website enquiries: Google Ads click id, for offline conversion import',
+    up(db) {
+      db.exec(`ALTER TABLE site_inquiries ADD COLUMN gclid TEXT;`);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

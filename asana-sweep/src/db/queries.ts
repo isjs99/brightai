@@ -1381,11 +1381,11 @@ export class Queries {
   // ---- Website enquiries ----
 
   private rowToInquiry(r: Row): SiteInquiry {
-    return { id: r.id as number, kind: (r.kind === 'call' ? 'call' : 'contact'), name: r.name as string, email: r.email as string, brand: (r.brand as string | null) ?? null, message: r.message as string, phone: (r.phone as string | null) ?? null, preferred_time: (r.preferred_time as string | null) ?? null, language: (r.language as string | null) ?? null, page: (r.page as string | null) ?? null, status: r.status as SiteInquiry['status'], assigned_to: (r.assigned_to as string | null) ?? null, note: (r.note as string | null) ?? null, slack_ts: (r.slack_ts as string | null) ?? null, replied_at: (r.replied_at as string | null) ?? null, forwarded_at: (r.forwarded_at as string | null) ?? null, created_at: r.created_at as string };
+    return { id: r.id as number, kind: (r.kind === 'call' ? 'call' : 'contact'), name: r.name as string, email: r.email as string, brand: (r.brand as string | null) ?? null, message: r.message as string, phone: (r.phone as string | null) ?? null, preferred_time: (r.preferred_time as string | null) ?? null, language: (r.language as string | null) ?? null, page: (r.page as string | null) ?? null, gclid: (r.gclid as string | null) ?? null, status: r.status as SiteInquiry['status'], assigned_to: (r.assigned_to as string | null) ?? null, note: (r.note as string | null) ?? null, slack_ts: (r.slack_ts as string | null) ?? null, replied_at: (r.replied_at as string | null) ?? null, forwarded_at: (r.forwarded_at as string | null) ?? null, created_at: r.created_at as string };
   }
 
-  createInquiry(i: { kind?: SiteInquiry['kind']; name: string; email: string; brand?: string | null; message: string; phone?: string | null; preferred_time?: string | null; language?: string | null; page?: string | null; ip?: string | null }): SiteInquiry {
-    const res = this.db.prepare('INSERT INTO site_inquiries (kind, name, email, brand, message, phone, preferred_time, language, page, ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(i.kind ?? 'contact', i.name, i.email, i.brand ?? null, i.message, i.phone ?? null, i.preferred_time ?? null, i.language ?? null, i.page ?? null, i.ip ?? null);
+  createInquiry(i: { kind?: SiteInquiry['kind']; name: string; email: string; brand?: string | null; message: string; phone?: string | null; preferred_time?: string | null; language?: string | null; page?: string | null; gclid?: string | null; ip?: string | null }): SiteInquiry {
+    const res = this.db.prepare('INSERT INTO site_inquiries (kind, name, email, brand, message, phone, preferred_time, language, page, gclid, ip) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(i.kind ?? 'contact', i.name, i.email, i.brand ?? null, i.message, i.phone ?? null, i.preferred_time ?? null, i.language ?? null, i.page ?? null, i.gclid ?? null, i.ip ?? null);
     return this.getInquiry(Number(res.lastInsertRowid))!;
   }
 

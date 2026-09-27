@@ -1267,6 +1267,8 @@ export interface SiteInquiry {
   preferred_time: string | null;
   language: string | null;
   page: string | null;
+  /** Google Ads click id the visitor arrived with (from the site), so qualified leads can be imported as offline conversions. */
+  gclid: string | null;
   status: InquiryStatus;
   assigned_to: string | null;
   note: string | null;
