@@ -1249,6 +1249,35 @@ export interface StockData {
   tts_configured: boolean;
 }
 
+// ---- Website enquiries (brightform.agency contact form) ----
+
+export type InquiryStatus = 'new' | 'replied' | 'qualified' | 'closed';
+
+export interface SiteInquiry {
+  id: number;
+  name: string;
+  email: string;
+  brand: string | null;
+  message: string;
+  language: string | null;
+  page: string | null;
+  status: InquiryStatus;
+  assigned_to: string | null;
+  note: string | null;
+  slack_ts: string | null;
+  replied_at: string | null;
+  created_at: string;
+}
+
+export interface InquiriesData {
+  inquiries: SiteInquiry[];
+  people: Person[];
+  slack_channel: string;
+  slack_configured: boolean;
+  gmail_connected: boolean;
+  origins: string[];
+}
+
 // ---- Incidents (instant issue alerts to Slack) ----
 
 export type IncidentSeverity = 'crit' | 'warn' | 'info';

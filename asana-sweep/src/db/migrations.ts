@@ -1181,6 +1181,31 @@ const migrations: Migration[] = [
       if (!exists) db.prepare(`INSERT INTO accounts (name, markets, am_name, aa_name, enabled, notes, created_at, updated_at) VALUES ('Nutori', 'ES/FR/IE/IT', NULL, NULL, 1, 'Added automatically: the Windsor connector carries Nutori España, France, Ireland and Italia. Set the AM.', datetime('now'), datetime('now'))`).run();
     },
   },
+  {
+    version: 26,
+    name: 'website enquiries (the brightform.agency contact form posts here)',
+    up(db) {
+      db.exec(`
+        CREATE TABLE site_inquiries (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          email TEXT NOT NULL,
+          brand TEXT,
+          message TEXT NOT NULL,
+          language TEXT,
+          page TEXT,
+          ip TEXT,
+          status TEXT NOT NULL DEFAULT 'new',
+          assigned_to TEXT,
+          note TEXT,
+          slack_ts TEXT,
+          replied_at TEXT,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+        CREATE INDEX site_inquiries_status ON site_inquiries(status, created_at);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

@@ -14,6 +14,7 @@ import type {
   TtsContact,
   BdActivity,
   MonitorData,
+  InquiriesData,
   HealthSummary,
   HealthThresholds,
   GmvExplore,
@@ -307,6 +308,11 @@ export const api = {
   dismissAlert: (id: number) => call<OutreachData>('POST', `/bd/alerts/${id}/dismiss`),
   bdActivity: (days: number) => call<BdActivity>('GET', `/bd/activity?days=${days}`),
   checkCalls: () => call<OutreachData & { checked: number; drafted: number; errors: string[] }>('POST', '/outreach/calls/check'),
+  // Website enquiries
+  inquiries: () => call<InquiriesData>('GET', '/inquiries'),
+  updateInquiry: (id: number, patch: { status?: string; assigned_to?: string | null; note?: string | null }) => call<InquiriesData>('PUT', `/inquiries/${id}`, patch),
+  inquirySettings: (s: { slack_channel?: string; origins?: string }) => call<InquiriesData>('PUT', '/inquiries/settings', s),
+  draftInquiryReply: (id: number, actor?: string | null) => call<InquiriesData & { draft: { draft_id: string; message_id: string; url: string } }>('POST', `/inquiries/${id}/draft`, { actor }),
   // Account monitor
   monitor: () => call<MonitorData>('GET', '/monitor'),
   monitorScan: () => call<MonitorData & { opened: number; resolved: number; found: number }>('POST', '/monitor/scan'),

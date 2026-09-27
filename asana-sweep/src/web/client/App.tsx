@@ -15,6 +15,7 @@ import LeadsPage from './pages/Leads';
 import BdPage from './pages/Bd';
 import InboxPage from './pages/Inbox';
 import OutreachPage from './pages/Outreach';
+import InquiriesPage from './pages/Inquiries';
 import MonitorPage from './pages/Monitor';
 import StockPage from './pages/Stock';
 import ReportsPage from './pages/Reports';
@@ -121,6 +122,7 @@ const NAV: { section: string; items: { to: string; label: string; end?: boolean 
       { to: '/leads', label: 'Leads' },
       { to: '/bd', label: 'BD pipeline' },
       { to: '/outreach', label: 'Outreach emails' },
+      { to: '/inquiries', label: 'Website enquiries' },
     ],
   },
   {
@@ -228,6 +230,7 @@ export default function App() {
               <Route path="/leads" element={<LeadsPage />} />
               <Route path="/bd" element={<BdPage />} />
               <Route path="/outreach" element={<OutreachPage />} />
+              <Route path="/inquiries" element={<InquiriesPage />} />
               <Route path="/monitor" element={<MonitorPage />} />
               <Route path="/stock" element={<StockPage />} />
               <Route path="/reports" element={<ReportsPage />} />

@@ -12,7 +12,7 @@ import { buildCalendar, buildGmv, buildGmvExplore } from '../reports/index.js';
 import { syncGmv } from '../gmv/sync.js';
 import { cruva } from '../gmv/cruva.js';
 import { discoverWindsorShops, syncWindsorGmv, windsor, windsorStatus } from '../gmv/windsor.js';
-import type { WindsorStatus } from '../sweep/types.js';
+import type { WindsorStatus, InquiriesData, SiteInquiry } from '../sweep/types.js';
 import { currencyForShop } from '../gmv/currency.js';
 import { authorizationUrl, tts } from '../tts/client.js';
 import { deactivatePromotion, pushPromotion, shopCredentials, syncPromotion } from '../tts/promotions.js';
@@ -180,6 +180,49 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     // The rules run straight away so the flags and Slack alerts follow the routine's numbers without waiting for the next scan.
     const scan = await scheduler.monitor.scan();
     res.json({ ...result, scan });
+  });
+
+  // ---- Website contact form: brightform.agency posts here; no session, CORS for the site's origins, rate limited ----
+  const siteOrigins = (): string[] => (q.getSetting('site_origins', '') || 'https://brightform.agency,https://www.brightform.agency').split(',').map((o) => o.trim()).filter(Boolean);
+  const contactCors = (req: Request, res: Response): boolean => {
+    const origin = String(req.headers.origin ?? '');
+    const allowed = siteOrigins();
+    const ok = !origin || allowed.includes(origin) || /^https:\/\/[a-z0-9-]+\.(lovable\.app|lovableproject\.com|pages\.dev)$/.test(origin) || /^http:\/\/localhost(:\d+)?$/.test(origin);
+    if (origin && ok) { res.setHeader('Access-Control-Allow-Origin', origin); res.setHeader('Vary', 'Origin'); }
+    res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Max-Age', '600');
+    return ok;
+  };
+  const contactHits = new Map<string, { count: number; until: number }>();
+  r.options('/site/contact', (req, res) => { contactCors(req, res); res.status(204).end(); });
+  r.post('/site/contact', async (req, res) => {
+    if (!contactCors(req, res)) return res.status(403).json({ error: 'Origin not allowed' });
+    const ip = req.ip ?? 'unknown';
+    const now = Date.now();
+    const h = contactHits.get(ip);
+    if (h && h.until > now && h.count >= 5) return res.status(429).json({ error: 'Too many messages from this network. Email us instead.' });
+    contactHits.set(ip, h && h.until > now ? { count: h.count + 1, until: h.until } : { count: 1, until: now + 3600000 });
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const name = String(b.name ?? '').trim().slice(0, 100);
+    const email = String(b.email ?? '').trim().slice(0, 255);
+    const brand = optText(b.brand)?.slice(0, 150) ?? null;
+    const message = String(b.message ?? '').trim().slice(0, 2000);
+    // Honeypot: real people leave the hidden field empty.
+    if (optText(b.website)) return res.status(201).json({ ok: true });
+    if (!name || !message || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Name, a valid email and a message are required.' });
+    if (q.recentInquiryFrom(email, 2)) return res.status(201).json({ ok: true, duplicate: true });
+    const inquiry = q.createInquiry({ name, email, brand, message, language: optText(b.language)?.slice(0, 8) ?? null, page: optText(b.page)?.slice(0, 200) ?? null, ip });
+    liveEvents.emitUpdate({ kind: 'inquiries' });
+    const channel = q.getSetting('site_inquiries_channel', '') || q.getSetting('incidents_default_channel', '');
+    if (slackBot.configured && channel) {
+      try {
+        const text = [`:incoming_envelope: *New website enquiry* from *${name}*${brand ? ` (${brand})` : ''}`, `*Email:* ${email}`, `*Message:* ${message.slice(0, 1500)}`, `<${config.publicUrl}/inquiries|Open in the dashboard>`].join('\n');
+        const posted = await slackBot.post(await slackBot.channelId(channel), text);
+        q.updateInquiry(inquiry.id, { slack_ts: posted.ts });
+      } catch (err) { log.warn(`Website enquiry Slack post failed: ${(err as Error).message}`); }
+    }
+    res.status(201).json({ ok: true });
   });
 
   // ---- Everything below needs a session ----
@@ -1813,6 +1856,54 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (!config.anthropicApiKey) throw new HttpError(400, 'Set ANTHROPIC_API_KEY in .env first; call follow-ups are written by Claude.');
     const r = await draftCallFollowups(q, { gmail });
     res.json({ ...r, ...outreachData() });
+  });
+
+  // ---- Website enquiries ----
+  const inquiriesData = (): InquiriesData => ({ inquiries: q.listInquiries(), people: q.listPeople(), slack_channel: q.getSetting('site_inquiries_channel', '') || q.getSetting('incidents_default_channel', ''), slack_configured: slackBot.configured, gmail_connected: gmail.connected, origins: siteOrigins() });
+  r.get('/inquiries', (_req, res) => res.json(inquiriesData()));
+  r.put('/inquiries/settings', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    if (b.slack_channel !== undefined) q.setSetting('site_inquiries_channel', String(b.slack_channel ?? '').trim());
+    if (b.origins !== undefined) q.setSetting('site_origins', String(b.origins ?? '').split(',').map((o) => o.trim()).filter(Boolean).join(','));
+    res.json(inquiriesData());
+  });
+  r.put('/inquiries/:id', (req, res) => {
+    const inq = q.getInquiry(idParam(req));
+    if (!inq) throw new HttpError(404, 'Enquiry not found');
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const patch: Partial<Pick<SiteInquiry, 'status' | 'assigned_to' | 'note' | 'replied_at'>> = {};
+    if (b.status !== undefined) {
+      const st = String(b.status);
+      if (!['new', 'replied', 'qualified', 'closed'].includes(st)) throw new HttpError(400, 'Bad status');
+      patch.status = st as SiteInquiry['status'];
+      if (st === 'replied' && !inq.replied_at) patch.replied_at = new Date().toISOString();
+    }
+    if (b.assigned_to !== undefined) patch.assigned_to = optText(b.assigned_to);
+    if (b.note !== undefined) patch.note = optText(b.note);
+    q.updateInquiry(inq.id, patch);
+    liveEvents.emitUpdate({ kind: 'inquiries' });
+    res.json(inquiriesData());
+  });
+  /** A Gmail draft replying to the enquiry, in the site's voice, ready to edit and send. */
+  r.post('/inquiries/:id/draft', async (req, res) => {
+    const inq = q.getInquiry(idParam(req));
+    if (!inq) throw new HttpError(404, 'Enquiry not found');
+    if (!gmail.connected) throw new HttpError(400, 'Connect Gmail on the BD pipeline page first.');
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const actor = optText(b.actor) ?? 'the Brightform team';
+    const first = inq.name.split(/\s+/)[0];
+    let body = `Hi ${first},\n\nThanks for getting in touch${inq.brand ? ` about ${inq.brand}` : ''}. \n\n[Reply here]\n\nThe quickest next step is a short call: https://calendly.com/isaacsinclair/brightform-2026-website-call\n\nBest,\n${actor}\nBrightform`;
+    if (config.anthropicApiKey) {
+      try {
+        body = await draftWithClaude(
+          'You write short replies to inbound enquiries for Brightform, a TikTok Shop Partner agency in the EU. British English, warm but plain, no hype, no exclamation marks, under 120 words. Acknowledge what they wrote specifically, say one relevant thing Brightform does for brands like theirs, and propose a short call with this link: https://calendly.com/isaacsinclair/brightform-2026-website-call. Sign off with the sender name given. Output the email body only, no subject.',
+          `Enquiry from ${inq.name}${inq.brand ? ` at ${inq.brand}` : ''} (${inq.email})${inq.language ? `, site language ${inq.language}` : ''}:\n\n${inq.message}\n\nSender name: ${actor}`,
+          { maxTokens: 400 },
+        );
+      } catch (err) { log.warn(`Enquiry draft via Claude failed, using the template: ${(err as Error).message}`); }
+    }
+    const draft = await gmail.createDraft({ to: inq.email, toName: inq.name, subject: `Re: your message to Brightform${inq.brand ? ` (${inq.brand})` : ''}`, body });
+    res.json({ draft, ...inquiriesData() });
   });
 
   // ---- Account monitor ----
