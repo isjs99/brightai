@@ -1252,13 +1252,19 @@ export interface StockData {
 // ---- Website enquiries (brightform.agency contact form) ----
 
 export type InquiryStatus = 'new' | 'replied' | 'qualified' | 'closed';
+/** "contact" is the message form, "call" the book-a-call request (the site's calendar link was replaced by a form). */
+export type InquiryKind = 'contact' | 'call';
 
 export interface SiteInquiry {
   id: number;
+  kind: InquiryKind;
   name: string;
   email: string;
   brand: string | null;
   message: string;
+  phone: string | null;
+  /** Free text from the call form, e.g. "morning: Mornings (9–12 CET)". */
+  preferred_time: string | null;
   language: string | null;
   page: string | null;
   status: InquiryStatus;
@@ -1266,6 +1272,8 @@ export interface SiteInquiry {
   note: string | null;
   slack_ts: string | null;
   replied_at: string | null;
+  /** When the enquiry was emailed to the team's inbox (null when Gmail was not connected or the send failed). */
+  forwarded_at: string | null;
   created_at: string;
 }
 
@@ -1275,6 +1283,9 @@ export interface InquiriesData {
   slack_channel: string;
   slack_configured: boolean;
   gmail_connected: boolean;
+  gmail_email: string | null;
+  /** Where every enquiry is forwarded by email; empty switches the forward off. */
+  forward_to: string;
   origins: string[];
 }
 

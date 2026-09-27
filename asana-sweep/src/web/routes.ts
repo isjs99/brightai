@@ -196,6 +196,36 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   };
   const contactHits = new Map<string, { count: number; until: number }>();
   r.options('/site/contact', (req, res) => { contactCors(req, res); res.status(204).end(); });
+  /** Default inbox for the email forward; an empty setting switches the forward off. */
+  const FORWARD_DEFAULT = 'isaac@brightform.agency';
+  const forwardTo = (): string => q.getSetting('site_inquiries_email', FORWARD_DEFAULT).trim();
+  /** Emails the enquiry to the team's inbox from the connected Gmail account, with Reply-To set to the enquirer. */
+  const forwardInquiry = async (inq: SiteInquiry): Promise<SiteInquiry> => {
+    const to = forwardTo();
+    if (!to) throw new HttpError(400, 'No forwarding address set (Website enquiries › Settings).');
+    if (!gmail.connected) throw new HttpError(400, 'Connect Gmail on the Outreach emails page first; the forward is sent from that account.');
+    const isCall = inq.kind === 'call';
+    const who = `${inq.name}${inq.brand ? ` (${inq.brand})` : ''}`;
+    const lines = [
+      isCall ? `${inq.name} asked for a call through brightform.agency.` : `${inq.name} sent a message through brightform.agency.`,
+      '',
+      `Name: ${inq.name}`,
+      `Email: ${inq.email}`,
+      ...(inq.brand ? [`Brand / company: ${inq.brand}`] : []),
+      ...(inq.phone ? [`Phone: ${inq.phone}`] : []),
+      ...(inq.preferred_time ? [`Preferred time: ${inq.preferred_time}`] : []),
+      ...(inq.language ? [`Site language: ${inq.language.toUpperCase()}`] : []),
+      ...(inq.page ? [`Page: ${inq.page}`] : []),
+      '',
+      isCall ? 'What they want to talk about:' : 'Message:',
+      inq.message,
+      '',
+      `Reply to this email and it goes straight to ${inq.email}.`,
+      `Dashboard: ${config.publicUrl}/inquiries`,
+    ];
+    await gmail.sendMessage({ to, replyTo: inq.email, replyToName: inq.name, subject: isCall ? `Call request: ${who}` : `Website enquiry: ${who}`, body: lines.join('\n') });
+    return q.updateInquiry(inq.id, { forwarded_at: new Date().toISOString() }) ?? inq;
+  };
   r.post('/site/contact', async (req, res) => {
     if (!contactCors(req, res)) return res.status(403).json({ error: 'Origin not allowed' });
     const ip = req.ip ?? 'unknown';
@@ -204,25 +234,33 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (h && h.until > now && h.count >= 5) return res.status(429).json({ error: 'Too many messages from this network. Email us instead.' });
     contactHits.set(ip, h && h.until > now ? { count: h.count + 1, until: h.until } : { count: 1, until: now + 3600000 });
     const b = (req.body ?? {}) as Record<string, unknown>;
+    const kind: SiteInquiry['kind'] = b.kind === 'call' ? 'call' : 'contact';
     const name = String(b.name ?? '').trim().slice(0, 100);
     const email = String(b.email ?? '').trim().slice(0, 255);
     const brand = optText(b.brand)?.slice(0, 150) ?? null;
+    const phone = optText(b.phone)?.slice(0, 40) ?? null;
+    const preferred_time = optText(b.preferred_time)?.slice(0, 80) ?? null;
     const message = String(b.message ?? '').trim().slice(0, 2000);
     // Honeypot: real people leave the hidden field empty.
     if (optText(b.website)) return res.status(201).json({ ok: true });
     if (!name || !message || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Name, a valid email and a message are required.' });
     if (q.recentInquiryFrom(email, 2)) return res.status(201).json({ ok: true, duplicate: true });
-    const inquiry = q.createInquiry({ name, email, brand, message, language: optText(b.language)?.slice(0, 8) ?? null, page: optText(b.page)?.slice(0, 200) ?? null, ip });
+    const inquiry = q.createInquiry({ kind, name, email, brand, message, phone, preferred_time, language: optText(b.language)?.slice(0, 8) ?? null, page: optText(b.page)?.slice(0, 200) ?? null, ip });
     liveEvents.emitUpdate({ kind: 'inquiries' });
+    // The visitor gets their answer now; Slack and the email forward follow without holding the form up.
+    res.status(201).json({ ok: true });
     const channel = q.getSetting('site_inquiries_channel', '') || q.getSetting('incidents_default_channel', '');
     if (slackBot.configured && channel) {
       try {
-        const text = [`:incoming_envelope: *New website enquiry* from *${name}*${brand ? ` (${brand})` : ''}`, `*Email:* ${email}`, `*Message:* ${message.slice(0, 1500)}`, `<${config.publicUrl}/inquiries|Open in the dashboard>`].join('\n');
+        const head = kind === 'call' ? `:telephone_receiver: *Call request* from *${name}*` : `:incoming_envelope: *New website enquiry* from *${name}*`;
+        const text = [`${head}${brand ? ` (${brand})` : ''}`, `*Email:* ${email}`, ...(phone ? [`*Phone:* ${phone}`] : []), ...(preferred_time ? [`*Preferred time:* ${preferred_time}`] : []), `*${kind === 'call' ? 'Wants to discuss' : 'Message'}:* ${message.slice(0, 1500)}`, `<${config.publicUrl}/inquiries|Open in the dashboard>`].join('\n');
         const posted = await slackBot.post(await slackBot.channelId(channel), text);
         q.updateInquiry(inquiry.id, { slack_ts: posted.ts });
       } catch (err) { log.warn(`Website enquiry Slack post failed: ${(err as Error).message}`); }
     }
-    res.status(201).json({ ok: true });
+    if (forwardTo() && gmail.connected) {
+      try { await forwardInquiry(inquiry); liveEvents.emitUpdate({ kind: 'inquiries' }); } catch (err) { log.warn(`Website enquiry email forward failed: ${(err as Error).message}`); }
+    } else if (forwardTo()) log.warn(`Website enquiry from ${email} not forwarded by email: Gmail is not connected`);
   });
 
   // ---- Everything below needs a session ----
@@ -1859,12 +1897,25 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   });
 
   // ---- Website enquiries ----
-  const inquiriesData = (): InquiriesData => ({ inquiries: q.listInquiries(), people: q.listPeople(), slack_channel: q.getSetting('site_inquiries_channel', '') || q.getSetting('incidents_default_channel', ''), slack_configured: slackBot.configured, gmail_connected: gmail.connected, origins: siteOrigins() });
+  const inquiriesData = (): InquiriesData => ({ inquiries: q.listInquiries(), people: q.listPeople(), slack_channel: q.getSetting('site_inquiries_channel', '') || q.getSetting('incidents_default_channel', ''), slack_configured: slackBot.configured, gmail_connected: gmail.connected, gmail_email: gmail.email, forward_to: forwardTo(), origins: siteOrigins() });
   r.get('/inquiries', (_req, res) => res.json(inquiriesData()));
   r.put('/inquiries/settings', (req, res) => {
     const b = (req.body ?? {}) as Record<string, unknown>;
     if (b.slack_channel !== undefined) q.setSetting('site_inquiries_channel', String(b.slack_channel ?? '').trim());
     if (b.origins !== undefined) q.setSetting('site_origins', String(b.origins ?? '').split(',').map((o) => o.trim()).filter(Boolean).join(','));
+    if (b.forward_to !== undefined) {
+      const to = String(b.forward_to ?? '').trim();
+      if (to && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to)) throw new HttpError(400, 'Forwarding address must be an email (or empty to switch the forward off).');
+      q.setSetting('site_inquiries_email', to);
+    }
+    res.json(inquiriesData());
+  });
+  /** Send (or resend) the email forward for one enquiry, e.g. after connecting Gmail. */
+  r.post('/inquiries/:id/forward', async (req, res) => {
+    const inq = q.getInquiry(idParam(req));
+    if (!inq) throw new HttpError(404, 'Enquiry not found');
+    await forwardInquiry(inq);
+    liveEvents.emitUpdate({ kind: 'inquiries' });
     res.json(inquiriesData());
   });
   r.put('/inquiries/:id', (req, res) => {
@@ -1892,17 +1943,22 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const b = (req.body ?? {}) as Record<string, unknown>;
     const actor = optText(b.actor) ?? 'the Brightform team';
     const first = inq.name.split(/\s+/)[0];
-    let body = `Hi ${first},\n\nThanks for getting in touch${inq.brand ? ` about ${inq.brand}` : ''}. \n\n[Reply here]\n\nThe quickest next step is a short call: https://calendly.com/isaacsinclair/brightform-2026-website-call\n\nBest,\n${actor}\nBrightform`;
+    const isCall = inq.kind === 'call';
+    let body = isCall
+      ? `Hi ${first},\n\nThanks for asking for a call${inq.brand ? ` about ${inq.brand}` : ''}. ${inq.preferred_time ? `You said ${inq.preferred_time.replace(/^[a-z]+:\s*/, '').toLowerCase()} works best. ` : ''}Would [day, time CET] or [day, time CET] suit? Reply with whichever is easier and I'll send an invite.\n\nBest,\n${actor}\nBrightform`
+      : `Hi ${first},\n\nThanks for getting in touch${inq.brand ? ` about ${inq.brand}` : ''}. \n\n[Reply here]\n\nThe quickest next step is a short call: https://calendly.com/isaacsinclair/brightform-2026-website-call\n\nBest,\n${actor}\nBrightform`;
     if (config.anthropicApiKey) {
       try {
         body = await draftWithClaude(
-          'You write short replies to inbound enquiries for Brightform, a TikTok Shop Partner agency in the EU. British English, warm but plain, no hype, no exclamation marks, under 120 words. Acknowledge what they wrote specifically, say one relevant thing Brightform does for brands like theirs, and propose a short call with this link: https://calendly.com/isaacsinclair/brightform-2026-website-call. Sign off with the sender name given. Output the email body only, no subject.',
-          `Enquiry from ${inq.name}${inq.brand ? ` at ${inq.brand}` : ''} (${inq.email})${inq.language ? `, site language ${inq.language}` : ''}:\n\n${inq.message}\n\nSender name: ${actor}`,
+          isCall
+            ? 'You write short replies to people who asked for a call through the website of Brightform, a TikTok Shop Partner agency in the EU. British English, warm but plain, no hype, no exclamation marks, under 110 words. Acknowledge what they want to discuss specifically, say one relevant thing Brightform does for brands like theirs, and propose two concrete slots that match their preferred time, written as placeholders like [Tue 10:00 CET] for the sender to fill in. No booking links. Sign off with the sender name given. Output the email body only, no subject.'
+            : 'You write short replies to inbound enquiries for Brightform, a TikTok Shop Partner agency in the EU. British English, warm but plain, no hype, no exclamation marks, under 120 words. Acknowledge what they wrote specifically, say one relevant thing Brightform does for brands like theirs, and propose a short call with this link: https://calendly.com/isaacsinclair/brightform-2026-website-call. Sign off with the sender name given. Output the email body only, no subject.',
+          `${isCall ? 'Call request' : 'Enquiry'} from ${inq.name}${inq.brand ? ` at ${inq.brand}` : ''} (${inq.email})${inq.language ? `, site language ${inq.language}` : ''}${inq.preferred_time ? `, preferred time: ${inq.preferred_time}` : ''}:\n\n${inq.message}\n\nSender name: ${actor}`,
           { maxTokens: 400 },
         );
       } catch (err) { log.warn(`Enquiry draft via Claude failed, using the template: ${(err as Error).message}`); }
     }
-    const draft = await gmail.createDraft({ to: inq.email, toName: inq.name, subject: `Re: your message to Brightform${inq.brand ? ` (${inq.brand})` : ''}`, body });
+    const draft = await gmail.createDraft({ to: inq.email, toName: inq.name, subject: isCall ? `Your call with Brightform${inq.brand ? ` (${inq.brand})` : ''}` : `Re: your message to Brightform${inq.brand ? ` (${inq.brand})` : ''}`, body });
     res.json({ draft, ...inquiriesData() });
   });
 

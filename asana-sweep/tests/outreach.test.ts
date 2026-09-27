@@ -173,3 +173,33 @@ describe('email drafts and voice examples', () => {
     expect(q.getDraft(d.id)).toBeNull();
   });
 });
+
+describe('gmail send (website enquiry forward)', () => {
+  it('sends through messages.send with From, Reply-To and the body', async () => {
+    const q = new Queries(openTestDb());
+    q.setSetting('gmail_refresh_token', 'r1');
+    q.setSetting('gmail_email', 'isaac@brightform.agency');
+    q.setSetting('outreach_sender_name', 'Isaac Sinclair');
+    const calls: { url: string; body: string | null }[] = [];
+    const fetchFn = (async (url: string | URL | Request, init?: RequestInit) => {
+      const u = String(url);
+      calls.push({ url: u, body: init?.body ? String(init.body) : null });
+      if (u.includes('oauth2.googleapis.com')) return new Response(JSON.stringify({ access_token: 'tok', expires_in: 3600 }), { status: 200 });
+      if (u.endsWith('/messages/send')) return new Response(JSON.stringify({ id: 's1', threadId: 't1' }), { status: 200 });
+      return new Response('{}', { status: 404 });
+    }) as typeof fetch;
+    const { config } = await import('../src/config');
+    config.googleClientId = 'cid';
+    config.googleClientSecret = 'sec';
+    const g = new GmailClient(q, fetchFn);
+    const r = await g.sendMessage({ to: 'isaac@brightform.agency', replyTo: 'grace@navy.mil', replyToName: 'Grace Hopper', subject: 'Call request: Grace Hopper (Cobol Co)', body: 'Phone: +1 555 0100\nPrefers mornings' });
+    expect(r).toEqual({ message_id: 's1', thread_id: 't1' });
+    const send = calls.find((c) => c.url.endsWith('/messages/send'))!;
+    const raw = fromB64url((JSON.parse(send.body!) as { raw: string }).raw);
+    expect(raw).toContain('To: isaac@brightform.agency');
+    expect(raw).toContain('From: Isaac Sinclair <isaac@brightform.agency>');
+    expect(raw).toContain('Reply-To: Grace Hopper <grace@navy.mil>');
+    expect(raw).toContain('Subject: Call request: Grace Hopper (Cobol Co)');
+    expect(Buffer.from(raw.split('\r\n\r\n')[1].replace(/\r\n/g, ''), 'base64').toString()).toContain('Prefers mornings');
+  });
+});

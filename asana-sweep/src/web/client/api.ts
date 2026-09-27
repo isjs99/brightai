@@ -311,7 +311,8 @@ export const api = {
   // Website enquiries
   inquiries: () => call<InquiriesData>('GET', '/inquiries'),
   updateInquiry: (id: number, patch: { status?: string; assigned_to?: string | null; note?: string | null }) => call<InquiriesData>('PUT', `/inquiries/${id}`, patch),
-  inquirySettings: (s: { slack_channel?: string; origins?: string }) => call<InquiriesData>('PUT', '/inquiries/settings', s),
+  inquirySettings: (s: { slack_channel?: string; origins?: string; forward_to?: string }) => call<InquiriesData>('PUT', '/inquiries/settings', s),
+  forwardInquiry: (id: number) => call<InquiriesData>('POST', `/inquiries/${id}/forward`),
   draftInquiryReply: (id: number, actor?: string | null) => call<InquiriesData & { draft: { draft_id: string; message_id: string; url: string } }>('POST', `/inquiries/${id}/draft`, { actor }),
   // Account monitor
   monitor: () => call<MonitorData>('GET', '/monitor'),

@@ -25,11 +25,11 @@ export const b64url = (s: string | Buffer): string => Buffer.from(s).toString('b
 export const fromB64url = (s: string): string => Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
 
 /** RFC 2822 message for the Gmail API: plain text, or multipart/alternative with an HTML part when `html` is given. */
-export function buildRawMessage(m: { to: string; toName?: string | null; from?: string | null; fromName?: string | null; subject: string; body: string; html?: string | null }): string {
+export function buildRawMessage(m: { to: string; toName?: string | null; from?: string | null; fromName?: string | null; replyTo?: string | null; replyToName?: string | null; subject: string; body: string; html?: string | null }): string {
   const enc = (s: string) => (/^[\x20-\x7e]*$/.test(s) ? s : `=?UTF-8?B?${Buffer.from(s).toString('base64')}?=`);
   const addr = (email: string, name?: string | null) => (name ? `${enc(name.replace(/[<>"]/g, ''))} <${email}>` : email);
   const b64 = (s: string) => Buffer.from(s.replace(/\r?\n/g, '\r\n')).toString('base64').replace(/(.{76})/g, '$1\r\n');
-  const head = [`To: ${addr(m.to, m.toName)}`, ...(m.from ? [`From: ${addr(m.from, m.fromName)}`] : []), `Subject: ${enc(m.subject)}`, 'MIME-Version: 1.0'];
+  const head = [`To: ${addr(m.to, m.toName)}`, ...(m.from ? [`From: ${addr(m.from, m.fromName)}`] : []), ...(m.replyTo ? [`Reply-To: ${addr(m.replyTo, m.replyToName)}`] : []), `Subject: ${enc(m.subject)}`, 'MIME-Version: 1.0'];
   const lines = m.html
     ? (() => {
         const boundary = `bf_${Date.now().toString(36)}`;
@@ -193,6 +193,18 @@ export class GmailClient {
     const raw = buildRawMessage({ ...m, from: this.email, fromName: this.q.getSetting('outreach_sender_name', '') || null });
     const d = (await this.api('POST', '/drafts', { message: { raw } })) as { id: string; message: { id: string } };
     return { draft_id: d.id, message_id: d.message.id, url: gmailDraftUrl(d.message.id, this.email) };
+  }
+
+  // ---- Sending ----
+
+  /**
+   * Sends a message from the connected account straight away (the compose scope covers messages.send). Used for
+   * forwarding website enquiries to the team's inbox; `replyTo` makes a plain "Reply" in Gmail go to the enquirer.
+   */
+  async sendMessage(m: { to: string; toName?: string | null; replyTo?: string | null; replyToName?: string | null; subject: string; body: string; html?: string | null }): Promise<{ message_id: string; thread_id: string }> {
+    const raw = buildRawMessage({ ...m, from: this.email, fromName: this.q.getSetting('outreach_sender_name', '') || null });
+    const sent = (await this.api('POST', '/messages/send', { raw })) as { id: string; threadId: string };
+    return { message_id: sent.id, thread_id: sent.threadId };
   }
 
   // ---- Sent history as voice samples ----

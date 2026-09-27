@@ -300,3 +300,6 @@ tr.dim td, .card.dim { opacity: .55; }
 .flaglist li.crit { border-color: var(--crit-border); background: var(--crit-bg); }
 .flaglist li.warn { border-color: var(--warn-border); background: var(--warn-bg); }
 .flaglist .badge { flex: none; }
+
+/* Small inline caution, e.g. "not emailed" under a timestamp */
+.warn-text { color: var(--warn, #b45309); }

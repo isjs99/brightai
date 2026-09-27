@@ -1206,6 +1206,18 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 27,
+    name: 'website enquiries: call requests (kind, phone, preferred time) and the email forward',
+    up(db) {
+      db.exec(`
+        ALTER TABLE site_inquiries ADD COLUMN kind TEXT NOT NULL DEFAULT 'contact';
+        ALTER TABLE site_inquiries ADD COLUMN phone TEXT;
+        ALTER TABLE site_inquiries ADD COLUMN preferred_time TEXT;
+        ALTER TABLE site_inquiries ADD COLUMN forwarded_at TEXT;
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {
