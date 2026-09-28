@@ -369,7 +369,7 @@ export default function PromotionsPage() {
                               <td>{t.tts_shop_name ?? <span className="sub">{tts?.shops.some((s) => s.account_id === t.account_id && s.market === t.market) ? 'linked' : 'none linked'}</span>}</td>
                               <td><TargetPill status={t.status} /></td>
                               <td className="mono sub">{t.tts_activity_id ?? '–'}{t.tts_status ? ` · ${t.tts_status}` : ''}</td>
-                              <td className="sub">{t.error_message ?? (t.pushed_at ? `pushed ${fmtRelative(t.pushed_at)}` : '')}</td>
+                              <td className="sub">{t.actor ? `${t.actor} · ` : ''}{t.error_message ?? (t.pushed_at ? `pushed ${fmtRelative(t.pushed_at)}` : '')}</td>
                             </tr>
                           ))}
                         </tbody>

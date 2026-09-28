@@ -515,6 +515,7 @@ export class Queries {
       tts_status: (r.tts_status as string | null) ?? null,
       error_message: (r.error_message as string | null) ?? null,
       pushed_at: (r.pushed_at as string | null) ?? null,
+      actor: (r.actor as string | null) ?? null,
     }));
   }
 
@@ -562,7 +563,7 @@ export class Queries {
     for (const t of targets) ins.run(promotionId, t.account_id, t.market);
   }
 
-  updateTarget(id: number, patch: Partial<Pick<PromotionTarget, 'status' | 'tts_shop_id' | 'tts_activity_id' | 'tts_status' | 'error_message' | 'pushed_at'>>): void {
+  updateTarget(id: number, patch: Partial<Pick<PromotionTarget, 'status' | 'tts_shop_id' | 'tts_activity_id' | 'tts_status' | 'error_message' | 'pushed_at' | 'actor'>>): void {
     const sets: string[] = [];
     const params: Record<string, unknown> = { id };
     for (const [k, v] of Object.entries(patch)) {

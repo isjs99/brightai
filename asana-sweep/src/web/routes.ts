@@ -983,9 +983,9 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   });
   r.post('/promotions/:id/push', async (req, res) => {
     if (!tts.configured) throw new HttpError(400, 'TikTok Shop app is not configured (TTS_APP_KEY / TTS_APP_SECRET).');
-    res.json({ promotion: await pushPromotion(q, idParam(req)) });
+    res.json({ promotion: await pushPromotion(q, idParam(req), undefined, actorOf(req)) });
   });
-  r.post('/promotions/:id/deactivate', async (req, res) => res.json({ promotion: await deactivatePromotion(q, idParam(req)) }));
+  r.post('/promotions/:id/deactivate', async (req, res) => res.json({ promotion: await deactivatePromotion(q, idParam(req), undefined, actorOf(req)) }));
   r.post('/promotions/:id/sync', async (req, res) => res.json({ promotion: await syncPromotion(q, idParam(req)) }));
 
   // ---- GMV Max settings ----

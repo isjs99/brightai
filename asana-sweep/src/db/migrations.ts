@@ -1225,6 +1225,13 @@ const migrations: Migration[] = [
       db.exec(`ALTER TABLE site_inquiries ADD COLUMN gclid TEXT;`);
     },
   },
+  {
+    version: 29,
+    name: 'promotion targets: who last pushed or deactivated (audit trail)',
+    up(db) {
+      db.exec(`ALTER TABLE promotion_targets ADD COLUMN actor TEXT;`);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

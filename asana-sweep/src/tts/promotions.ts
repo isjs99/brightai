@@ -48,14 +48,14 @@ export function productRows(p: Promotion, shopId: string): unknown[] {
 }
 
 /** Push every planned target of a promotion to its TikTok shop. Targets without a linked shop are marked unlinked. */
-export async function pushPromotion(q: Queries, promotionId: number, client: TtsClient = tts): Promise<Promotion> {
+export async function pushPromotion(q: Queries, promotionId: number, client: TtsClient = tts, actor: string | null = null): Promise<Promotion> {
   const p = q.getPromotion(promotionId);
   if (!p) throw new Error('Promotion not found');
   for (const t of p.targets) {
     if (t.status === 'live' || t.status === 'pushed') continue;
     const shop = q.findTtsShopFor(t.account_id, t.market);
     if (!shop) {
-      q.updateTarget(t.id, { status: 'unlinked', tts_shop_id: null, error_message: `No authorised TikTok shop linked to ${t.account_name} ${t.market}.` });
+      q.updateTarget(t.id, { status: 'unlinked', tts_shop_id: null, error_message: `No authorised TikTok shop linked to ${t.account_name} ${t.market}.`, actor });
       continue;
     }
     try {
@@ -65,8 +65,8 @@ export async function pushPromotion(q: Queries, promotionId: number, client: Tts
         const rows = productRows(p, shop.id);
         if (rows.length) await client.updateActivityProducts(creds, created.activity_id, rows);
       }
-      q.updateTarget(t.id, { status: 'pushed', tts_shop_id: shop.id, tts_activity_id: created.activity_id, tts_status: created.status ?? null, error_message: null, pushed_at: new Date().toISOString() });
-      log.info(`Promotion ${p.id} pushed to ${shop.name} (${t.market}): activity ${created.activity_id}`);
+      q.updateTarget(t.id, { status: 'pushed', tts_shop_id: shop.id, tts_activity_id: created.activity_id, tts_status: created.status ?? null, error_message: null, pushed_at: new Date().toISOString(), actor });
+      log.info(`Promotion ${p.id} pushed to ${shop.name} (${t.market}) by ${actor ?? 'unknown'}: activity ${created.activity_id}`);
     } catch (err) {
       const msg = (err as Error).message;
       log.error(`Promotion ${p.id} push failed for ${t.account_name} ${t.market}: ${msg}`);
@@ -76,18 +76,19 @@ export async function pushPromotion(q: Queries, promotionId: number, client: Tts
   return q.getPromotion(promotionId)!;
 }
 
-export async function deactivatePromotion(q: Queries, promotionId: number, client: TtsClient = tts): Promise<Promotion> {
+export async function deactivatePromotion(q: Queries, promotionId: number, client: TtsClient = tts, actor: string | null = null): Promise<Promotion> {
   const p = q.getPromotion(promotionId);
   if (!p) throw new Error('Promotion not found');
   for (const t of p.targets) {
     if (!t.tts_activity_id || !t.tts_shop_id) {
-      if (t.status === 'planned') q.updateTarget(t.id, { status: 'deactivated' });
+      if (t.status === 'planned') q.updateTarget(t.id, { status: 'deactivated', actor });
       continue;
     }
     try {
       const creds = await shopCredentials(q, t.tts_shop_id, client);
       await client.deactivateActivity(creds, t.tts_activity_id);
-      q.updateTarget(t.id, { status: 'deactivated', tts_status: 'DEACTIVATED', error_message: null });
+      q.updateTarget(t.id, { status: 'deactivated', tts_status: 'DEACTIVATED', error_message: null, actor });
+      log.info(`Promotion ${p.id} deactivated on shop ${t.tts_shop_name ?? t.tts_shop_id} (${t.market}) by ${actor ?? 'unknown'}`);
     } catch (err) {
       q.updateTarget(t.id, { status: 'error', error_message: (err as Error).message });
     }

@@ -424,6 +424,8 @@ export interface PromotionTarget {
   tts_status: string | null;
   error_message: string | null;
   pushed_at: string | null;
+  /** Who last pushed or deactivated this target (audit trail). */
+  actor: string | null;
 }
 
 export interface Promotion {
