@@ -1396,7 +1396,7 @@ export class Queries {
   }
 
   listInquiries(limit = 300): SiteInquiry[] {
-    return (this.db.prepare('SELECT * FROM site_inquiries ORDER BY created_at DESC LIMIT ?').all(limit) as Row[]).map((r) => this.rowToInquiry(r));
+    return (this.db.prepare('SELECT * FROM site_inquiries ORDER BY created_at DESC, id DESC LIMIT ?').all(limit) as Row[]).map((r) => this.rowToInquiry(r));
   }
 
   /** Same email in the last minutes: the form was double-submitted or a bot is hammering it. */
