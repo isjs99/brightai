@@ -96,3 +96,23 @@ describe('send queue', () => {
     expect(sendSettings(q).daily_cap).toBe(30);
   });
 });
+
+describe('bulk draft with auto-send', () => {
+  it('queues each generated draft instead of saving it to Drafts', async () => {
+    const { q, gmail, sq, p } = await setup();
+    const { BulkDraftJob } = await import('../src/bd/bulk');
+    const fakeGen = async () => ({ subject: 'Hello from Brightform', body: 'Hi,\n\nShort note.\n\nIsaac', generator: 'template' as const });
+    const job = new BulkDraftJob(q, gmail, fakeGen as never, sq);
+    job.start({ ids: [p.id], limit: 10, include_drafted: true }, { language: 'en', style: 'short', to_gmail: true, auto_send: true, actor: 'Isaac' } as never);
+    await new Promise((r) => setTimeout(r, 50));
+    const st = job.state;
+    expect(st.auto_send).toBe(true);
+    expect(st.to_gmail).toBe(false);
+    expect(st.drafted).toBe(1);
+    expect(st.queued).toBe(1);
+    const d = q.listDrafts({ prospectId: p.id })[0];
+    expect(d.status).toBe('queued');
+    expect(p.contacts.map((c) => c.email)).toContain(d.to_email); // the most senior contact with an email
+    expect(d.queued_by).toBe('Isaac');
+  });
+});

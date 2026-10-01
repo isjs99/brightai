@@ -69,8 +69,8 @@ export class Scheduler {
     this.health = new HealthEngine(q);
     this.monitor.health = this.health;
     this.gmail = new GmailClient(q);
-    this.bulkDrafts = new BulkDraftJob(q, this.gmail);
     this.sendQueue = new SendQueue(q, this.gmail);
+    this.bulkDrafts = new BulkDraftJob(q, this.gmail, undefined, this.sendQueue);
     this.stock = new StockTracker(q);
     this.incidents = new IncidentEngine(q);
     this.reports = new ClientReports(q);

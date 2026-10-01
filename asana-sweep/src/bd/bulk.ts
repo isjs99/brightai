@@ -4,6 +4,7 @@ import { titleScore } from './apollo.js';
 import { bodyToHtml } from './outreach.js';
 import { generateDraft, type DraftOpts } from './draft.js';
 import type { GmailClient } from './gmail.js';
+import type { SendQueue } from './sendqueue.js';
 import { liveEvents } from '../live/events.js';
 import { log } from '../logger.js';
 
@@ -57,19 +58,21 @@ export function bulkCandidates(q: Queries, sel: BulkDraftSelection = {}): { pros
 }
 
 export class BulkDraftJob {
-  private status: BulkDraftStatus = { running: false, total: 0, done: 0, drafted: 0, gmail: 0, skipped: 0, current: null, errors: [], started_at: null, finished_at: null, to_gmail: false };
+  private status: BulkDraftStatus = { running: false, total: 0, done: 0, drafted: 0, gmail: 0, queued: 0, skipped: 0, current: null, errors: [], started_at: null, finished_at: null, to_gmail: false, auto_send: false };
   private stopRequested = false;
 
-  constructor(private q: Queries, private gmail: GmailClient, private generate: typeof generateDraft = generateDraft) {}
+  constructor(private q: Queries, private gmail: GmailClient, private generate: typeof generateDraft = generateDraft, private sendQueue: SendQueue | null = null) {}
 
   get state(): BulkDraftStatus {
     return { ...this.status, errors: [...this.status.errors] };
   }
 
-  start(sel: BulkDraftSelection, opts: DraftOpts & { to_gmail: boolean; actor: string | null }): BulkDraftStatus {
+  start(sel: BulkDraftSelection, opts: DraftOpts & { to_gmail: boolean; auto_send?: boolean; actor: string | null }): BulkDraftStatus {
     if (this.status.running) return this.state;
     const items = bulkCandidates(this.q, sel);
-    this.status = { running: items.length > 0, total: items.length, done: 0, drafted: 0, gmail: 0, skipped: 0, current: null, errors: [], started_at: new Date().toISOString(), finished_at: items.length ? null : new Date().toISOString(), to_gmail: opts.to_gmail && this.gmail.connected };
+    // Auto-send queues each draft for the send queue instead of saving it to the Drafts folder.
+    const autoSend = Boolean(opts.auto_send && this.sendQueue && this.gmail.forActor(opts.actor).connected);
+    this.status = { running: items.length > 0, total: items.length, done: 0, drafted: 0, gmail: 0, queued: 0, skipped: 0, current: null, errors: [], started_at: new Date().toISOString(), finished_at: items.length ? null : new Date().toISOString(), to_gmail: !autoSend && opts.to_gmail && this.gmail.connected, auto_send: autoSend };
     this.stopRequested = false;
     if (items.length) void this.run(items, opts);
     return this.state;
@@ -79,7 +82,7 @@ export class BulkDraftJob {
     this.stopRequested = true;
   }
 
-  private async run(items: { prospect: BdProspect; contact: BdContact }[], opts: DraftOpts & { to_gmail: boolean; actor: string | null }): Promise<void> {
+  private async run(items: { prospect: BdProspect; contact: BdContact }[], opts: DraftOpts & { to_gmail: boolean; auto_send?: boolean; actor: string | null }): Promise<void> {
     for (const { prospect, contact } of items) {
       if (this.stopRequested) break;
       this.status.current = prospect.brand ?? prospect.shop_name;
@@ -88,7 +91,11 @@ export class BulkDraftJob {
         const g = await this.generate(this.q, prospect.id, contact, opts);
         const draft = this.q.createDraft({ prospect_id: prospect.id, contact_id: contact.id, to_name: contact.name, to_email: contact.email!, subject: g.subject, body: g.body, language: opts.language, style: opts.style, generator: g.generator, created_by: opts.actor });
         this.status.drafted += 1;
-        if (this.status.to_gmail) {
+        if (this.status.auto_send && this.sendQueue) {
+          const r = this.sendQueue.queue([draft.id], opts.actor);
+          if (r.queued.length) { this.status.queued += 1; this.q.logOutreach(prospect.id, { channel: 'gmail', action: 'note', note: `Bulk draft "${g.subject}" to ${contact.name} queued to send from Gmail`, contact_name: contact.name, actor: opts.actor }); }
+          else { this.status.errors.push(`${this.status.current}: not queued: ${r.skipped[0]?.reason ?? 'unknown'}`); this.q.logOutreach(prospect.id, { channel: 'gmail', action: 'note', note: `Bulk draft "${g.subject}" to ${contact.name} (not queued: ${r.skipped[0]?.reason ?? 'unknown'})`, contact_name: contact.name, actor: opts.actor }); }
+        } else if (this.status.to_gmail) {
           try {
             const r = await this.gmail.createDraft({ to: draft.to_email, toName: draft.to_name, subject: draft.subject, body: draft.body, html: bodyToHtml(draft.body) });
             this.q.updateDraft(draft.id, { status: 'gmail', gmail_draft_id: r.draft_id, gmail_message_id: r.message_id, gmail_url: r.url });
@@ -110,7 +117,7 @@ export class BulkDraftJob {
     this.status.running = false;
     this.status.current = null;
     this.status.finished_at = new Date().toISOString();
-    log.info(`Bulk drafts: ${this.status.drafted} drafted, ${this.status.gmail} in Gmail, ${this.status.errors.length} error(s)`);
+    log.info(`Bulk drafts: ${this.status.drafted} drafted, ${this.status.gmail} in Gmail, ${this.status.queued} queued to send, ${this.status.errors.length} error(s)`);
     liveEvents.emitUpdate({ kind: 'bd' });
   }
 }

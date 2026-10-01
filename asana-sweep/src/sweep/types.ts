@@ -987,12 +987,16 @@ export interface BulkDraftStatus {
   done: number;
   drafted: number;
   gmail: number;
+  /** Drafts handed to the send queue (auto-send runs). */
+  queued: number;
   skipped: number;
   current: string | null;
   errors: string[];
   started_at: string | null;
   finished_at: string | null;
   to_gmail: boolean;
+  /** This run queues each draft to be sent from Gmail instead of saving it to Drafts. */
+  auto_send: boolean;
 }
 
 /** Progress of the background "find decision makers for every prospect" job. */
