@@ -18,6 +18,7 @@ import { draftCallFollowups, tldv } from '../bd/tldv.js';
 import { scanEnterpriseAlerts } from '../bd/alerts.js';
 import { GmailClient } from '../bd/gmail.js';
 import { BulkDraftJob } from '../bd/bulk.js';
+import { SendQueue } from '../bd/sendqueue.js';
 import { StockTracker } from '../stock/index.js';
 import { IncidentEngine } from '../incidents/index.js';
 import { ClientReports } from '../reports/client.js';
@@ -49,6 +50,8 @@ export class Scheduler {
   private healthTask: ScheduledTask | null = null;
   readonly gmail: GmailClient;
   readonly bulkDrafts: BulkDraftJob;
+  readonly sendQueue: SendQueue;
+  private sendTask: ScheduledTask | null = null;
   readonly stock: StockTracker;
   readonly incidents: IncidentEngine;
   readonly reports: ClientReports;
@@ -67,6 +70,7 @@ export class Scheduler {
     this.monitor.health = this.health;
     this.gmail = new GmailClient(q);
     this.bulkDrafts = new BulkDraftJob(q, this.gmail);
+    this.sendQueue = new SendQueue(q, this.gmail);
     this.stock = new StockTracker(q);
     this.incidents = new IncidentEngine(q);
     this.reports = new ClientReports(q);
@@ -99,6 +103,8 @@ export class Scheduler {
     scanEnterpriseAlerts(this.q);
     // Apollo credits: refresh every 10 minutes so the BD page shows a live balance and enrichment resumes when credits return.
     this.apolloTask = cron.schedule('*/10 * * * *', () => this.refreshApollo());
+    // Outreach send queue: one queued draft per minute at most, inside the sending hours and under the daily cap.
+    this.sendTask = cron.schedule('* * * * *', () => void this.sendQueue.tick());
     this.reloadFastmossSchedule();
     this.pullsTask = cron.schedule('0 6 * * *', () => void this.dailyPull({ fastmoss: false }), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // A second pass late morning in case the FastMoss routine ran late.
@@ -307,6 +313,8 @@ export class Scheduler {
     this.copilot.stop();
     this.apolloTask?.destroy();
     this.apolloTask = null;
+    this.sendTask?.destroy();
+    this.sendTask = null;
     this.fastmossTask?.destroy();
     this.fastmossTask = null;
     this.tldvTask?.destroy();

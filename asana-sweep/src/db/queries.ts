@@ -1123,7 +1123,8 @@ export class Queries {
       to_name: r.to_name as string, to_email: r.to_email as string, subject: r.subject as string, body: r.body as string,
       language: r.language as string, style: r.style as BdEmailDraft['style'], status: r.status as BdEmailDraft['status'], generator: r.generator as BdEmailDraft['generator'],
       kind: ((r.kind as string | null) ?? 'cold') as BdEmailDraft['kind'], meeting_id: (r.meeting_id as string | null) ?? null, meeting_title: (r.meeting_title as string | null) ?? null,
-      gmail_draft_id: (r.gmail_draft_id as string | null) ?? null, gmail_message_id: (r.gmail_message_id as string | null) ?? null, gmail_url: (r.gmail_url as string | null) ?? null,
+      gmail_draft_id: (r.gmail_draft_id as string | null) ?? null, gmail_message_id: (r.gmail_message_id as string | null) ?? null, gmail_thread_id: (r.gmail_thread_id as string | null) ?? null, gmail_url: (r.gmail_url as string | null) ?? null,
+      queued_at: (r.queued_at as string | null) ?? null, queued_by: (r.queued_by as string | null) ?? null, send_account: (r.send_account as string | null) ?? null, sent_at: (r.sent_at as string | null) ?? null, send_error: (r.send_error as string | null) ?? null,
       created_by: (r.created_by as string | null) ?? null, created_at: r.created_at as string, updated_at: r.updated_at as string,
     };
   }
@@ -1156,7 +1157,7 @@ export class Queries {
     return r ? this.rowToDraft(r) : null;
   }
 
-  updateDraft(id: number, patch: Partial<Pick<BdEmailDraft, 'subject' | 'body' | 'language' | 'style' | 'status' | 'generator' | 'gmail_draft_id' | 'gmail_message_id' | 'gmail_url' | 'to_email' | 'to_name'>>): BdEmailDraft | null {
+  updateDraft(id: number, patch: Partial<Pick<BdEmailDraft, 'subject' | 'body' | 'language' | 'style' | 'status' | 'generator' | 'gmail_draft_id' | 'gmail_message_id' | 'gmail_thread_id' | 'gmail_url' | 'to_email' | 'to_name' | 'queued_at' | 'queued_by' | 'send_account' | 'sent_at' | 'send_error'>>): BdEmailDraft | null {
     const sets: string[] = [];
     const params: Record<string, unknown> = { id, now: new Date().toISOString() };
     for (const [k, v] of Object.entries(patch)) {

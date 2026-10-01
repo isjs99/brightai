@@ -655,7 +655,7 @@ export interface BdProspect {
   outreach_log: BdOutreachEvent[];
 }
 
-export type BdDraftStatus = 'draft' | 'gmail' | 'sent' | 'discarded';
+export type BdDraftStatus = 'draft' | 'gmail' | 'queued' | 'sent' | 'discarded';
 
 /** A cold email drafted for one decision maker, reviewed in the inbox, then handed to Gmail. */
 export interface BdEmailDraft {
@@ -677,10 +677,30 @@ export interface BdEmailDraft {
   meeting_title: string | null;
   gmail_draft_id: string | null;
   gmail_message_id: string | null;
+  gmail_thread_id: string | null;
   gmail_url: string | null;
+  /** Send queue: when and by whom it was queued, which Gmail account sends it ('' = shared), when it went, last failure. */
+  queued_at: string | null;
+  queued_by: string | null;
+  send_account: string | null;
+  sent_at: string | null;
+  send_error: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
+}
+
+/** Live state of the outreach send queue. */
+export interface SendQueueState {
+  queued: number;
+  sent_today: number;
+  last_sent_at: string | null;
+  /** When the next queued draft can go out, null when nothing is queued, paused, outside the window or the cap is reached. */
+  next_at: string | null;
+  in_window: boolean;
+  sending: boolean;
+  last_error: string | null;
+  settings: { daily_cap: number; gap_seconds: number; hours: string; weekdays_only: boolean; paused: boolean; timezone: string };
 }
 
 /** One of Isaac's earlier outreach emails, used as a voice sample when drafting. */
@@ -715,6 +735,7 @@ export interface OutreachSettings {
 }
 
 export interface OutreachData {
+  send_queue: SendQueueState;
   drafts: BdEmailDraft[];
   examples: OutreachExample[];
   settings: OutreachSettings;

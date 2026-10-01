@@ -91,7 +91,32 @@ export default function OutreachPage() {
 type Ctx = { data: OutreachData; isAdmin: boolean; busy: string | null; run: <T extends OutreachData>(key: string, fn: () => Promise<T>, after?: (r: T) => void) => Promise<void>; onNotice: (n: string | null) => void; onError: (e: string | null) => void };
 
 function statusBadge(d: BdEmailDraft) {
-  return d.status === 'sent' ? <span className="badge good">Sent</span> : d.status === 'gmail' ? <span className="badge accent">In Gmail</span> : <span className="badge warn">Draft</span>;
+  return d.status === 'sent' ? <span className="badge good" title={d.sent_at ? `Sent ${fmtRelative(d.sent_at)}` : ''}>Sent</span> : d.status === 'queued' ? <span className="badge accent" title={`Queued by ${d.queued_by ?? 'admin'} · goes out from ${d.send_account || 'the shared Gmail'}`}>Queued</span> : d.status === 'gmail' ? <span className="badge accent">In Gmail</span> : <span className="badge warn">Draft</span>;
+}
+
+/** The send queue: how many are waiting, what went today, when the next one goes, pause/resume. */
+function SendQueueCard({ data, isAdmin, busy, run, onNotice }: Ctx) {
+  const sq = data.send_queue;
+  const st = sq.settings;
+  return (
+    <div className={`card ${sq.queued ? '' : 'dim'}`} style={{ marginBottom: 12, padding: '10px 14px' }}>
+      <div className="page-head" style={{ marginBottom: 4 }}>
+        <div className="actions">
+          <b>Auto-send</b>
+          <span className={`badge ${st.paused ? 'warn' : sq.queued ? 'good' : 'muted'}`}>{st.paused ? 'Paused' : sq.queued ? `${sq.queued} queued` : 'Nothing queued'}</span>
+          <span className="badge muted">{sq.sent_today}/{st.daily_cap} sent today</span>
+          {sq.next_at && <span className="badge muted">next {fmtRelative(sq.next_at)}</span>}
+          {!sq.in_window && sq.queued > 0 && !st.paused && <span className="badge muted">outside sending hours ({st.hours}{st.weekdays_only ? ', Mon–Fri' : ''})</span>}
+          {sq.last_error && <span className="badge crit" title={sq.last_error}>Last send failed</span>}
+        </div>
+        {isAdmin && <div className="actions">
+          <button className="small" disabled={busy !== null} onClick={() => run('sqp', () => api.saveOutreachSettings({ send_paused: !st.paused }), () => onNotice(st.paused ? 'Auto-send resumed.' : 'Auto-send paused. Queued drafts stay queued.'))}>{st.paused ? 'Resume' : 'Pause'}</button>
+          {sq.queued > 0 && sq.in_window && !st.paused && <button className="small" disabled={busy !== null} onClick={() => run('sqt', api.sendQueueTick, (r) => onNotice(r.sent ? `Sent to ${r.sent.to_email}.` : 'Nothing sent: cap reached or the gap since the last send has not passed.'))}>Send next now</button>}
+        </div>}
+      </div>
+      <p className="sub" style={{ margin: 0 }}>Queued drafts go out one at a time from the Gmail of whoever queued them (or the shared account), every {st.gap_seconds >= 60 ? `${Math.round(st.gap_seconds / 60)} min` : `${st.gap_seconds} s`} at most, {st.hours} {st.timezone}{st.weekdays_only ? ', Monday to Friday' : ''}, up to {st.daily_cap} a day. Each send is logged on the prospect like "Mark as sent". Change the pace in Settings.</p>
+    </div>
+  );
 }
 
 function Drafts({ data, isAdmin, busy, run, onNotice, onError, kind, initialDraft }: Ctx & { kind: 'cold' | 'followup'; initialDraft: number | null }) {
@@ -124,10 +149,12 @@ function Drafts({ data, isAdmin, busy, run, onNotice, onError, kind, initialDraf
           <span className={`badge ${s.llm_configured ? 'good' : 'muted'}`}>{s.llm_configured ? 'Claude drafting' : 'Template drafting (no ANTHROPIC_API_KEY)'}</span>
           <select value={only} onChange={(e) => setOnly(e.target.value as 'open' | 'all')}><option value="open">Open drafts</option><option value="all">All incl. sent</option></select>
           {isAdmin && kind === 'cold' && s.gmail_connected && list.some((d) => d.status === 'draft') && <button className="small" disabled={busy === 'gmailall'} onClick={() => run('gmailall', api.draftsToGmailAll, (r) => onNotice(`${r.saved} draft(s) saved to Gmail${r.errors.length ? `, ${r.errors.length} failed: ${r.errors.slice(0, 2).join(' · ')}` : ''}. Send them from your drafts folder, then mark each as sent.`))} title="Save every open draft into Gmail drafts in one go">{busy === 'gmailall' ? 'Saving…' : `Save all ${list.filter((d) => d.status === 'draft').length} to Gmail`}</button>}
+          {isAdmin && (s.gmail_connected || s.gmail_accounts.length > 0) && list.some((d) => d.status === 'draft' || d.status === 'gmail') && <button className="small primary" disabled={busy === 'qall'} title="Queue every open draft here to be sent automatically from Gmail, on the drip set in Settings" onClick={() => { const n = list.filter((d) => d.status === 'draft' || d.status === 'gmail').length; if (window.confirm(`Queue ${n} draft(s) to send automatically from Gmail? They go out one at a time inside the sending hours. Drafts with a [placeholder], no email, or a prospect already emailed are skipped.`)) run('qall', () => api.queueDrafts(list.filter((d) => d.status === 'draft' || d.status === 'gmail').map((d) => d.id)), (r) => onNotice(`${r.queued} queued${r.skipped.length ? `, ${r.skipped.length} skipped: ${r.skipped.slice(0, 3).map((x) => x.reason).join(' · ')}` : ''}.`)); }}>{busy === 'qall' ? 'Queuing…' : `Send all ${list.filter((d) => d.status === 'draft' || d.status === 'gmail').length} via Gmail`}</button>}
           {isAdmin && kind === 'cold' && <Link className="button small" to="/bd">Bulk draft from the pipeline</Link>}
         </div>
         {kind === 'cold' && <span className="sub">Draft from a decision maker in the BD pipeline. Emails use the brand name, not the shop handle, and headings become real bold in Gmail.</span>}
       </div>
+      <SendQueueCard data={data} isAdmin={isAdmin} busy={busy} run={run} onNotice={onNotice} onError={onError} />
       <div className="inbox-split">
         <div className="inbox-list">
           {list.length === 0 ? <div className="empty">{kind === 'cold' ? 'No drafts yet. Open a prospect in the BD pipeline and click "Draft email" next to a decision maker with an email address.' : 'No call follow-ups yet.'}</div> : list.map((d) => (
@@ -160,10 +187,15 @@ function Drafts({ data, isAdmin, busy, run, onNotice, onError, kind, initialDraf
               {isAdmin && (
                 <>
                   <div className="actions" style={{ marginTop: 8 }}>
-                    <button className="primary" disabled={busy !== null || draft.status === 'sent'} onClick={openInGmail}>{busy === 'gmail' ? 'Opening…' : s.gmail_connected ? 'Save to Gmail & open' : 'Open in Gmail'}</button>
+                    {draft.status === 'queued'
+                      ? <button className="primary" disabled={busy !== null} onClick={() => run('unq', () => api.unqueueDraft(draft.id), () => onNotice('Taken out of the queue; it stays a draft.'))}>Take out of queue</button>
+                      : draft.status !== 'sent' && (s.gmail_connected || s.gmail_accounts.length > 0) && <button className="primary" disabled={busy !== null} title="Queue it to be sent automatically from Gmail on the drip" onClick={() => run('q1', async () => { await saveIfDirty(); const r = await api.queueDrafts([draft.id]); if (r.skipped.length) { const again = window.confirm(`Not queued: ${r.skipped[0].reason}. Queue it anyway?`); if (again) return api.queueDrafts([draft.id], true); } return r; }, (r) => onNotice(r.queued ? `Queued. ${data.send_queue.in_window ? 'It goes out within a few minutes.' : 'It goes out when the sending hours open.'}` : `Not queued${r.skipped[0] ? `: ${r.skipped[0].reason}` : ''}.`))}>Send via Gmail</button>}
+                    <button disabled={busy !== null || draft.status === 'sent' || draft.status === 'queued'} onClick={openInGmail}>{busy === 'gmail' ? 'Opening…' : s.gmail_connected ? 'Save to Gmail & open' : 'Open in Gmail'}</button>
                     <button disabled={!dirty || busy !== null} onClick={() => run('save', async () => { await saveIfDirty(); return api.outreach(); }, () => onNotice('Draft saved.'))}>Save edits</button>
-                    {draft.status !== 'sent' && <button disabled={busy !== null} onClick={() => window.confirm(`Mark as sent to ${draft.to_email}? This ticks Gmail on the prospect and logs it in the history.`) && run('sent', () => api.markDraftSent(draft.id), () => onNotice('Logged as sent. Gmail is ticked on the prospect.'))}>Mark as sent</button>}
+                    {draft.status !== 'sent' && draft.status !== 'queued' && <button disabled={busy !== null} onClick={() => window.confirm(`Mark as sent to ${draft.to_email}? This ticks Gmail on the prospect and logs it in the history.`) && run('sent', () => api.markDraftSent(draft.id), () => onNotice('Logged as sent. Gmail is ticked on the prospect.'))}>Mark as sent</button>}
                   </div>
+                  {draft.send_error && <p className="sub crit" style={{ marginTop: 6 }}>Last auto-send failed: {draft.send_error}</p>}
+                  {draft.status === 'sent' && draft.sent_at && <p className="sub" style={{ marginTop: 6 }}>Sent {fmtRelative(draft.sent_at)}{draft.send_account !== null ? ` automatically from ${draft.send_account || 'the shared Gmail'}` : ''}{draft.gmail_url ? <> · <a href={draft.gmail_url} target="_blank" rel="noreferrer">open in Gmail</a></> : null}.</p>}
                   {draft.kind === 'cold' && (
                     <div className="inline-form" style={{ marginTop: 12 }}>
                       <label className="field"><span className="lbl">Language</span><select value={gen.language} onChange={(e) => setGen({ ...gen, language: e.target.value })}>{Object.entries(DRAFT_LANGS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}</select></label>
@@ -343,6 +375,8 @@ function Settings({ data, isAdmin, busy, run, onNotice }: Ctx) {
   const mine = s.gmail_accounts.find((a) => a.person && a.person === actor) ?? null;
   const others = s.gmail_accounts.filter((a) => a.person && a.person !== actor);
   const [settings, setSettings] = useState({ sender_name: s.sender_name, sender_title: s.sender_title, booking_url: s.booking_url, pitch: s.pitch, sent_query: s.sent_query, watchlist_sheet_tab: s.watchlist_sheet_tab, linkedin_check_days: s.linkedin_check_days });
+  const sq = data.send_queue.settings;
+  const [pace, setPace] = useState({ send_daily_cap: sq.daily_cap, send_gap_seconds: sq.gap_seconds, send_hours: sq.hours, send_weekdays_only: sq.weekdays_only });
   const [newExample, setNewExample] = useState<{ subject: string; body: string; kind: string } | null>(null);
   const [tc, setTc] = useState<Partial<TtsContact> & { market: string; name: string }>({ market: 'DE', name: '', category: '', role: '', lark: '', email: '', notes: '', is_agency_manager: false });
   return (
@@ -360,6 +394,18 @@ function Settings({ data, isAdmin, busy, run, onNotice }: Ctx) {
             {others.length > 0 && <p className="sub" style={{ marginTop: 10 }}>Also connected: {others.map((a) => `${a.person} (${a.email})`).join(', ')}.</p>}
           </>
         )}
+      </div>
+
+      <div className="card" style={{ marginBottom: 14 }}>
+        <h3 style={{ marginTop: 0 }}>Auto-send pace</h3>
+        <p className="sub">How fast queued drafts leave Gmail. Keep it human: a cold-outreach mailbox that suddenly sends hundreds a day gets its domain reputation burned, and that hits every brightform.agency inbox, not just the sender. 20 to 40 a day with a couple of minutes between sends is the safe range for a mailbox that is not warmed up.</p>
+        <div className="inline-form">
+          <label className="field" style={{ minWidth: 140 }}><span className="lbl">Max per day</span><input type="number" min={1} max={500} value={pace.send_daily_cap} disabled={!isAdmin} onChange={(e) => setPace({ ...pace, send_daily_cap: Number(e.target.value) })} /></label>
+          <label className="field" style={{ minWidth: 160 }}><span className="lbl">Seconds between sends</span><input type="number" min={10} max={3600} value={pace.send_gap_seconds} disabled={!isAdmin} onChange={(e) => setPace({ ...pace, send_gap_seconds: Number(e.target.value) })} /></label>
+          <label className="field" style={{ minWidth: 150 }}><span className="lbl">Sending hours ({sq.timezone})</span><input type="text" value={pace.send_hours} placeholder="08:30-18:00" disabled={!isAdmin} onChange={(e) => setPace({ ...pace, send_hours: e.target.value })} /></label>
+          <label className="field check"><input type="checkbox" checked={pace.send_weekdays_only} disabled={!isAdmin} onChange={(e) => setPace({ ...pace, send_weekdays_only: e.target.checked })} /> Weekdays only</label>
+        </div>
+        {isAdmin && <div className="actions" style={{ marginTop: 8 }}><button className="primary" disabled={busy === 'pace'} onClick={() => run('pace', () => api.saveOutreachSettings(pace), () => onNotice('Auto-send pace saved.'))}>Save pace</button></div>}
       </div>
 
       <div className="card" style={{ marginBottom: 14 }}>

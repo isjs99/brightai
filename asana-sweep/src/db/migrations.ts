@@ -1250,6 +1250,20 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 31,
+    name: 'outreach drafts: send queue (auto-send through Gmail on a drip)',
+    up(db) {
+      db.exec(`
+        ALTER TABLE bd_email_drafts ADD COLUMN queued_at TEXT;
+        ALTER TABLE bd_email_drafts ADD COLUMN queued_by TEXT;
+        ALTER TABLE bd_email_drafts ADD COLUMN send_account TEXT;
+        ALTER TABLE bd_email_drafts ADD COLUMN sent_at TEXT;
+        ALTER TABLE bd_email_drafts ADD COLUMN send_error TEXT;
+        ALTER TABLE bd_email_drafts ADD COLUMN gmail_thread_id TEXT;
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

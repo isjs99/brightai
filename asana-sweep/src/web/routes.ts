@@ -38,6 +38,7 @@ import type { ConversationDetail, ContextEntry, InboxData } from '../sweep/types
 import { normaliseDomain } from '../bd/score.js';
 import { importPullFiles, isoDate, parseProspectInput } from '../bd/import.js';
 import { GmailClient, gmailComposeUrl, normaliseAccount } from '../bd/gmail.js';
+import { recordSent, saveSendSettings } from '../bd/sendqueue.js';
 import { bodyToHtml, LANGUAGES as OUTREACH_LANGUAGES, outreachInputs } from '../bd/outreach.js';
 import { generateDraft as generateOutreachDraft } from '../bd/draft.js';
 import { bulkCandidates, pickBestLinkedin } from '../bd/bulk.js';
@@ -1500,6 +1501,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   const isAdminReq = (req: Request): boolean => (auth instanceof SharedPasswordAuth ? auth.roleOf(req) === 'admin' : auth.isAuthenticated(req));
 
   const outreachData = (): OutreachData => ({
+    send_queue: scheduler.sendQueue.state(),
     drafts: q.listDrafts(),
     examples: q.listExamples(),
     settings: {
@@ -1682,13 +1684,30 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   r.post('/outreach/drafts/:id/sent', (req, res) => {
     const d = q.getDraft(idParam(req));
     if (!d) throw new HttpError(404, 'Draft not found');
-    q.updateDraft(d.id, { status: 'sent' });
-    const before = q.getProspect(d.prospect_id);
-    if (before && !before.outreach_gmail) q.patchProspect(d.prospect_id, { outreach_gmail: true, outreach_note: `Sent "${d.subject}" to ${d.to_email}`, outreach_contact: d.to_name }, actorOf(req));
-    else q.logOutreach(d.prospect_id, { channel: 'gmail', action: 'contacted', note: `Sent "${d.subject}" to ${d.to_email}`, contact_name: d.to_name, actor: actorOf(req) });
-    if (before && before.status === 'new') q.patchProspect(d.prospect_id, { status: 'contacted' }, actorOf(req));
+    const out = q.updateDraft(d.id, { status: 'sent', sent_at: new Date().toISOString() })!;
+    recordSent(q, out, actorOf(req), '');
     liveEvents.emitUpdate({ kind: 'bd' });
     res.json({ draft: q.getDraft(d.id), ...outreachData() });
+  });
+
+  // ---- Send queue: reviewed drafts go out through Gmail on a drip, no clicking in Gmail ----
+  r.post('/outreach/drafts/queue', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const ids = Array.isArray(b.ids) ? b.ids.map(Number).filter((n) => Number.isInteger(n)) : [];
+    if (!ids.length) throw new HttpError(400, 'No drafts given.');
+    let result: { queued: unknown[]; skipped: { id: number; reason: string }[] };
+    try { result = scheduler.sendQueue.queue(ids, actorOf(req), { force: bool(b.force, false) }); } catch (err) { throw new HttpError(400, (err as Error).message); }
+    res.json({ queued: result.queued.length, skipped: result.skipped, ...outreachData() });
+  });
+  r.post('/outreach/drafts/:id/unqueue', (req, res) => {
+    const d = scheduler.sendQueue.unqueue(idParam(req));
+    if (!d) throw new HttpError(404, 'Draft not found');
+    res.json({ draft: d, ...outreachData() });
+  });
+  /** Send one queued draft right now, ignoring the gap (still inside the window and cap). */
+  r.post('/outreach/send-queue/tick', async (_req, res) => {
+    const sent = await scheduler.sendQueue.tick();
+    res.json({ sent, ...outreachData() });
   });
 
   r.delete('/outreach/drafts/:id', (req, res) => {
@@ -1701,6 +1720,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const b = (req.body ?? {}) as Record<string, unknown>;
     const keys: Record<string, string> = { sender_name: 'outreach_sender_name', sender_title: 'outreach_sender_title', booking_url: 'outreach_booking_url', pitch: 'outreach_pitch', sent_query: 'outreach_sent_query', watchlist_sheet_tab: 'watchlist_sheet_tab', linkedin_check_days: 'linkedin_check_days' };
     for (const [k, setting] of Object.entries(keys)) if (typeof b[k] === 'string' || typeof b[k] === 'number') q.setSetting(setting, String(b[k]).trim());
+    saveSendSettings(q, b);
     if (typeof b.tldv_auto_draft === 'boolean') q.setSetting('tldv_auto_draft', b.tldv_auto_draft ? '1' : '0');
     res.json(outreachData());
   });
