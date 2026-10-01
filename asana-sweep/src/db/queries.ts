@@ -30,6 +30,7 @@ import type {
   Incident,
   HealthAssessment,
   SiteInquiry,
+  InquiryEvent,
   ClientReport,
   ReportData,
   PlaybookItem,
@@ -158,6 +159,11 @@ export class Queries {
 
   setSetting(key: string, value: string): void {
     this.db.prepare('INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
+  }
+
+  /** Every setting whose key starts with `prefix`, e.g. the per-person Gmail connections. */
+  listSettings(prefix: string): { key: string; value: string }[] {
+    return (this.db.prepare("SELECT key, value FROM settings WHERE key LIKE ? || '%' ORDER BY key").all(prefix) as { key: string; value: string | null }[]).map((r) => ({ key: r.key, value: r.value ?? '' }));
   }
 
   // ---- Checks ----
@@ -1404,6 +1410,16 @@ export class Queries {
     const cut = new Date(Date.now() - minutes * 60000).toISOString();
     const r = this.db.prepare('SELECT * FROM site_inquiries WHERE lower(email) = lower(?) AND created_at > ? ORDER BY created_at DESC LIMIT 1').get(email, cut) as Row | undefined;
     return r ? this.rowToInquiry(r) : null;
+  }
+
+  /** One line in an enquiry's history: who did what, when. */
+  addInquiryEvent(inquiryId: number, e: { kind: InquiryEvent['kind']; actor?: string | null; detail?: string | null; url?: string | null }): InquiryEvent {
+    const res = this.db.prepare('INSERT INTO site_inquiry_events (inquiry_id, kind, actor, detail, url) VALUES (?, ?, ?, ?, ?)').run(inquiryId, e.kind, e.actor ?? null, e.detail ?? null, e.url ?? null);
+    return this.listInquiryEvents(inquiryId).find((x) => x.id === Number(res.lastInsertRowid))!;
+  }
+
+  listInquiryEvents(inquiryId: number): InquiryEvent[] {
+    return (this.db.prepare('SELECT * FROM site_inquiry_events WHERE inquiry_id = ? ORDER BY at ASC, id ASC').all(inquiryId) as Row[]).map((r) => ({ id: r.id as number, inquiry_id: r.inquiry_id as number, at: r.at as string, kind: r.kind as InquiryEvent['kind'], actor: (r.actor as string | null) ?? null, detail: (r.detail as string | null) ?? null, url: (r.url as string | null) ?? null }));
   }
 
   updateInquiry(id: number, patch: Partial<Pick<SiteInquiry, 'status' | 'assigned_to' | 'note' | 'slack_ts' | 'replied_at' | 'forwarded_at'>>): SiteInquiry | null {

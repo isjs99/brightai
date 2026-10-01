@@ -1232,6 +1232,24 @@ const migrations: Migration[] = [
       db.exec(`ALTER TABLE promotion_targets ADD COLUMN actor TEXT;`);
     },
   },
+  {
+    version: 30,
+    name: 'website enquiries: history of what was done with each one',
+    up(db) {
+      db.exec(`
+        CREATE TABLE site_inquiry_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          inquiry_id INTEGER NOT NULL REFERENCES site_inquiries(id) ON DELETE CASCADE,
+          at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          kind TEXT NOT NULL,
+          actor TEXT,
+          detail TEXT,
+          url TEXT
+        );
+        CREATE INDEX site_inquiry_events_inquiry ON site_inquiry_events(inquiry_id, at);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

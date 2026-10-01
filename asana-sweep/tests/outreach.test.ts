@@ -203,3 +203,35 @@ describe('gmail send (website enquiry forward)', () => {
     expect(Buffer.from(raw.split('\r\n\r\n')[1].replace(/\r\n/g, ''), 'base64').toString()).toContain('Prefers mornings');
   });
 });
+
+describe('gmail per-person accounts', () => {
+  it('keeps each person\'s connection apart from the shared one and falls back to shared', async () => {
+    const q = new Queries(openTestDb());
+    const { config } = await import('../src/config');
+    config.googleClientId = 'cid';
+    config.googleClientSecret = 'sec';
+    const g = new GmailClient(q);
+    expect(g.connected).toBe(false);
+    expect(g.accounts()).toEqual([]);
+    q.setSetting('gmail_refresh_token', 'shared');
+    q.setSetting('gmail_email', 'isaac@brightform.agency');
+    q.setSetting('gmail_refresh_token:Giorgia', 'g1');
+    q.setSetting('gmail_email:Giorgia', 'giorgia@brightform.agency');
+    expect(g.forAccount('Giorgia').connected).toBe(true);
+    expect(g.forAccount('Giorgia').email).toBe('giorgia@brightform.agency');
+    expect(g.forActor('Giorgia').email).toBe('giorgia@brightform.agency');
+    expect(g.forActor('Tamara').email).toBe('isaac@brightform.agency'); // not connected: shared account
+    expect(g.forActor(null).email).toBe('isaac@brightform.agency');
+    expect(g.accounts().map((a) => a.person)).toEqual(['', 'Giorgia']);
+    // the OAuth state names the account and only validates for that account's client
+    const url = new URL(g.forAccount('Giorgia').authUrl());
+    const state = url.searchParams.get('state')!;
+    expect(GmailClient.accountOfState(state)).toBe('Giorgia');
+    expect(g.forAccount('Giorgia').validState(state)).toBe(true);
+    expect(g.validState(state)).toBe(false);
+    expect(GmailClient.accountOfState(new URL(g.authUrl()).searchParams.get('state')!)).toBe('');
+    g.forAccount('Giorgia').disconnect();
+    expect(g.forAccount('Giorgia').connected).toBe(false);
+    expect(g.connected).toBe(true);
+  });
+});

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { BdAlert, BdEmailDraft, BdFollowup, OutreachData, OutreachExample, TtsContact } from '../../../sweep/types';
-import { api, fmtRelative, useLiveUpdates } from '../api';
+import { api, currentActor, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
 
 type Tab = 'drafts' | 'followups' | 'calls' | 'activity' | 'alerts' | 'settings';
@@ -339,6 +339,9 @@ function Alerts({ data, isAdmin, busy, run, onNotice }: Ctx) {
 
 function Settings({ data, isAdmin, busy, run, onNotice }: Ctx) {
   const s = data.settings;
+  const actor = currentActor();
+  const mine = s.gmail_accounts.find((a) => a.person && a.person === actor) ?? null;
+  const others = s.gmail_accounts.filter((a) => a.person && a.person !== actor);
   const [settings, setSettings] = useState({ sender_name: s.sender_name, sender_title: s.sender_title, booking_url: s.booking_url, pitch: s.pitch, sent_query: s.sent_query, watchlist_sheet_tab: s.watchlist_sheet_tab, linkedin_check_days: s.linkedin_check_days });
   const [newExample, setNewExample] = useState<{ subject: string; body: string; kind: string } | null>(null);
   const [tc, setTc] = useState<Partial<TtsContact> & { market: string; name: string }>({ market: 'DE', name: '', category: '', role: '', lark: '', email: '', notes: '', is_agency_manager: false });
@@ -346,12 +349,16 @@ function Settings({ data, isAdmin, busy, run, onNotice }: Ctx) {
     <>
       <div className="card" style={{ marginBottom: 14 }}>
         <h3 style={{ marginTop: 0 }}>Gmail</h3>
-        {s.gmail_connected ? (
-          <p className="sub">Connected as <b>{s.gmail_email}</b>. Drafts are created in that account's Drafts folder with real formatting and sent from there. {isAdmin && <button className="small" onClick={() => run('gd', api.gmailDisconnect)}>Disconnect</button>}</p>
-        ) : s.gmail_configured ? (
-          <p className="sub">Not connected. {isAdmin && <a className="button primary" href="/api/gmail/connect">Connect Gmail</a>} Until then "Open in Gmail" opens a prefilled compose window (plain text, no bold).</p>
-        ) : (
+        {!s.gmail_configured ? (
           <p className="sub">Add <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> to .env (a Google Cloud OAuth client with redirect URI <code>{window.location.origin}/api/gmail/callback</code>) to save formatted drafts straight into Gmail. Without it, "Open in Gmail" opens a prefilled compose window, which still sends from your own account.</p>
+        ) : (
+          <>
+            <p className="sub"><b>Shared account</b> (sends the website-enquiry forward and is the fallback for drafts): {s.gmail_connected ? <>connected as <b>{s.gmail_email}</b>. {isAdmin && <button className="small" onClick={() => run('gd', () => api.gmailDisconnect(''))}>Disconnect</button>}</> : <>not connected. {isAdmin ? <a className="button primary" href="/api/gmail/connect">Connect shared Gmail</a> : 'An admin connects it.'}</>}</p>
+            <p className="sub" style={{ marginTop: 10 }}><b>Your own Gmail</b>: when connected, "Save to Gmail" and "Draft reply" create the draft in your Drafts folder, so it goes out from your address. {actor ? (
+              mine ? <>Connected for <b>{actor}</b> as <b>{mine.email}</b>. <button className="small" onClick={() => run('gdm', () => api.gmailDisconnect(actor))}>Disconnect</button></> : <a className="button primary" href={`/api/gmail/connect?as=${encodeURIComponent(actor)}`}>Connect my Gmail ({actor})</a>
+            ) : 'Pick your name top right first, then connect.'}</p>
+            {others.length > 0 && <p className="sub" style={{ marginTop: 10 }}>Also connected: {others.map((a) => `${a.person} (${a.email})`).join(', ')}.</p>}
+          </>
         )}
       </div>
 

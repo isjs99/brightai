@@ -12,7 +12,7 @@ import { buildCalendar, buildGmv, buildGmvExplore } from '../reports/index.js';
 import { syncGmv } from '../gmv/sync.js';
 import { cruva } from '../gmv/cruva.js';
 import { discoverWindsorShops, syncWindsorGmv, windsor, windsorStatus } from '../gmv/windsor.js';
-import type { WindsorStatus, InquiriesData, SiteInquiry } from '../sweep/types.js';
+import type { WindsorStatus, InquiriesData, SiteInquiry, InquiryHistory, InquiryMail } from '../sweep/types.js';
 import { currencyForShop } from '../gmv/currency.js';
 import { authorizationUrl, tts } from '../tts/client.js';
 import { deactivatePromotion, pushPromotion, shopCredentials, syncPromotion } from '../tts/promotions.js';
@@ -37,7 +37,7 @@ import { LANGUAGE_NAMES } from '../inbox/language.js';
 import type { ConversationDetail, ContextEntry, InboxData } from '../sweep/types.js';
 import { normaliseDomain } from '../bd/score.js';
 import { importPullFiles, isoDate, parseProspectInput } from '../bd/import.js';
-import { GmailClient, gmailComposeUrl } from '../bd/gmail.js';
+import { GmailClient, gmailComposeUrl, normaliseAccount } from '../bd/gmail.js';
 import { bodyToHtml, LANGUAGES as OUTREACH_LANGUAGES, outreachInputs } from '../bd/outreach.js';
 import { generateDraft as generateOutreachDraft } from '../bd/draft.js';
 import { bulkCandidates, pickBestLinkedin } from '../bd/bulk.js';
@@ -200,7 +200,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   const FORWARD_DEFAULT = 'isaac@brightform.agency';
   const forwardTo = (): string => q.getSetting('site_inquiries_email', FORWARD_DEFAULT).trim();
   /** Emails the enquiry to the team's inbox from the connected Gmail account, with Reply-To set to the enquirer. */
-  const forwardInquiry = async (inq: SiteInquiry): Promise<SiteInquiry> => {
+  const forwardInquiry = async (inq: SiteInquiry, actor = 'dashboard'): Promise<SiteInquiry> => {
     const to = forwardTo();
     if (!to) throw new HttpError(400, 'No forwarding address set (Website enquiries › Settings).');
     if (!gmail.connected) throw new HttpError(400, 'Connect Gmail on the Outreach emails page first; the forward is sent from that account.');
@@ -224,6 +224,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
       `Dashboard: ${config.publicUrl}/inquiries`,
     ];
     await gmail.sendMessage({ to, replyTo: inq.email, replyToName: inq.name, subject: isCall ? `Call request: ${who}` : `Website enquiry: ${who}`, body: lines.join('\n') });
+    q.addInquiryEvent(inq.id, { kind: 'forwarded', actor, detail: `Emailed to ${to} from ${gmail.email ?? 'the shared Gmail'}` });
     return q.updateInquiry(inq.id, { forwarded_at: new Date().toISOString() }) ?? inq;
   };
   r.post('/site/contact', async (req, res) => {
@@ -246,6 +247,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (!name || !message || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return res.status(400).json({ error: 'Name, a valid email and a message are required.' });
     if (q.recentInquiryFrom(email, 2)) return res.status(201).json({ ok: true, duplicate: true });
     const inquiry = q.createInquiry({ kind, name, email, brand, message, phone, preferred_time, language: optText(b.language)?.slice(0, 8) ?? null, page: optText(b.page)?.slice(0, 200) ?? null, gclid: optText(b.gclid)?.slice(0, 200) ?? null, ip });
+    q.addInquiryEvent(inquiry.id, { kind: 'created', actor: 'website', detail: `${kind === 'call' ? 'Call request' : 'Message'} from ${name}${inquiry.page ? ` on ${inquiry.page}` : ''}${inquiry.gclid ? ', arrived from a Google Ads click' : ''}` });
     liveEvents.emitUpdate({ kind: 'inquiries' });
     // The visitor gets their answer now; Slack and the email forward follow without holding the form up.
     res.status(201).json({ ok: true });
@@ -256,6 +258,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
         const text = [`${head}${brand ? ` (${brand})` : ''}`, `*Email:* ${email}`, ...(phone ? [`*Phone:* ${phone}`] : []), ...(preferred_time ? [`*Preferred time:* ${preferred_time}`] : []), `*${kind === 'call' ? 'Details' : 'Message'}:*\n${message.slice(0, 1500)}`, `<${config.publicUrl}/inquiries|Open in the dashboard>`].join('\n');
         const posted = await slackBot.post(await slackBot.channelId(channel), text);
         q.updateInquiry(inquiry.id, { slack_ts: posted.ts });
+        q.addInquiryEvent(inquiry.id, { kind: 'slack', actor: 'dashboard', detail: `Posted to ${channel}` });
       } catch (err) { log.warn(`Website enquiry Slack post failed: ${(err as Error).message}`); }
     }
     if (forwardTo() && gmail.connected) {
@@ -1503,6 +1506,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
       gmail_configured: gmail.configured,
       gmail_connected: gmail.connected,
       gmail_email: gmail.email,
+      gmail_accounts: gmail.accounts(),
       llm_configured: Boolean(config.anthropicApiKey),
       sender_name: q.getSetting('outreach_sender_name', ''),
       sender_title: q.getSetting('outreach_sender_title', ''),
@@ -1607,15 +1611,16 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
 
   /** Push every open dashboard draft into Gmail in one go. */
   r.post('/outreach/drafts/gmail-all', async (req, res) => {
-    if (!gmail.connected) throw new HttpError(400, 'Connect Gmail in Settings first.');
+    const mine = gmail.forActor(actorOf(req));
+    if (!mine.connected) throw new HttpError(400, 'Connect Gmail in Settings first.');
     const open = q.listDrafts({}).filter((d) => d.status === 'draft');
     let saved = 0;
     const errors: string[] = [];
     for (const d of open) {
       try {
-        const g = await gmail.createDraft({ to: d.to_email, toName: d.to_name, subject: d.subject, body: d.body, html: bodyToHtml(d.body) });
+        const g = await mine.createDraft({ to: d.to_email, toName: d.to_name, subject: d.subject, body: d.body, html: bodyToHtml(d.body) });
         q.updateDraft(d.id, { status: 'gmail', gmail_draft_id: g.draft_id, gmail_message_id: g.message_id, gmail_url: g.url });
-        q.logOutreach(d.prospect_id, { channel: 'gmail', action: 'note', note: `Draft "${d.subject}" saved to Gmail (${gmail.email})`, contact_name: d.to_name, actor: actorOf(req) });
+        q.logOutreach(d.prospect_id, { channel: 'gmail', action: 'note', note: `Draft "${d.subject}" saved to Gmail (${mine.email})`, contact_name: d.to_name, actor: actorOf(req) });
         saved += 1;
       } catch (err) {
         errors.push(`${d.shop_name}: ${(err as Error).message}`);
@@ -1654,11 +1659,12 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   r.post('/outreach/drafts/:id/gmail', async (req, res) => {
     const d = q.getDraft(idParam(req));
     if (!d) throw new HttpError(404, 'Draft not found');
-    if (gmail.connected) {
+    const mine = gmail.forActor(actorOf(req));
+    if (mine.connected) {
       try {
-        const g = await gmail.createDraft({ to: d.to_email, toName: d.to_name, subject: d.subject, body: d.body, html: bodyToHtml(d.body) });
+        const g = await mine.createDraft({ to: d.to_email, toName: d.to_name, subject: d.subject, body: d.body, html: bodyToHtml(d.body) });
         const draft = q.updateDraft(d.id, { status: d.status === 'sent' ? 'sent' : 'gmail', gmail_draft_id: g.draft_id, gmail_message_id: g.message_id, gmail_url: g.url });
-        q.logOutreach(d.prospect_id, { channel: 'gmail', action: 'note', note: `Draft "${d.subject}" saved to Gmail (${gmail.email})`, contact_name: d.to_name, actor: actorOf(req) });
+        q.logOutreach(d.prospect_id, { channel: 'gmail', action: 'note', note: `Draft "${d.subject}" saved to Gmail (${mine.email})`, contact_name: d.to_name, actor: actorOf(req) });
         liveEvents.emitUpdate({ kind: 'bd' });
         return res.json({ mode: 'gmail', url: g.url, draft, ...outreachData() });
       } catch (err) {
@@ -1742,29 +1748,37 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   });
 
   // Gmail OAuth: admin clicks Connect, Google sends them back to /api/gmail/callback, we keep the refresh token.
+  // The shared account (no ?as=) needs admin; anyone signed in can connect their own Gmail for the name they act as.
   r.get('/gmail/connect', (req, res) => {
-    if (!isAdminReq(req)) return res.status(403).send('Admin only');
+    const person = normaliseAccount(req.query.as);
+    if (!person && !isAdminReq(req)) return res.status(403).send('Admin only for the shared account. Pick your name top right and connect "my Gmail" instead.');
     if (!gmail.configured) return res.status(400).send('Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env first.');
-    res.redirect(gmail.authUrl());
+    res.redirect(gmail.forAccount(person).authUrl());
   });
 
   r.get('/gmail/callback', async (req, res) => {
     const { code, state, error } = req.query as Record<string, string | undefined>;
-    const back = (msg: string, ok: boolean) => res.redirect(`/outreach?${ok ? 'notice' : 'error'}=${encodeURIComponent(msg)}`);
-    if (!isAdminReq(req)) return back('Sign in as admin, then connect Gmail again.', false);
+    const back = (msg: string, ok: boolean) => res.redirect(`/outreach?tab=settings&${ok ? 'notice' : 'error'}=${encodeURIComponent(msg)}`);
+    if (!auth.isAuthenticated(req)) return back('Sign in, then connect Gmail again.', false);
     if (error) return back(`Google said: ${error}`, false);
-    if (!code || !gmail.validState(state)) return back('Gmail connect failed: bad state. Try again.', false);
+    const person = GmailClient.accountOfState(state);
+    if (person === null) return back('Gmail connect failed: bad state. Try again.', false);
+    if (!person && !isAdminReq(req)) return back('Only an admin can connect the shared account.', false);
+    const client = gmail.forAccount(person);
+    if (!code || !client.validState(state)) return back('Gmail connect failed: bad state. Try again.', false);
     try {
-      const { email } = await gmail.exchangeCode(code);
+      const { email } = await client.exchangeCode(code);
       liveEvents.emitUpdate({ kind: 'settings' });
-      back(`Gmail connected as ${email}.`, true);
+      back(`Gmail connected as ${email}${person ? ` for ${person}` : ' (shared account)'}.`, true);
     } catch (err) {
       back((err as Error).message, false);
     }
   });
 
-  r.post('/gmail/disconnect', (_req, res) => {
-    gmail.disconnect();
+  r.post('/gmail/disconnect', (req, res) => {
+    const person = normaliseAccount((req.body as Record<string, unknown> | undefined)?.person);
+    if (!person && !isAdminReq(req)) throw new HttpError(403, 'Admin only for the shared account.');
+    gmail.forAccount(person).disconnect();
     liveEvents.emitUpdate({ kind: 'settings' });
     res.json(outreachData());
   });
@@ -1897,7 +1911,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   });
 
   // ---- Website enquiries ----
-  const inquiriesData = (): InquiriesData => ({ inquiries: q.listInquiries(), people: q.listPeople(), slack_channel: q.getSetting('site_inquiries_channel', '') || q.getSetting('incidents_default_channel', ''), slack_configured: slackBot.configured, gmail_connected: gmail.connected, gmail_email: gmail.email, forward_to: forwardTo(), origins: siteOrigins() });
+  const inquiriesData = (): InquiriesData => ({ inquiries: q.listInquiries(), people: q.listPeople(), gmail_accounts: gmail.accounts(), slack_channel: q.getSetting('site_inquiries_channel', '') || q.getSetting('incidents_default_channel', ''), slack_configured: slackBot.configured, gmail_connected: gmail.connected, gmail_email: gmail.email, forward_to: forwardTo(), origins: siteOrigins() });
   r.get('/inquiries', (_req, res) => res.json(inquiriesData()));
   r.put('/inquiries/settings', (req, res) => {
     const b = (req.body ?? {}) as Record<string, unknown>;
@@ -1914,7 +1928,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   r.post('/inquiries/:id/forward', async (req, res) => {
     const inq = q.getInquiry(idParam(req));
     if (!inq) throw new HttpError(404, 'Enquiry not found');
-    await forwardInquiry(inq);
+    await forwardInquiry(inq, actorOf(req));
     liveEvents.emitUpdate({ kind: 'inquiries' });
     res.json(inquiriesData());
   });
@@ -1932,14 +1946,47 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (b.assigned_to !== undefined) patch.assigned_to = optText(b.assigned_to);
     if (b.note !== undefined) patch.note = optText(b.note);
     q.updateInquiry(inq.id, patch);
+    const actor = actorOf(req);
+    if (patch.status && patch.status !== inq.status) q.addInquiryEvent(inq.id, { kind: 'status', actor, detail: `Marked ${patch.status}` });
+    if (b.assigned_to !== undefined && (patch.assigned_to ?? null) !== inq.assigned_to) q.addInquiryEvent(inq.id, { kind: 'assigned', actor, detail: patch.assigned_to ? `Assigned to ${patch.assigned_to}` : 'Unassigned' });
+    if (b.note !== undefined && (patch.note ?? null) !== inq.note) q.addInquiryEvent(inq.id, { kind: 'note', actor, detail: patch.note ? `Note: ${patch.note}` : 'Note removed' });
     liveEvents.emitUpdate({ kind: 'inquiries' });
     res.json(inquiriesData());
+  });
+  /** Everything that happened with one enquiry, plus any email to or from them in the connected Gmail. */
+  r.get('/inquiries/:id/history', async (req, res) => {
+    const inq = q.getInquiry(idParam(req));
+    if (!inq) throw new HttpError(404, 'Enquiry not found');
+    const events = q.listInquiryEvents(inq.id);
+    // Enquiries from before the history existed get their known milestones filled in from the row itself.
+    if (!events.some((e) => e.kind === 'created')) events.unshift({ id: 0, inquiry_id: inq.id, at: inq.created_at, kind: 'created', actor: 'website', detail: `${inq.kind === 'call' ? 'Call request' : 'Message'} from ${inq.name}`, url: null });
+    if (inq.forwarded_at && !events.some((e) => e.kind === 'forwarded')) events.push({ id: -1, inquiry_id: inq.id, at: inq.forwarded_at, kind: 'forwarded', actor: 'dashboard', detail: `Emailed to ${forwardTo() || 'the team'}`, url: null });
+    if (inq.replied_at && !events.some((e) => e.kind === 'status' && e.detail === 'Marked replied')) events.push({ id: -2, inquiry_id: inq.id, at: inq.replied_at, kind: 'status', actor: null, detail: 'Marked replied', url: null });
+    events.sort((a, b) => a.at.localeCompare(b.at));
+    const mail: InquiryMail[] = [];
+    let mail_account: string | null = null;
+    let mail_error: string | null = null;
+    const mine = gmail.forActor(actorOf(req));
+    if (mine.connected) {
+      mail_account = mine.email;
+      try {
+        const own = (mine.email ?? '').toLowerCase();
+        for (const m of await mine.searchMessages(`(from:${inq.email} OR to:${inq.email})`, 20)) {
+          const sent = (m.from_email ?? '') === own || (m.from_email ?? '') !== inq.email.toLowerCase();
+          mail.push({ id: m.id, direction: sent ? 'sent' : 'received', from: m.from_email, to: m.to, subject: m.subject, snippet: m.body.replace(/\s+/g, ' ').trim().slice(0, 200), date: m.date, url: `https://mail.google.com/mail/${mine.email ? `?authuser=${encodeURIComponent(mine.email)}` : 'u/0/'}#all/${m.id}` });
+        }
+        mail.sort((a, b) => (a.date ?? '').localeCompare(b.date ?? ''));
+      } catch (err) { mail_error = (err as Error).message; }
+    }
+    const out: InquiryHistory = { inquiry: inq, events, mail, mail_account, mail_error };
+    res.json(out);
   });
   /** A Gmail draft replying to the enquiry, in the site's voice, ready to edit and send. */
   r.post('/inquiries/:id/draft', async (req, res) => {
     const inq = q.getInquiry(idParam(req));
     if (!inq) throw new HttpError(404, 'Enquiry not found');
-    if (!gmail.connected) throw new HttpError(400, 'Connect Gmail on the BD pipeline page first.');
+    const mine = gmail.forActor(actorOf(req));
+    if (!mine.connected) throw new HttpError(400, 'Connect Gmail first (Growth › Outreach emails › Settings): your own, or the shared account.');
     const b = (req.body ?? {}) as Record<string, unknown>;
     const actor = optText(b.actor) ?? 'the Brightform team';
     const first = inq.name.split(/\s+/)[0];
@@ -1958,7 +2005,8 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
         );
       } catch (err) { log.warn(`Enquiry draft via Claude failed, using the template: ${(err as Error).message}`); }
     }
-    const draft = await gmail.createDraft({ to: inq.email, toName: inq.name, subject: isCall ? `Your call with Brightform${inq.brand ? ` (${inq.brand})` : ''}` : `Re: your message to Brightform${inq.brand ? ` (${inq.brand})` : ''}`, body });
+    const draft = await mine.createDraft({ to: inq.email, toName: inq.name, subject: isCall ? `Your call with Brightform${inq.brand ? ` (${inq.brand})` : ''}` : `Re: your message to Brightform${inq.brand ? ` (${inq.brand})` : ''}`, body });
+    q.addInquiryEvent(inq.id, { kind: 'draft', actor: actorOf(req), detail: `Reply drafted in Gmail (${mine.email})`, url: draft.url });
     res.json({ draft, ...inquiriesData() });
   });
 

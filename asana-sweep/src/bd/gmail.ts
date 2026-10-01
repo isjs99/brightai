@@ -4,9 +4,10 @@ import type { Queries } from '../db/queries.js';
 import { log } from '../logger.js';
 
 /**
- * Gmail link for BD outreach. One Google account (Isaac's) is connected once via OAuth; the
- * refresh token lives in settings. Used to create drafts in his Drafts folder (so they are sent
- * from his own account, in his own Gmail) and to read his sent cold outreach as voice samples.
+ * Gmail link. The shared (default) Google account, Isaac's, is connected once via OAuth and its refresh token
+ * lives in settings; it sends the website-enquiry forward and is the fallback for drafts. Each team member can
+ * also connect their own Gmail (keys suffixed with their name, see `forAccount`), and drafts are then created in
+ * the Drafts folder of whoever is acting, so they go out from that person's own address.
  *
  * Setup: a Google Cloud OAuth client (Web application) with redirect URI
  * `${PUBLIC_URL}/api/gmail/callback`, then GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET in .env.
@@ -20,6 +21,12 @@ const API = 'https://gmail.googleapis.com/gmail/v1/users/me';
 const SETTING_REFRESH = 'gmail_refresh_token';
 const SETTING_EMAIL = 'gmail_email';
 const SETTING_CONNECTED_AT = 'gmail_connected_at';
+/** Settings key for a person's own connection: the shared account uses the bare key, a person's gets ":<name>". */
+const keyFor = (base: string, account: string): string => (account ? `${base}:${account}` : base);
+/** A person's name as stored in the key: trimmed, no colons, at most 60 characters. */
+export const normaliseAccount = (v: unknown): string => String(v ?? '').trim().replace(/:/g, '').slice(0, 60);
+
+export interface GmailAccount { person: string; email: string; connected_at: string | null }
 
 export const b64url = (s: string | Buffer): string => Buffer.from(s).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 export const fromB64url = (s: string): string => Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
@@ -103,19 +110,48 @@ export function cleanSentBody(text: string): string {
 
 export class GmailClient {
   private accessToken: { token: string; expires: number } | null = null;
+  private readonly cache = new Map<string, GmailClient>();
 
-  constructor(private q: Queries, private fetchFn: typeof fetch = fetch) {}
+  /** `account` is '' for the shared account, else the person's name. */
+  constructor(private q: Queries, private fetchFn: typeof fetch = fetch, readonly account: string = '') {}
 
   get configured(): boolean {
     return Boolean(config.googleClientId && config.googleClientSecret);
   }
 
   get connected(): boolean {
-    return this.configured && Boolean(this.q.getSetting(SETTING_REFRESH, ''));
+    return this.configured && Boolean(this.q.getSetting(keyFor(SETTING_REFRESH, this.account), ''));
   }
 
   get email(): string | null {
-    return this.q.getSetting(SETTING_EMAIL, '') || null;
+    return this.q.getSetting(keyFor(SETTING_EMAIL, this.account), '') || null;
+  }
+
+  /** The client for one person's own connection (whether or not it is connected yet). */
+  forAccount(person: string): GmailClient {
+    const name = normaliseAccount(person);
+    if (!name || name === this.account) return this;
+    let c = this.cache.get(name);
+    if (!c) { c = new GmailClient(this.q, this.fetchFn, name); this.cache.set(name, c); }
+    return c;
+  }
+
+  /** The client to draft from for whoever is acting: their own Gmail when connected, else the shared account. */
+  forActor(actor: string | null | undefined): GmailClient {
+    const own = actor ? this.forAccount(actor) : this;
+    return own.connected ? own : this;
+  }
+
+  /** Every connected account: the shared one (person '') first, then each person. */
+  accounts(): GmailAccount[] {
+    const out: GmailAccount[] = [];
+    if (this.q.getSetting(SETTING_REFRESH, '')) out.push({ person: '', email: this.q.getSetting(SETTING_EMAIL, ''), connected_at: this.q.getSetting(SETTING_CONNECTED_AT, '') || null });
+    for (const { key, value } of this.q.listSettings(`${SETTING_REFRESH}:`)) {
+      if (!value) continue;
+      const person = key.slice(SETTING_REFRESH.length + 1);
+      out.push({ person, email: this.q.getSetting(keyFor(SETTING_EMAIL, person), ''), connected_at: this.q.getSetting(keyFor(SETTING_CONNECTED_AT, person), '') || null });
+    }
+    return out;
   }
 
   get redirectUri(): string {
@@ -125,21 +161,30 @@ export class GmailClient {
   // ---- OAuth ----
 
   private sign(nonce: string): string {
-    return createHmac('sha256', config.sessionSecret).update(`gmail:${nonce}`).digest('hex').slice(0, 32);
+    return createHmac('sha256', config.sessionSecret).update(`gmail:${nonce}:${this.account}`).digest('hex').slice(0, 32);
   }
 
+  /** OAuth start URL; the state names this client's account so the callback stores the token under the right person. */
   authUrl(): string {
     const nonce = randomBytes(12).toString('hex');
-    const state = `${nonce}.${this.sign(nonce)}`;
+    const state = `${nonce}.${this.sign(nonce)}.${b64url(this.account)}`;
     const p = new URLSearchParams({ client_id: config.googleClientId, redirect_uri: this.redirectUri, response_type: 'code', scope: GMAIL_SCOPES.join(' '), access_type: 'offline', prompt: 'consent', include_granted_scopes: 'true', state });
     return `${AUTH_URL}?${p.toString()}`;
   }
 
   validState(state: string | undefined): boolean {
-    const [nonce, sig] = String(state ?? '').split('.');
+    const [nonce, sig, acct] = String(state ?? '').split('.');
     if (!nonce || !sig) return false;
+    if (fromB64url(acct ?? '') !== this.account) return false;
     const expect = this.sign(nonce);
     return sig.length === expect.length && timingSafeEqual(Buffer.from(sig), Buffer.from(expect));
+  }
+
+  /** Which account a callback's state belongs to ('' for the shared one); null when the state is malformed. */
+  static accountOfState(state: string | undefined): string | null {
+    const parts = String(state ?? '').split('.');
+    if (parts.length < 2) return null;
+    return normaliseAccount(fromB64url(parts[2] ?? ''));
   }
 
   async exchangeCode(code: string): Promise<{ email: string }> {
@@ -149,26 +194,26 @@ export class GmailClient {
     if (!res.ok || !data.access_token) throw new Error(`Google token exchange failed: ${data.error_description ?? data.error ?? res.statusText}`);
     if (!data.refresh_token) throw new Error('Google did not return a refresh token. Remove Brightform from your Google account permissions (myaccount.google.com/permissions) and connect again.');
     this.accessToken = { token: data.access_token, expires: Date.now() + (data.expires_in ?? 3600) * 1000 - 60000 };
-    this.q.setSetting(SETTING_REFRESH, data.refresh_token);
+    this.q.setSetting(keyFor(SETTING_REFRESH, this.account), data.refresh_token);
     const profile = (await this.api('GET', '/profile')) as { emailAddress?: string };
     const email = profile.emailAddress ?? '';
-    this.q.setSetting(SETTING_EMAIL, email);
-    this.q.setSetting(SETTING_CONNECTED_AT, new Date().toISOString());
-    log.info(`Gmail connected as ${email}`);
+    this.q.setSetting(keyFor(SETTING_EMAIL, this.account), email);
+    this.q.setSetting(keyFor(SETTING_CONNECTED_AT, this.account), new Date().toISOString());
+    log.info(`Gmail connected as ${email}${this.account ? ` for ${this.account}` : ' (shared account)'}`);
     return { email };
   }
 
   disconnect(): void {
-    this.q.setSetting(SETTING_REFRESH, '');
-    this.q.setSetting(SETTING_EMAIL, '');
+    this.q.setSetting(keyFor(SETTING_REFRESH, this.account), '');
+    this.q.setSetting(keyFor(SETTING_EMAIL, this.account), '');
     this.accessToken = null;
   }
 
   private async token(): Promise<string> {
     if (this.accessToken && this.accessToken.expires > Date.now()) return this.accessToken.token;
-    const refresh = this.q.getSetting(SETTING_REFRESH, '');
+    const refresh = this.q.getSetting(keyFor(SETTING_REFRESH, this.account), '');
     if (!this.configured) throw new Error('Gmail is not configured: set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env.');
-    if (!refresh) throw new Error('Gmail is not connected. Connect it from Growth > Outreach emails.');
+    if (!refresh) throw new Error(`Gmail is not connected${this.account ? ` for ${this.account}` : ''}. Connect it from Growth > Outreach emails > Settings.`);
     const body = new URLSearchParams({ refresh_token: refresh, client_id: config.googleClientId, client_secret: config.googleClientSecret, grant_type: 'refresh_token' });
     const res = await this.fetchFn(TOKEN_URL, { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body });
     const data = (await res.json().catch(() => ({}))) as { access_token?: string; expires_in?: number; error?: string; error_description?: string };

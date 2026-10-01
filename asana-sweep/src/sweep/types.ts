@@ -700,6 +700,8 @@ export interface OutreachSettings {
   gmail_configured: boolean;
   gmail_connected: boolean;
   gmail_email: string | null;
+  /** Everyone who has connected their own Gmail, plus the shared account (person ''). */
+  gmail_accounts: GmailAccountInfo[];
   llm_configured: boolean;
   sender_name: string;
   sender_title: string;
@@ -1281,9 +1283,47 @@ export interface SiteInquiry {
   created_at: string;
 }
 
+/** A line in an enquiry's history. */
+export type InquiryEventKind = 'created' | 'forwarded' | 'assigned' | 'status' | 'note' | 'draft' | 'slack';
+
+export interface InquiryEvent {
+  id: number;
+  inquiry_id: number;
+  at: string;
+  kind: InquiryEventKind;
+  actor: string | null;
+  detail: string | null;
+  url: string | null;
+}
+
+/** An email to or from the enquirer found in the connected Gmail account. */
+export interface InquiryMail {
+  id: string;
+  direction: 'sent' | 'received';
+  from: string | null;
+  to: string | null;
+  subject: string;
+  snippet: string;
+  date: string | null;
+  url: string;
+}
+
+export interface InquiryHistory {
+  inquiry: SiteInquiry;
+  events: InquiryEvent[];
+  mail: InquiryMail[];
+  /** Which Gmail account the mail was searched in, null when none is connected. */
+  mail_account: string | null;
+  mail_error: string | null;
+}
+
+export interface GmailAccountInfo { person: string; email: string; connected_at: string | null }
+
 export interface InquiriesData {
   inquiries: SiteInquiry[];
   people: Person[];
+  /** Connected Gmail accounts: the shared one (person '') and each person's own. */
+  gmail_accounts: GmailAccountInfo[];
   slack_channel: string;
   slack_configured: boolean;
   gmail_connected: boolean;

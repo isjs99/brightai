@@ -15,6 +15,7 @@ import type {
   BdActivity,
   MonitorData,
   InquiriesData,
+  InquiryHistory,
   HealthSummary,
   HealthThresholds,
   GmvExplore,
@@ -289,7 +290,7 @@ export const api = {
   setExample: (id: number, enabled: boolean) => call<OutreachData>('PUT', `/outreach/examples/${id}`, { enabled }),
   deleteExample: (id: number) => call<OutreachData>('DELETE', `/outreach/examples/${id}`),
   pullExamples: () => call<OutreachData & { pulled: number; added: number }>('POST', '/outreach/examples/pull'),
-  gmailDisconnect: () => call<OutreachData>('POST', '/gmail/disconnect'),
+  gmailDisconnect: (person = '') => call<OutreachData>('POST', '/gmail/disconnect', { person }),
   // LinkedIn sequence, follow-ups, TTS contacts, alerts, activity, calls
   linkedinStep: (contactId: number, step: 'requested' | 'connected' | 'messaged', note?: string) => call<OutreachData & { contact: BdContactT; prospect: BdProspectT; followup: BdFollowup | null; message: { text: string; generator: string } | null }>('POST', `/bd/contacts/${contactId}/linkedin`, { step, note }),
   addFollowup: (f: { prospect_id: number; contact_id?: number | null; title: string; due_at?: string; note?: string }) => call<OutreachData & { followup: BdFollowup }>('POST', '/bd/followups', f),
@@ -313,6 +314,7 @@ export const api = {
   updateInquiry: (id: number, patch: { status?: string; assigned_to?: string | null; note?: string | null }) => call<InquiriesData>('PUT', `/inquiries/${id}`, patch),
   inquirySettings: (s: { slack_channel?: string; origins?: string; forward_to?: string }) => call<InquiriesData>('PUT', '/inquiries/settings', s),
   forwardInquiry: (id: number) => call<InquiriesData>('POST', `/inquiries/${id}/forward`),
+  inquiryHistory: (id: number) => call<InquiryHistory>('GET', `/inquiries/${id}/history`),
   draftInquiryReply: (id: number, actor?: string | null) => call<InquiriesData & { draft: { draft_id: string; message_id: string; url: string } }>('POST', `/inquiries/${id}/draft`, { actor }),
   // Account monitor
   monitor: () => call<MonitorData>('GET', '/monitor'),

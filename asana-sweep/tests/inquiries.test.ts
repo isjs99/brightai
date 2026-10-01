@@ -33,3 +33,16 @@ describe('call requests and the email forward', () => {
     expect(q.listInquiries().map((i) => i.kind)).toEqual(['contact', 'call']);
   });
 });
+
+describe('enquiry history', () => {
+  it('keeps a timeline of what was done with an enquiry', () => {
+    const q = new Queries(openTestDb());
+    const a = q.createInquiry({ kind: 'call', name: 'Ada', email: 'ada@acme.com', message: 'Hi' });
+    q.addInquiryEvent(a.id, { kind: 'created', actor: 'website', detail: 'Call request from Ada' });
+    q.addInquiryEvent(a.id, { kind: 'assigned', actor: 'Isaac', detail: 'Assigned to Giorgia' });
+    const d = q.addInquiryEvent(a.id, { kind: 'draft', actor: 'Giorgia', detail: 'Reply drafted', url: 'https://mail.google.com/x' });
+    expect(d.url).toBe('https://mail.google.com/x');
+    expect(q.listInquiryEvents(a.id).map((e) => e.kind)).toEqual(['created', 'assigned', 'draft']);
+    expect(q.listInquiryEvents(999)).toEqual([]);
+  });
+});
