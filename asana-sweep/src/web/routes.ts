@@ -1574,10 +1574,18 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const ids = Array.isArray(b.ids) ? (b.ids as unknown[]).map(Number).filter((n) => Number.isInteger(n) && n > 0) : undefined;
     const limit = Math.min(Math.max(Number(b.limit) || 25, 1), 500);
     if (scheduler.bulkDrafts.state.running) throw new HttpError(409, 'A bulk draft run is already going. Wait for it to finish or stop it.');
-    if (bool(b.auto_send, false) && !gmail.forActor(actorOf(req)).connected) throw new HttpError(400, 'Connect Gmail first (Outreach emails › Settings) to send automatically.');
-    const state = scheduler.bulkDrafts.start({ ids, market: optText(b.market), limit, include_drafted: bool(b.include_drafted, false) }, { ...opts, to_gmail: bool(b.to_gmail, true), auto_send: bool(b.auto_send, false), actor: actorOf(req) });
+    const autoSend = bool(b.auto_send, false);
+    if (autoSend && !gmail.forActor(actorOf(req)).connected) throw new HttpError(400, 'Connect Gmail first (Outreach emails › Settings) to send automatically.');
+    // Auto-send: shops that already have an open draft get that draft queued instead of being skipped as "already drafted".
+    let pre_queued = 0;
+    const pre_skipped: { id: number; reason: string }[] = [];
+    if (autoSend && ids?.length) {
+      const open = q.listDrafts({}).filter((d) => ids.includes(d.prospect_id) && d.kind === 'cold' && (d.status === 'draft' || d.status === 'gmail'));
+      if (open.length) { const r = scheduler.sendQueue.queue(open.map((d) => d.id), actorOf(req)); pre_queued = r.queued.length; pre_skipped.push(...r.skipped); }
+    }
+    const state = scheduler.bulkDrafts.start({ ids, market: optText(b.market), limit, include_drafted: bool(b.include_drafted, false) }, { ...opts, to_gmail: bool(b.to_gmail, true), auto_send: autoSend, actor: actorOf(req) });
     if (bool(b.to_gmail, true) && !gmail.connected) log.warn('Bulk drafts: Gmail is not connected, drafts stay in the dashboard');
-    res.status(202).json({ state, ...bdData() });
+    res.status(202).json({ state, pre_queued, pre_skipped, ...bdData() });
   });
 
   /** Bulk LinkedIn: the best profile per selected prospect; with log=true each is logged as "connection requested" (reminder to check back). */
