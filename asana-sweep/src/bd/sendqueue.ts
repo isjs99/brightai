@@ -13,16 +13,17 @@ import { log } from '../logger.js';
  * prospect exactly as "Mark as sent" would have, so the pipeline, the Gmail tick and the history stay right.
  */
 
-export const SEND_DEFAULTS = { daily_cap: 30, gap_seconds: 120, hours: '08:30-18:00', weekdays_only: true, paused: false };
+export const SEND_DEFAULTS = { daily_cap: 30, gap_seconds: 120, hours: '08:30-18:00', hours_enabled: true, weekdays_only: true, paused: false };
 
-const SETTINGS = { cap: 'outreach_send_daily_cap', gap: 'outreach_send_gap_seconds', hours: 'outreach_send_hours', weekdays: 'outreach_send_weekdays_only', paused: 'outreach_send_paused', tz: 'check_timezone' } as const;
+const SETTINGS = { cap: 'outreach_send_daily_cap', gap: 'outreach_send_gap_seconds', hours: 'outreach_send_hours', hoursOn: 'outreach_send_hours_enabled', weekdays: 'outreach_send_weekdays_only', paused: 'outreach_send_paused', tz: 'check_timezone' } as const;
 
-export function sendSettings(q: Queries): { daily_cap: number; gap_seconds: number; hours: string; weekdays_only: boolean; paused: boolean; timezone: string } {
+export function sendSettings(q: Queries): { daily_cap: number; gap_seconds: number; hours: string; hours_enabled: boolean; weekdays_only: boolean; paused: boolean; timezone: string } {
   const num = (k: string, d: number, min: number, max: number) => { const n = Number(q.getSetting(k, '')); return Number.isFinite(n) && n >= min && n <= max && q.getSetting(k, '') !== '' ? Math.round(n) : d; };
   return {
     daily_cap: num(SETTINGS.cap, SEND_DEFAULTS.daily_cap, 1, 500),
     gap_seconds: num(SETTINGS.gap, SEND_DEFAULTS.gap_seconds, 10, 3600),
     hours: /^\d{2}:\d{2}-\d{2}:\d{2}$/.test(q.getSetting(SETTINGS.hours, '')) ? q.getSetting(SETTINGS.hours, '') : SEND_DEFAULTS.hours,
+    hours_enabled: (q.getSetting(SETTINGS.hoursOn, '') || (SEND_DEFAULTS.hours_enabled ? '1' : '0')) === '1',
     weekdays_only: (q.getSetting(SETTINGS.weekdays, '') || (SEND_DEFAULTS.weekdays_only ? '1' : '0')) === '1',
     paused: q.getSetting(SETTINGS.paused, '') === '1',
     timezone: q.getSetting(SETTINGS.tz, 'Europe/Madrid'),
@@ -33,6 +34,7 @@ export function saveSendSettings(q: Queries, b: Record<string, unknown>): void {
   if (b.send_daily_cap !== undefined) q.setSetting(SETTINGS.cap, String(Math.max(1, Math.min(500, Math.round(Number(b.send_daily_cap) || SEND_DEFAULTS.daily_cap)))));
   if (b.send_gap_seconds !== undefined) q.setSetting(SETTINGS.gap, String(Math.max(10, Math.min(3600, Math.round(Number(b.send_gap_seconds) || SEND_DEFAULTS.gap_seconds)))));
   if (b.send_hours !== undefined && /^\d{2}:\d{2}-\d{2}:\d{2}$/.test(String(b.send_hours))) q.setSetting(SETTINGS.hours, String(b.send_hours));
+  if (b.send_hours_enabled !== undefined) q.setSetting(SETTINGS.hoursOn, b.send_hours_enabled ? '1' : '0');
   if (b.send_weekdays_only !== undefined) q.setSetting(SETTINGS.weekdays, b.send_weekdays_only ? '1' : '0');
   if (b.send_paused !== undefined) q.setSetting(SETTINGS.paused, b.send_paused ? '1' : '0');
 }
@@ -45,10 +47,11 @@ function localParts(now: Date, timezone: string): { minutes: number; weekday: nu
   return { minutes: Number(parts.hour) % 24 * 60 + Number(parts.minute), weekday, day: `${parts.year}-${parts.month}-${parts.day}` };
 }
 
-/** Whether sends are allowed right now under the hours and weekday rules. */
-export function inSendWindow(now: Date, s: { hours: string; weekdays_only: boolean; timezone: string }): boolean {
+/** Whether sends are allowed right now under the hours and weekday rules (sending hours off = any time of day). */
+export function inSendWindow(now: Date, s: { hours: string; hours_enabled?: boolean; weekdays_only: boolean; timezone: string }): boolean {
   const { minutes, weekday } = localParts(now, s.timezone);
   if (s.weekdays_only && (weekday === 0 || weekday === 6)) return false;
+  if (s.hours_enabled === false) return true;
   const [from, to] = s.hours.split('-').map((t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; });
   return minutes >= from && minutes < to;
 }
@@ -127,7 +130,7 @@ export class SendQueue {
       const earliest = lastSent ? Date.parse(lastSent) + s.gap_seconds * 1000 : now.getTime();
       next_at = new Date(Math.max(earliest, now.getTime())).toISOString();
     }
-    return { queued: queued.length, sent_today, last_sent_at: lastSent, next_at, in_window: inWindow, sending: this.sending, last_error: this.lastError, settings: { daily_cap: s.daily_cap, gap_seconds: s.gap_seconds, hours: s.hours, weekdays_only: s.weekdays_only, paused: s.paused, timezone: s.timezone } };
+    return { queued: queued.length, sent_today, last_sent_at: lastSent, next_at, in_window: inWindow, sending: this.sending, last_error: this.lastError, settings: { daily_cap: s.daily_cap, gap_seconds: s.gap_seconds, hours: s.hours, hours_enabled: s.hours_enabled, weekdays_only: s.weekdays_only, paused: s.paused, timezone: s.timezone } };
   }
 
   /** Called every minute. Sends at most one draft per call so the gap and cap hold even if a send is slow. */

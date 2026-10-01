@@ -700,7 +700,7 @@ export interface SendQueueState {
   in_window: boolean;
   sending: boolean;
   last_error: string | null;
-  settings: { daily_cap: number; gap_seconds: number; hours: string; weekdays_only: boolean; paused: boolean; timezone: string };
+  settings: { daily_cap: number; gap_seconds: number; hours: string; hours_enabled: boolean; weekdays_only: boolean; paused: boolean; timezone: string };
 }
 
 /** One of Isaac's earlier outreach emails, used as a voice sample when drafting. */

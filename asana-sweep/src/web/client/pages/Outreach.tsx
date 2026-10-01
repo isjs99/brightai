@@ -106,15 +106,16 @@ function SendQueueCard({ data, isAdmin, busy, run, onNotice }: Ctx) {
           <span className={`badge ${st.paused ? 'warn' : sq.queued ? 'good' : 'muted'}`}>{st.paused ? 'Paused' : sq.queued ? `${sq.queued} queued` : 'Nothing queued'}</span>
           <span className="badge muted">{sq.sent_today}/{st.daily_cap} sent today</span>
           {sq.next_at && <span className="badge muted">next {fmtRelative(sq.next_at)}</span>}
-          {!sq.in_window && sq.queued > 0 && !st.paused && <span className="badge muted">outside sending hours ({st.hours}{st.weekdays_only ? ', Mon–Fri' : ''})</span>}
+          {!sq.in_window && sq.queued > 0 && !st.paused && <span className="badge muted">{st.hours_enabled ? `outside sending hours (${st.hours}${st.weekdays_only ? ', Mon–Fri' : ''})` : 'weekend (weekdays only)'}</span>}
           {sq.last_error && <span className="badge crit" title={sq.last_error}>Last send failed</span>}
         </div>
         {isAdmin && <div className="actions">
+          <label className="field check" title="On: sends only inside the hours below. Off: sends at any time of day (the gap, the daily cap and weekdays-only still apply)."><input type="checkbox" checked={st.hours_enabled} disabled={busy !== null} onChange={(e) => run('sqh', () => api.saveOutreachSettings({ send_hours_enabled: e.target.checked }), () => onNotice(e.target.checked ? `Sending hours on: ${st.hours} ${st.timezone}.` : 'Sending hours off: queued drafts go out at any time of day.'))} /> Sending hours {st.hours_enabled ? `on (${st.hours})` : 'off'}</label>
           <button className="small" disabled={busy !== null} onClick={() => run('sqp', () => api.saveOutreachSettings({ send_paused: !st.paused }), () => onNotice(st.paused ? 'Auto-send resumed.' : 'Auto-send paused. Queued drafts stay queued.'))}>{st.paused ? 'Resume' : 'Pause'}</button>
           {sq.queued > 0 && sq.in_window && !st.paused && <button className="small" disabled={busy !== null} onClick={() => run('sqt', api.sendQueueTick, (r) => onNotice(r.sent ? `Sent to ${r.sent.to_email}.` : 'Nothing sent: cap reached or the gap since the last send has not passed.'))}>Send next now</button>}
         </div>}
       </div>
-      <p className="sub" style={{ margin: 0 }}>Queued drafts go out one at a time from the Gmail of whoever queued them (or the shared account), every {st.gap_seconds >= 60 ? `${Math.round(st.gap_seconds / 60)} min` : `${st.gap_seconds} s`} at most, {st.hours} {st.timezone}{st.weekdays_only ? ', Monday to Friday' : ''}, up to {st.daily_cap} a day. Each send is logged on the prospect like "Mark as sent". Change the pace in Settings.</p>
+      <p className="sub" style={{ margin: 0 }}>Queued drafts go out one at a time from the Gmail of whoever queued them (or the shared account), every {st.gap_seconds >= 60 ? `${Math.round(st.gap_seconds / 60)} min` : `${st.gap_seconds} s`} at most, {st.hours_enabled ? `${st.hours} ${st.timezone}` : 'any time of day'}{st.weekdays_only ? ', Monday to Friday' : ''}, up to {st.daily_cap} a day. Each send is logged on the prospect like "Mark as sent". Change the pace in Settings.</p>
     </div>
   );
 }
@@ -376,7 +377,7 @@ function Settings({ data, isAdmin, busy, run, onNotice }: Ctx) {
   const others = s.gmail_accounts.filter((a) => a.person && a.person !== actor);
   const [settings, setSettings] = useState({ sender_name: s.sender_name, sender_title: s.sender_title, booking_url: s.booking_url, pitch: s.pitch, sent_query: s.sent_query, watchlist_sheet_tab: s.watchlist_sheet_tab, linkedin_check_days: s.linkedin_check_days });
   const sq = data.send_queue.settings;
-  const [pace, setPace] = useState({ send_daily_cap: sq.daily_cap, send_gap_seconds: sq.gap_seconds, send_hours: sq.hours, send_weekdays_only: sq.weekdays_only });
+  const [pace, setPace] = useState({ send_daily_cap: sq.daily_cap, send_gap_seconds: sq.gap_seconds, send_hours: sq.hours, send_hours_enabled: sq.hours_enabled, send_weekdays_only: sq.weekdays_only });
   const [newExample, setNewExample] = useState<{ subject: string; body: string; kind: string } | null>(null);
   const [tc, setTc] = useState<Partial<TtsContact> & { market: string; name: string }>({ market: 'DE', name: '', category: '', role: '', lark: '', email: '', notes: '', is_agency_manager: false });
   return (
@@ -402,7 +403,8 @@ function Settings({ data, isAdmin, busy, run, onNotice }: Ctx) {
         <div className="inline-form">
           <label className="field" style={{ minWidth: 140 }}><span className="lbl">Max per day</span><input type="number" min={1} max={500} value={pace.send_daily_cap} disabled={!isAdmin} onChange={(e) => setPace({ ...pace, send_daily_cap: Number(e.target.value) })} /></label>
           <label className="field" style={{ minWidth: 160 }}><span className="lbl">Seconds between sends</span><input type="number" min={10} max={3600} value={pace.send_gap_seconds} disabled={!isAdmin} onChange={(e) => setPace({ ...pace, send_gap_seconds: Number(e.target.value) })} /></label>
-          <label className="field" style={{ minWidth: 150 }}><span className="lbl">Sending hours ({sq.timezone})</span><input type="text" value={pace.send_hours} placeholder="08:30-18:00" disabled={!isAdmin} onChange={(e) => setPace({ ...pace, send_hours: e.target.value })} /></label>
+          <label className="field check" title="Off: queued drafts go out at any time of day"><input type="checkbox" checked={pace.send_hours_enabled} disabled={!isAdmin} onChange={(e) => setPace({ ...pace, send_hours_enabled: e.target.checked })} /> Sending hours on</label>
+          <label className="field" style={{ minWidth: 150 }}><span className="lbl">Sending hours ({sq.timezone})</span><input type="text" value={pace.send_hours} placeholder="08:30-18:00" disabled={!isAdmin || !pace.send_hours_enabled} onChange={(e) => setPace({ ...pace, send_hours: e.target.value })} /></label>
           <label className="field check"><input type="checkbox" checked={pace.send_weekdays_only} disabled={!isAdmin} onChange={(e) => setPace({ ...pace, send_weekdays_only: e.target.checked })} /> Weekdays only</label>
         </div>
         {isAdmin && <div className="actions" style={{ marginTop: 8 }}><button className="primary" disabled={busy === 'pace'} onClick={() => run('pace', () => api.saveOutreachSettings(pace), () => onNotice('Auto-send pace saved.'))}>Save pace</button></div>}

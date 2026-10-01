@@ -116,3 +116,16 @@ describe('bulk draft with auto-send', () => {
     expect(d.queued_by).toBe('Isaac');
   });
 });
+
+describe('sending hours switch', () => {
+  it('sends at any time of day when sending hours are off, weekdays rule still applies', async () => {
+    const { q } = await setup();
+    saveSendSettings(q, { send_hours_enabled: false });
+    const s = sendSettings(q);
+    expect(s.hours_enabled).toBe(false);
+    expect(inSendWindow(new Date('2026-10-01T22:30:00Z'), s)).toBe(true); // 00:30 Madrid, Friday
+    expect(inSendWindow(new Date('2026-10-03T10:00:00Z'), s)).toBe(false); // Saturday
+    saveSendSettings(q, { send_hours_enabled: true });
+    expect(inSendWindow(new Date('2026-10-01T22:30:00Z'), sendSettings(q))).toBe(false);
+  });
+});
