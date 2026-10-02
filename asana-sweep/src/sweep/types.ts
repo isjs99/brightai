@@ -736,6 +736,8 @@ export interface OutreachSettings {
 
 export interface OutreachData {
   send_queue: SendQueueState;
+  /** The last bulk draft run, so the queue card can say what it produced. */
+  bulk_draft: BulkDraftStatus;
   drafts: BdEmailDraft[];
   examples: OutreachExample[];
   settings: OutreachSettings;

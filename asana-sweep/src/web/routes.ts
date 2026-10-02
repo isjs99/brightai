@@ -1502,6 +1502,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
 
   const outreachData = (): OutreachData => ({
     send_queue: scheduler.sendQueue.state(),
+    bulk_draft: scheduler.bulkDrafts.state,
     drafts: q.listDrafts(),
     examples: q.listExamples(),
     settings: {
@@ -1581,7 +1582,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const pre_skipped: { id: number; reason: string }[] = [];
     if (autoSend && ids?.length) {
       const open = q.listDrafts({}).filter((d) => ids.includes(d.prospect_id) && d.kind === 'cold' && (d.status === 'draft' || d.status === 'gmail'));
-      if (open.length) { const r = scheduler.sendQueue.queue(open.map((d) => d.id), actorOf(req)); pre_queued = r.queued.length; pre_skipped.push(...r.skipped); }
+      if (open.length) { const r = scheduler.sendQueue.queue(open.map((d) => d.id), actorOf(req), { force: bool(b.include_drafted, false) }); pre_queued = r.queued.length; pre_skipped.push(...r.skipped); }
     }
     const state = scheduler.bulkDrafts.start({ ids, market: optText(b.market), limit, include_drafted: bool(b.include_drafted, false) }, { ...opts, to_gmail: bool(b.to_gmail, true), auto_send: autoSend, actor: actorOf(req) });
     if (bool(b.to_gmail, true) && !gmail.connected) log.warn('Bulk drafts: Gmail is not connected, drafts stay in the dashboard');

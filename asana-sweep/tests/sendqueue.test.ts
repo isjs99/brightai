@@ -129,3 +129,17 @@ describe('sending hours switch', () => {
     expect(inSendWindow(new Date('2026-10-01T22:30:00Z'), sendSettings(q))).toBe(false);
   });
 });
+
+describe('bulk draft resilience', () => {
+  it('falls back to the template when Claude fails, still queues, and notes the failure', async () => {
+    const { q, gmail, sq, p } = await setup();
+    const { BulkDraftJob } = await import('../src/bd/bulk');
+    const gen = async () => ({ subject: 'Hello from Brightform', body: 'Hi,\n\nShort note.\n\nIsaac', generator: 'template' as const, fallback_error: 'Claude API 529: overloaded' });
+    const job = new BulkDraftJob(q, gmail, gen as never, sq);
+    job.start({ ids: [p.id], limit: 10, include_drafted: true }, { language: 'en', style: 'short', to_gmail: true, auto_send: true, actor: 'Isaac' } as never);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(job.state.drafted).toBe(1);
+    expect(job.state.queued).toBe(1);
+    expect(job.state.errors[0]).toMatch(/Claude failed/);
+  });
+});

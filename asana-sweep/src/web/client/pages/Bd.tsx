@@ -334,6 +334,13 @@ export default function BdPage() {
       </div>
       {error && <div className="banner crit">{error}</div>}
       {notice && <div className="banner info">{notice}</div>}
+      {data.bulk_draft.finished_at && !data.bulk_draft.running && (Date.now() - Date.parse(data.bulk_draft.finished_at)) < 6 * 3600000 && (
+        <div className={`banner ${data.bulk_draft.errors.length && !data.bulk_draft.drafted ? 'crit' : 'info'}`} style={{ marginBottom: 8 }}>
+          Last bulk run ({fmtRelative(data.bulk_draft.finished_at)}): {data.bulk_draft.total} shop(s), {data.bulk_draft.drafted} drafted{data.bulk_draft.auto_send ? `, ${data.bulk_draft.queued} queued to send from Gmail` : data.bulk_draft.to_gmail ? `, ${data.bulk_draft.gmail} saved to Gmail drafts` : ''}{data.bulk_draft.skipped ? `, ${data.bulk_draft.skipped} skipped` : ''}{data.bulk_draft.total === 0 ? ' (nothing to do: every selected shop already had a draft or an email out; tick "Include already drafted" to redo them)' : ''}.
+{data.bulk_draft.errors.length > 0 && <details style={{ marginTop: 4 }}><summary>{data.bulk_draft.errors.length} note(s)</summary><ul style={{ margin: '4px 0 0 16px' }}>{data.bulk_draft.errors.slice(0, 20).map((e, i) => <li key={i}>{e}</li>)}</ul></details>}
+          {' '}<Link to="/outreach">Open Outreach emails</Link>.
+        </div>
+      )}
       {data.apollo.configured && data.apollo.exhausted && <div className="banner crit"><b>Apollo has run out of credits.</b> Enrichment and reveals are paused{data.apollo.exhausted_at ? ` since ${fmtRelative(data.apollo.exhausted_at)}` : ''}{data.apollo.cycle_end ? `; the cycle resets on ${data.apollo.cycle_end.slice(0, 10)}` : ''}. Top up in Apollo (Settings &gt; Plans) or wait for the reset; the balance is re-checked every 10 minutes and enrichment resumes on its own.{data.apollo.error ? ` Last error: ${data.apollo.error}` : ''}</div>}
       {data.apollo.configured && !data.apollo.exhausted && data.apollo.ok && (data.apollo.remaining ?? 0) < 200 && <div className="banner info">Apollo credits are running low: {data.apollo.remaining?.toLocaleString('en-GB')} left{data.apollo.cycle_end ? `, cycle resets ${data.apollo.cycle_end.slice(0, 10)}` : ''}.</div>}
       {data.enrich.stopped_reason === 'credits' && !data.enrich.running && <div className="banner crit">The last enrichment run stopped because Apollo ran out of credits ({data.enrich.done} of {data.enrich.total} done).</div>}
@@ -447,7 +454,7 @@ export default function BdPage() {
             <label className="field check" title="Queue each draft to be sent from Gmail on the drip set under Outreach emails › Settings, without reading each one first"><input type="checkbox" checked={bulk.auto_send} disabled={!data.gmail_connected} onChange={(e) => setBulk({ ...bulk, auto_send: e.target.checked })} /> Send automatically from Gmail</label>
             <label className="field check" title="Also draft for prospects that already have an open draft or a sent email"><input type="checkbox" checked={bulk.include_drafted} onChange={(e) => setBulk({ ...bulk, include_drafted: e.target.checked })} /> Include already drafted</label>
           </div>
-          {data.bulk_draft.finished_at && !data.bulk_draft.running && <div className="banner info" style={{ marginBottom: 8 }}>Last run: {data.bulk_draft.drafted} drafted, {data.bulk_draft.gmail} saved to Gmail{data.bulk_draft.errors.length ? `, ${data.bulk_draft.errors.length} error(s): ${data.bulk_draft.errors.slice(0, 3).join(' · ')}` : ''}. <Link to="/outreach">Review drafts</Link>.</div>}
+
           {!bulkPreview ? <p className="sub">Loading candidates…</p> : bulkPreview.count === 0 ? <p className="sub">Nothing to draft{f.market ? ` in ${f.market}` : ''}: every prospect with an email contact already has a draft or an email out. Tick "Include already drafted" to redo them.</p> : (
             <>
               <p className="sub">{bulkPreview.count} prospect(s){f.market ? ` in ${f.market}` : ' across all markets'} ready, sorted by momentum. Who gets the email:</p>

@@ -115,6 +115,7 @@ function SendQueueCard({ data, isAdmin, busy, run, onNotice }: Ctx) {
           {sq.queued > 0 && sq.in_window && !st.paused && <button className="small" disabled={busy !== null} onClick={() => run('sqt', api.sendQueueTick, (r) => onNotice(r.sent ? `Sent to ${r.sent.to_email}.` : 'Nothing sent: cap reached or the gap since the last send has not passed.'))}>Send next now</button>}
         </div>}
       </div>
+      {data.bulk_draft && data.bulk_draft.finished_at && !data.bulk_draft.running && (Date.now() - Date.parse(data.bulk_draft.finished_at)) < 6 * 3600000 && <p className="sub" style={{ margin: '0 0 6px' }}>Last bulk run ({fmtRelative(data.bulk_draft.finished_at)}): {data.bulk_draft.total} shop(s), {data.bulk_draft.drafted} drafted{data.bulk_draft.auto_send ? `, ${data.bulk_draft.queued} queued` : ''}{data.bulk_draft.errors.length ? `, ${data.bulk_draft.errors.length} note(s): ${data.bulk_draft.errors.slice(0, 2).join(' · ')}` : ''}.</p>}
       <p className="sub" style={{ margin: 0 }}>Queued drafts go out one at a time from the Gmail of whoever queued them (or the shared account), every {st.gap_seconds >= 60 ? `${Math.round(st.gap_seconds / 60)} min` : `${st.gap_seconds} s`} at most, {st.hours_enabled ? `${st.hours} ${st.timezone}` : 'any time of day'}{st.weekdays_only ? ', Monday to Friday' : ''}, up to {st.daily_cap} a day. Each send is logged on the prospect like "Mark as sent". Change the pace in Settings.</p>
     </div>
   );
