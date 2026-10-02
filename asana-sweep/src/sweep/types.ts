@@ -639,6 +639,8 @@ export interface BdProspect {
   owner_id: number | null;
   owner_name: string | null;
   notes: string | null;
+  /** The TikTok Shop AM we know for sure is on this account (a tts_contacts id), when recorded. */
+  tts_am_contact_id: number | null;
   outreach_tts_am: boolean;
   outreach_tts_am_at: string | null;
   outreach_gmail: boolean;
@@ -736,6 +738,8 @@ export interface OutreachSettings {
 
 export interface OutreachData {
   send_queue: SendQueueState;
+  lark_messages: LarkMessage[];
+  lark_job: LarkDraftStatus;
   /** The last bulk draft run, so the queue card can say what it produced. */
   bulk_draft: BulkDraftStatus;
   drafts: BdEmailDraft[];
@@ -769,6 +773,48 @@ export interface BdFollowup {
 }
 
 /** Who at TikTok Shop to loop in for a prospect (per market, optionally per category). */
+/** A Lark DM to someone at TikTok Shop about one prospect: who, why them, what it says, the facts it used. */
+export type LarkStatus = 'draft' | 'scheduled' | 'sent' | 'discarded';
+
+export interface LarkMessage {
+  id: number;
+  prospect_id: number;
+  shop_name: string;
+  brand: string | null;
+  market: string;
+  contact_id: number | null;
+  contact_name: string | null;
+  contact_role: string | null;
+  contact_lark: string | null;
+  /** known = the AM recorded on the prospect; tsp = the market's TSP manager (we are not sure who the AM is). */
+  confidence: 'known' | 'tsp';
+  reason: string | null;
+  body: string;
+  /** The verifiable facts the message was written from, for the sender to check. */
+  facts: string[];
+  generator: 'claude' | 'template';
+  status: LarkStatus;
+  /** The day it should be sent (YYYY-MM-DD) once scheduled. */
+  scheduled_for: string | null;
+  sent_at: string | null;
+  sent_by: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LarkDraftStatus {
+  running: boolean;
+  total: number;
+  done: number;
+  drafted: number;
+  skipped: number;
+  current: string | null;
+  errors: string[];
+  started_at: string | null;
+  finished_at: string | null;
+}
+
 export interface TtsContact {
   id: number;
   market: string;
@@ -980,6 +1026,11 @@ export interface BdData {
   bulk_draft: BulkDraftStatus;
   /** Cold email state per prospect id: draft (in the dashboard), gmail (saved to Gmail drafts), sent. */
   draft_state: Record<number, 'draft' | 'gmail' | 'sent'>;
+  /** Lark message state per prospect id. */
+  lark_state: Record<number, LarkStatus>;
+  lark_job: LarkDraftStatus;
+  /** The TikTok Shop directory, so a prospect can record which AM is on the account. */
+  tts_contacts: TtsContact[];
 }
 
 /** Progress of a bulk "draft an email to the best contact of every prospect" run. */
@@ -1081,6 +1132,7 @@ export interface BdProspectInput {
 
 export interface BdProspectPatch {
   status?: BdStatus;
+  tts_am_contact_id?: number | null;
   owner_id?: number | null;
   notes?: string | null;
   domain?: string | null;

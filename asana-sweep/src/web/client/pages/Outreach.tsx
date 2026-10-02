@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import type { BdAlert, BdEmailDraft, BdFollowup, OutreachData, OutreachExample, TtsContact } from '../../../sweep/types';
+import type { BdAlert, BdEmailDraft, BdFollowup, LarkMessage, OutreachData, OutreachExample, TtsContact } from '../../../sweep/types';
 import { api, currentActor, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
 
-type Tab = 'drafts' | 'followups' | 'calls' | 'activity' | 'alerts' | 'settings';
+type Tab = 'drafts' | 'lark' | 'followups' | 'calls' | 'activity' | 'alerts' | 'settings';
 const TABS: { key: Tab; label: string }[] = [
   { key: 'drafts', label: 'Email drafts' },
+  { key: 'lark', label: 'Lark messages' },
   { key: 'followups', label: 'Follow-ups' },
   { key: 'calls', label: 'Call follow-ups' },
   { key: 'activity', label: 'Team activity' },
@@ -55,6 +56,9 @@ export default function OutreachPage() {
   if (!data) return <p>{error ?? 'Loading…'}</p>;
   const dueCount = data.followups.filter((f) => Date.parse(f.due_at) <= Date.now()).length;
   const callDrafts = data.drafts.filter((d) => d.kind === 'followup');
+  const todayKey = new Date().toISOString().slice(0, 10);
+  const larkDue = data.lark_messages.filter((m) => m.status === 'scheduled' && m.scheduled_for !== null && m.scheduled_for <= todayKey).length;
+  const larkOpen = data.lark_messages.filter((m) => m.status === 'draft' || m.status === 'scheduled').length;
   const ctx = { data, isAdmin, busy, run, onNotice: setNotice, onError: setError };
 
   return (
@@ -72,6 +76,7 @@ export default function OutreachPage() {
           <button key={t.key} className={`tab ${tab === t.key ? 'active' : ''}`} onClick={() => setTab(t.key)}>
             {t.label}
             {t.key === 'drafts' && ` (${data.drafts.filter((d) => d.kind === 'cold' && d.status !== 'sent').length})`}
+            {t.key === 'lark' && (larkDue > 0 ? <span className="badge warn" style={{ marginLeft: 6 }}>{larkDue} due</span> : larkOpen > 0 ? ` (${larkOpen})` : '')}
             {t.key === 'followups' && dueCount > 0 && <span className="badge warn" style={{ marginLeft: 6 }}>{dueCount} due</span>}
             {t.key === 'calls' && callDrafts.length > 0 && ` (${callDrafts.filter((d) => d.status !== 'sent').length})`}
             {t.key === 'alerts' && data.alerts.length > 0 && <span className="badge crit" style={{ marginLeft: 6 }}>{data.alerts.length}</span>}
@@ -79,6 +84,7 @@ export default function OutreachPage() {
         ))}
       </div>
       {tab === 'drafts' && <Drafts {...ctx} kind="cold" initialDraft={params.get('draft') ? Number(params.get('draft')) : null} />}
+      {tab === 'lark' && <Lark {...ctx} />}
       {tab === 'calls' && <Calls {...ctx} />}
       {tab === 'followups' && <Followups {...ctx} />}
       {tab === 'activity' && <Activity {...ctx} />}
@@ -209,6 +215,135 @@ function Drafts({ data, isAdmin, busy, run, onNotice, onError, kind, initialDraf
                 </>
               )}
               <p className="sub" style={{ marginTop: 10 }}>Written by {draft.generator === 'claude' ? 'Claude in Isaac\'s voice' : 'the template (set ANTHROPIC_API_KEY for tailored drafts)'} · {fmtRelative(draft.created_at)} by {draft.created_by ?? 'admin'}.</p>
+            </>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function larkBadge(m: LarkMessage, today: string) {
+  if (m.status === 'sent') return <span className="badge good" title={m.sent_at ? `Sent ${fmtRelative(m.sent_at)} by ${m.sent_by ?? 'admin'}` : ''}>Sent</span>;
+  if (m.status === 'scheduled') return m.scheduled_for && m.scheduled_for <= today ? <span className="badge warn">{m.scheduled_for === today ? 'Due today' : `Overdue (${m.scheduled_for})`}</span> : <span className="badge accent">{m.scheduled_for}</span>;
+  return <span className="badge muted">Draft</span>;
+}
+
+/** Lark messages to TikTok Shop AMs / TSP managers: review the facts, edit, copy, open Lark, mark sent. Bulk scheduled across days. */
+function Lark({ data, isAdmin, busy, run, onNotice }: Ctx) {
+  const today = new Date().toISOString().slice(0, 10);
+  const [selected, setSelected] = useState<number | null>(null);
+  const [edit, setEdit] = useState('');
+  const [instructions, setInstructions] = useState('');
+  const [view, setView] = useState<'open' | 'due' | 'sent' | 'all'>('open');
+  const [ticked, setTicked] = useState<Set<number>>(new Set());
+  const [sched, setSched] = useState({ per_day: 5, start: today, weekdays_only: true });
+  const [copied, setCopied] = useState(false);
+  const msgs = data.lark_messages;
+  const job = data.lark_job;
+  const isDue = (m: LarkMessage) => m.status === 'scheduled' && m.scheduled_for !== null && m.scheduled_for <= today;
+  const list = msgs.filter((m) => (view === 'open' ? m.status !== 'sent' : view === 'due' ? isDue(m) : view === 'sent' ? m.status === 'sent' : true));
+  const current = msgs.find((m) => m.id === selected) ?? null;
+  useEffect(() => { setEdit(current?.body ?? ''); setCopied(false); }, [current?.id, current?.updated_at]); // eslint-disable-line react-hooks/exhaustive-deps
+  const dirty = Boolean(current && edit.trim() !== current.body.trim());
+  const saveIfDirty = async () => { if (current && dirty) await api.updateLark(current.id, { body: edit.trim() }); };
+  const contact = current && current.contact_id ? data.tts_contacts.find((c) => c.id === current.contact_id) ?? null : null;
+  const larkUrl = contact?.lark && /^https?:\/\//i.test(contact.lark) ? contact.lark : null;
+  const copyAndOpen = () => current && run('copy', async () => {
+    await saveIfDirty();
+    try { await navigator.clipboard.writeText(edit.trim()); setCopied(true); } catch { onNotice('Copy failed; select the text by hand.'); }
+    if (larkUrl) { const w = window.open(larkUrl, '_blank', 'noopener'); if (!w) onNotice(`Pop-up blocked. Open Lark here: ${larkUrl}`); }
+    return api.outreach();
+  }, () => onNotice(larkUrl ? `Message copied and ${current.contact_name ?? 'the contact'}'s Lark opened. Paste, send, then click "Sent in Lark".` : `Message copied. ${current.contact_name ?? 'This contact'} has no Lark link on file: find them in Lark, paste, send, then click "Sent in Lark".`));
+  const toggleAll = () => setTicked(ticked.size === list.length && list.length ? new Set() : new Set(list.filter((m) => m.status !== 'sent').map((m) => m.id)));
+  const scheduleTicked = () => {
+    const ids = [...ticked].filter((id) => msgs.some((m) => m.id === id && m.status !== 'sent'));
+    if (!ids.length) return;
+    run('sched', () => api.scheduleLark(ids, sched), (r) => { setTicked(new Set()); onNotice(`${r.scheduled} message(s) scheduled, ${sched.per_day} a day${sched.weekdays_only ? ' on weekdays' : ''} from ${sched.start}${r.last_day ? ` to ${r.last_day}` : ''}. Due ones show up here each morning and in the 09:00 Slack DM.`); });
+  };
+  const confidence = (m: LarkMessage) => (m.confidence === 'known' ? <span className="badge good" title={m.reason ?? ''}>Known AM</span> : <span className="badge accent" title={m.reason ?? ''}>TSP manager</span>);
+
+  return (
+    <>
+      <p className="hint">One short Lark DM per shop: to the TikTok AM when we know for sure who is on the account (set "Known TikTok AM" on the prospect in the BD pipeline), otherwise to the TSP manager for the market. Each draft lists the facts it was written from so you can check it is true before it goes. Lark has no API for this, so the dashboard copies the text and opens the person in Lark; you paste, send, and click "Sent in Lark", which ticks TikTok AM on the prospect. Tick messages and schedule them across days; the due ones land in the 09:00 Slack DM.</p>
+      <div className="toolbar">
+        <div className="actions">
+          <span className={`badge ${msgs.some(isDue) ? 'warn' : 'muted'}`}>{msgs.filter(isDue).length} due</span>
+          <span className="badge muted">{msgs.filter((m) => m.status === 'scheduled' && !isDue(m)).length} scheduled</span>
+          <span className="badge muted">{msgs.filter((m) => m.status === 'draft').length} unscheduled</span>
+          {job.running && <span className="badge accent">Drafting {job.done}/{job.total}{job.current ? `: ${job.current}` : ''}</span>}
+          {job.running && isAdmin && <button className="small" disabled={busy !== null} onClick={() => run('lstop', api.larkStop, () => onNotice('Stopping after the current one.'))}>Stop</button>}
+          <select value={view} onChange={(e) => setView(e.target.value as typeof view)}><option value="open">Open</option><option value="due">Due today</option><option value="sent">Sent</option><option value="all">All</option></select>
+          {isAdmin && <Link className="button small" to="/bd">Draft from the pipeline</Link>}
+        </div>
+      </div>
+      {!job.running && job.finished_at && (Date.now() - Date.parse(job.finished_at)) < 6 * 3600000 && <p className="sub" style={{ margin: '0 0 8px' }}>Last run ({fmtRelative(job.finished_at)}): {job.total} shop(s), {job.drafted} drafted{job.skipped ? `, ${job.skipped} skipped` : ''}{job.errors.length ? `: ${job.errors.slice(0, 3).join(' · ')}` : ''}.</p>}
+      {isAdmin && list.some((m) => m.status !== 'sent') && (
+        <div className="card" style={{ marginBottom: 12, padding: '10px 14px' }}>
+          <div className="inline-form" style={{ alignItems: 'center' }}>
+            <button className="small" onClick={toggleAll}>{ticked.size === list.length && list.length ? 'Untick all' : `Tick all ${list.filter((m) => m.status !== 'sent').length} shown`}</button>
+            <b>{ticked.size} ticked</b>
+            <label className="field" style={{ minWidth: 90 }}><span className="lbl">Per day</span><input type="number" min={1} max={50} value={sched.per_day} onChange={(e) => setSched({ ...sched, per_day: Math.max(1, Number(e.target.value) || 1) })} /></label>
+            <label className="field" style={{ minWidth: 150 }}><span className="lbl">From</span><input type="date" value={sched.start} onChange={(e) => setSched({ ...sched, start: e.target.value || today })} /></label>
+            <label className="field check"><input type="checkbox" checked={sched.weekdays_only} onChange={(e) => setSched({ ...sched, weekdays_only: e.target.checked })} /> Weekdays only</label>
+            <button className="primary" disabled={busy !== null || ticked.size === 0} onClick={scheduleTicked}>{busy === 'sched' ? 'Scheduling…' : `Schedule ${ticked.size} across days`}</button>
+            <button disabled={busy !== null || ticked.size === 0} onClick={() => window.confirm(`Discard ${ticked.size} message(s)?`) && run('ldel', async () => { for (const id of ticked) await api.deleteLark(id); setTicked(new Set()); return api.outreach(); })}>Discard ticked</button>
+          </div>
+        </div>
+      )}
+      <div className="inbox-split">
+        <div className="inbox-list">
+          {list.length === 0 ? <div className="empty">{view === 'due' ? 'Nothing due today.' : view === 'sent' ? 'Nothing sent yet.' : 'No Lark messages yet. Tick shops in the BD pipeline and click "Draft Lark messages".'}</div> : list.map((m) => (
+            <div key={m.id} className={`conv ${selected === m.id ? 'active' : ''}`} style={{ display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+              {isAdmin && m.status !== 'sent' && <input type="checkbox" checked={ticked.has(m.id)} onClick={(e) => e.stopPropagation()} onChange={() => { const n = new Set(ticked); if (n.has(m.id)) n.delete(m.id); else n.add(m.id); setTicked(n); }} style={{ marginTop: 4 }} />}
+              <button className="conv" style={{ flex: 1, padding: 0, border: 0, background: 'transparent', textAlign: 'left' }} onClick={() => setSelected(m.id)}>
+                <div className="page-head" style={{ marginBottom: 2 }}><b>{m.brand ?? m.shop_name}</b> {larkBadge(m, today)}</div>
+                <div className="sub">{m.market} · to {m.contact_name ?? 'nobody yet'}{m.contact_role ? ` (${m.contact_role})` : ''} {confidence(m)}</div>
+                <div className="sub">{fmtRelative(m.updated_at)} · {m.generator === 'claude' ? 'Claude' : 'template'}{m.created_by ? ` · ${m.created_by}` : ''}</div>
+              </button>
+            </div>
+          ))}
+        </div>
+        <div className="detail card">
+          {!current ? <p className="sub">Pick a message on the left.</p> : (
+            <>
+              <div className="page-head" style={{ marginBottom: 8 }}>
+                <div><b>{current.brand ?? current.shop_name}</b> <span className="badge muted">{current.market}</span> {larkBadge(current, today)} <Link to={`/bd?q=${encodeURIComponent(current.shop_name)}`} className="sub">open in pipeline</Link></div>
+                {isAdmin && current.status !== 'sent' && <button className="small danger" onClick={() => window.confirm('Discard this message?') && run('ldel1', () => api.deleteLark(current.id), () => setSelected(null))}>Discard</button>}
+              </div>
+              <div className="inline-form" style={{ marginBottom: 8, alignItems: 'center' }}>
+                <label className="field" style={{ minWidth: 280 }}><span className="lbl">To</span>
+                  <select value={current.contact_id ?? ''} disabled={!isAdmin || current.status === 'sent'} onChange={(e) => run('lto', () => api.updateLark(current.id, { contact_id: e.target.value ? Number(e.target.value) : null }), () => onNotice('Recipient changed. Redraft if the wording should change with it.'))}>
+                    <option value="">– nobody –</option>
+                    {[...data.tts_contacts].sort((a, b) => (a.market === current.market ? 0 : 1) - (b.market === current.market ? 0 : 1) || a.market.localeCompare(b.market) || a.name.localeCompare(b.name)).map((c) => <option key={c.id} value={c.id}>{c.market} · {c.name}{c.role ? ` · ${c.role}` : ''}{c.is_agency_manager ? ' (TSP manager)' : ''}</option>)}
+                  </select>
+                </label>
+                <span>{confidence(current)} <span className="sub">{current.reason}</span></span>
+                {contact?.lark && !larkUrl && <span className="sub">Lark: {contact.lark}</span>}
+                {!contact?.lark && contact && <span className="sub">No Lark link on file for {contact.name}; add one under Voice, Gmail &amp; contacts and "Copy &amp; open Lark" will open them directly.</span>}
+              </div>
+              <div className="card" style={{ background: 'var(--surface-2)', marginBottom: 8, padding: '8px 12px' }}>
+                <b>Check these before sending</b> <span className="sub">(the only facts the draft was written from; anything else in the text is wrong)</span>
+                <ul style={{ margin: '4px 0 0 18px', padding: 0 }}>{current.facts.map((f, i) => <li key={i} className="sub">{f}</li>)}</ul>
+              </div>
+              <textarea rows={7} style={{ width: '100%', fontFamily: 'inherit' }} value={edit} disabled={!isAdmin || current.status === 'sent'} onChange={(e) => setEdit(e.target.value)} />
+              <div className="sub" style={{ marginTop: 2 }}>{edit.trim().split(/\s+/).filter(Boolean).length} words</div>
+              {isAdmin && current.status !== 'sent' && (
+                <>
+                  <div className="actions" style={{ marginTop: 8 }}>
+                    <button className="primary" disabled={busy !== null} onClick={copyAndOpen}>{busy === 'copy' ? 'Opening…' : copied ? 'Copied' : larkUrl ? 'Copy & open Lark' : 'Copy message'}</button>
+                    <button disabled={busy !== null} onClick={() => window.confirm(`Sent in Lark to ${current.contact_name ?? 'the contact'}? This ticks TikTok AM on the prospect and logs it in the history.`) && run('lsent', async () => { await saveIfDirty(); return api.larkSent(current.id); }, () => onNotice('Logged. TikTok AM is ticked on the prospect.'))}>Sent in Lark</button>
+                    <button disabled={!dirty || busy !== null} onClick={() => run('lsave', async () => { await saveIfDirty(); return api.outreach(); }, () => onNotice('Saved.'))}>Save edits</button>
+                    <label className="field" style={{ minWidth: 160 }}><span className="lbl">Send on</span><input type="date" value={current.scheduled_for ?? ''} onChange={(e) => run('lday', () => api.updateLark(current.id, { scheduled_for: e.target.value || null }))} /></label>
+                  </div>
+                  <div className="inline-form" style={{ marginTop: 10 }}>
+                    <label className="field" style={{ flex: 1, minWidth: 260 }}><span className="lbl">Steer it</span><input type="text" value={instructions} placeholder="e.g. mention we met at the Berlin event, keep it to three lines" onChange={(e) => setInstructions(e.target.value)} /></label>
+                    <button disabled={busy !== null} onClick={() => run('lregen', () => api.regenerateLark(current.id, instructions || undefined), () => onNotice('Redrafted from the latest facts.'))}>{busy === 'lregen' ? 'Drafting…' : 'Redraft'}</button>
+                  </div>
+                </>
+              )}
+              {current.status === 'sent' && <p className="sub" style={{ marginTop: 6 }}>Sent {fmtRelative(current.sent_at)} by {current.sent_by ?? 'admin'}.</p>}
+              <p className="sub" style={{ marginTop: 10 }}>Written by {current.generator === 'claude' ? 'Claude in Isaac\'s voice' : 'the template (set ANTHROPIC_API_KEY for tailored drafts)'} · {fmtRelative(current.created_at)} by {current.created_by ?? 'admin'}.</p>
             </>
           )}
         </div>

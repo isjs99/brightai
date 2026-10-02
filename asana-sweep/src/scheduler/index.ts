@@ -18,6 +18,7 @@ import { draftCallFollowups, tldv } from '../bd/tldv.js';
 import { scanEnterpriseAlerts } from '../bd/alerts.js';
 import { GmailClient } from '../bd/gmail.js';
 import { BulkDraftJob } from '../bd/bulk.js';
+import { LarkDraftJob } from '../bd/lark.js';
 import { SendQueue } from '../bd/sendqueue.js';
 import { StockTracker } from '../stock/index.js';
 import { IncidentEngine } from '../incidents/index.js';
@@ -50,6 +51,7 @@ export class Scheduler {
   private healthTask: ScheduledTask | null = null;
   readonly gmail: GmailClient;
   readonly bulkDrafts: BulkDraftJob;
+  readonly larkJob: LarkDraftJob;
   readonly sendQueue: SendQueue;
   private sendTask: ScheduledTask | null = null;
   readonly stock: StockTracker;
@@ -71,6 +73,7 @@ export class Scheduler {
     this.gmail = new GmailClient(q);
     this.sendQueue = new SendQueue(q, this.gmail);
     this.bulkDrafts = new BulkDraftJob(q, this.gmail, undefined, this.sendQueue);
+    this.larkJob = new LarkDraftJob(q);
     this.stock = new StockTracker(q);
     this.incidents = new IncidentEngine(q);
     this.reports = new ClientReports(q);
@@ -197,20 +200,33 @@ export class Scheduler {
   /** DM each person their due BD follow-ups (matched by the actor name on the follow-up); the rest go to the admin channel if configured. */
   async remindFollowups(): Promise<{ sent: number }> {
     const due = this.q.listFollowups().filter((f) => Date.parse(f.due_at) <= Date.now() + 12 * 3600000);
-    if (!due.length) return { sent: 0 };
+    const today = new Date().toISOString().slice(0, 10);
+    const lark = this.q.listLarkMessages().filter((m) => m.status === 'scheduled' && m.scheduled_for !== null && m.scheduled_for <= today);
+    if (!due.length && !lark.length) return { sent: 0 };
     const people = this.q.listPeople();
-    const byActor = new Map<string, typeof due>();
-    for (const f of due) {
-      const key = (f.created_by ?? '').toLowerCase();
-      byActor.set(key, [...(byActor.get(key) ?? []), f]);
-    }
+    const byActor = new Map<string, { followups: typeof due; lark: typeof lark }>();
+    const bucket = (actor: string | null) => {
+      const key = (actor ?? '').toLowerCase();
+      if (!byActor.has(key)) byActor.set(key, { followups: [], lark: [] });
+      return byActor.get(key)!;
+    };
+    for (const f of due) bucket(f.created_by).followups.push(f);
+    for (const m of lark) bucket(m.created_by).lark.push(m);
     let sent = 0;
     for (const [actor, items] of byActor) {
       const person = people.find((p) => p.name.toLowerCase() === actor || actor.startsWith(p.name.toLowerCase()));
       if (!person?.slack_user_id) continue;
-      const lines = items.slice(0, 15).map((f) => `• ${f.title}${f.linkedin_url ? ` (${f.linkedin_url})` : ''}${f.overdue ? ' — overdue' : ''}`);
+      const parts: string[] = [];
+      if (items.followups.length) {
+        const lines = items.followups.slice(0, 15).map((f) => `• ${f.title}${f.linkedin_url ? ` (${f.linkedin_url})` : ''}${f.overdue ? ' — overdue' : ''}`);
+        parts.push(`BD follow-ups due today (${items.followups.length}):\n${lines.join('\n')}\n${config.publicUrl}/outreach?tab=followups`);
+      }
+      if (items.lark.length) {
+        const lines = items.lark.slice(0, 15).map((m) => `• ${m.brand ?? m.shop_name} → ${m.contact_name ?? 'TikTok Shop'}${m.scheduled_for && m.scheduled_for < today ? ' — overdue' : ''}`);
+        parts.push(`Lark messages to send today (${items.lark.length}):\n${lines.join('\n')}\n${config.publicUrl}/outreach?tab=lark`);
+      }
       try {
-        await slackBot.dm(person.slack_user_id, `BD follow-ups due today (${items.length}):\n${lines.join('\n')}\n${config.publicUrl}/outreach?tab=followups`);
+        await slackBot.dm(person.slack_user_id, parts.join('\n\n'));
         sent += 1;
       } catch (err) {
         log.warn(`Follow-up reminder to ${person.name} failed: ${(err as Error).message}`);

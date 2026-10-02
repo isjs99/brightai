@@ -20,6 +20,7 @@ import type {
   OutreachExample,
   BdFollowup,
   TtsContact,
+  LarkMessage,
   WatchlistEntry,
   BdAlert,
   BdActivity,
@@ -971,6 +972,7 @@ export class Queries {
       owner_id: (r.owner_id as number | null) ?? null,
       owner_name: (r.owner_name as string | null) ?? null,
       notes: (r.notes as string | null) ?? null,
+      tts_am_contact_id: (r.tts_am_contact_id as number | null) ?? null,
       ...o,
       outreach_tts_am_at: (r.outreach_tts_am_at as string | null) ?? null,
       outreach_gmail_at: (r.outreach_gmail_at as string | null) ?? null,
@@ -1077,7 +1079,7 @@ export class Queries {
   patchProspect(id: number, patch: BdProspectPatch, actor?: string | null): BdProspect | null {
     const sets: string[] = [];
     const params: Record<string, unknown> = { id, now: new Date().toISOString() };
-    const simple: (keyof BdProspectPatch)[] = ['status', 'owner_id', 'notes', 'domain', 'website', 'launched_at', 'gmv_started_at', 'apollo_org_id', 'company_industry', 'company_employees', 'company_linkedin', 'company_location', 'company_description', 'enriched_at', 'enrich_note'];
+    const simple: (keyof BdProspectPatch)[] = ['status', 'owner_id', 'notes', 'tts_am_contact_id', 'domain', 'website', 'launched_at', 'gmv_started_at', 'apollo_org_id', 'company_industry', 'company_employees', 'company_linkedin', 'company_location', 'company_description', 'enriched_at', 'enrich_note'];
     for (const k of simple) {
       if (patch[k] !== undefined) {
         sets.push(`${k} = @${k}`);
@@ -1269,6 +1271,70 @@ export class Queries {
 
   deleteTtsContact(id: number): boolean {
     return this.db.prepare('DELETE FROM tts_contacts WHERE id = ?').run(id).changes > 0;
+  }
+
+  // ---- Lark messages to TikTok Shop AMs / TSP managers ----
+
+  private static LARK_SELECT = `SELECT m.*, p.shop_name, p.brand, p.market, c.name AS contact_name, c.role AS contact_role, c.lark AS contact_lark FROM bd_lark_messages m JOIN bd_prospects p ON p.id = m.prospect_id LEFT JOIN tts_contacts c ON c.id = m.contact_id`;
+
+  private rowToLark(r: Row): LarkMessage {
+    let facts: string[] = [];
+    try { const v = JSON.parse((r.facts_json as string) || '[]'); if (Array.isArray(v)) facts = v.map(String); } catch { facts = []; }
+    return {
+      id: r.id as number,
+      prospect_id: r.prospect_id as number,
+      shop_name: r.shop_name as string,
+      brand: (r.brand as string | null) ?? null,
+      market: r.market as string,
+      contact_id: (r.contact_id as number | null) ?? null,
+      contact_name: (r.contact_name as string | null) ?? null,
+      contact_role: (r.contact_role as string | null) ?? null,
+      contact_lark: (r.contact_lark as string | null) ?? null,
+      confidence: r.confidence === 'known' ? 'known' : 'tsp',
+      reason: (r.reason as string | null) ?? null,
+      body: r.body as string,
+      facts,
+      generator: r.generator === 'claude' ? 'claude' : 'template',
+      status: (r.status as LarkMessage['status']) ?? 'draft',
+      scheduled_for: (r.scheduled_for as string | null) ?? null,
+      sent_at: (r.sent_at as string | null) ?? null,
+      sent_by: (r.sent_by as string | null) ?? null,
+      created_by: (r.created_by as string | null) ?? null,
+      created_at: r.created_at as string,
+      updated_at: r.updated_at as string,
+    };
+  }
+
+  createLarkMessage(m: { prospect_id: number; contact_id: number | null; confidence: LarkMessage['confidence']; reason: string | null; body: string; facts: string[]; generator: LarkMessage['generator']; created_by: string | null }): LarkMessage {
+    const info = this.db.prepare(`INSERT INTO bd_lark_messages (prospect_id, contact_id, confidence, reason, body, facts_json, generator, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(m.prospect_id, m.contact_id, m.confidence, m.reason, m.body, JSON.stringify(m.facts), m.generator, m.created_by);
+    return this.getLarkMessage(Number(info.lastInsertRowid))!;
+  }
+
+  getLarkMessage(id: number): LarkMessage | null {
+    const r = this.db.prepare(`${Queries.LARK_SELECT} WHERE m.id = ?`).get(id) as Row | undefined;
+    return r ? this.rowToLark(r) : null;
+  }
+
+  /** Every Lark message that is not discarded: due ones first, then drafts, then sent (newest first). */
+  listLarkMessages(opts: { includeDiscarded?: boolean } = {}): LarkMessage[] {
+    const where = opts.includeDiscarded ? '' : ` WHERE m.status != 'discarded'`;
+    return (this.db.prepare(`${Queries.LARK_SELECT}${where} ORDER BY CASE m.status WHEN 'scheduled' THEN 0 WHEN 'draft' THEN 1 WHEN 'sent' THEN 2 ELSE 3 END, m.scheduled_for, m.sent_at DESC, m.id DESC`).all() as Row[]).map((r) => this.rowToLark(r));
+  }
+
+  updateLarkMessage(id: number, patch: Partial<Pick<LarkMessage, 'body' | 'contact_id' | 'confidence' | 'reason' | 'status' | 'scheduled_for' | 'sent_at' | 'sent_by' | 'facts' | 'generator'>>): LarkMessage | null {
+    const sets: string[] = [];
+    const params: Record<string, unknown> = { id, now: new Date().toISOString() };
+    for (const k of ['body', 'contact_id', 'confidence', 'reason', 'status', 'scheduled_for', 'sent_at', 'sent_by', 'generator'] as const) {
+      if (patch[k] !== undefined) { sets.push(`${k} = @${k}`); params[k] = patch[k]; }
+    }
+    if (patch.facts !== undefined) { sets.push('facts_json = @facts_json'); params.facts_json = JSON.stringify(patch.facts); }
+    if (!sets.length) return this.getLarkMessage(id);
+    this.db.prepare(`UPDATE bd_lark_messages SET ${sets.join(', ')}, updated_at = @now WHERE id = @id`).run(params);
+    return this.getLarkMessage(id);
+  }
+
+  deleteLarkMessage(id: number): boolean {
+    return this.db.prepare('DELETE FROM bd_lark_messages WHERE id = ?').run(id).changes > 0;
   }
 
   // ---- Enterprise watchlist and alerts ----

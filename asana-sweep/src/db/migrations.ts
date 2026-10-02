@@ -1264,6 +1264,33 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 32,
+    name: 'Lark messages to TikTok Shop AMs and TSP managers, and the AM known on each prospect',
+    up(db) {
+      db.exec(`
+        ALTER TABLE bd_prospects ADD COLUMN tts_am_contact_id INTEGER;
+        CREATE TABLE bd_lark_messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          prospect_id INTEGER NOT NULL REFERENCES bd_prospects(id) ON DELETE CASCADE,
+          contact_id INTEGER,
+          confidence TEXT NOT NULL DEFAULT 'tsp',
+          reason TEXT,
+          body TEXT NOT NULL,
+          facts_json TEXT NOT NULL DEFAULT '[]',
+          generator TEXT NOT NULL DEFAULT 'template',
+          status TEXT NOT NULL DEFAULT 'draft',
+          scheduled_for TEXT,
+          sent_at TEXT,
+          sent_by TEXT,
+          created_by TEXT,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+        CREATE INDEX bd_lark_messages_status ON bd_lark_messages(status, scheduled_for);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

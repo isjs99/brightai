@@ -42,6 +42,8 @@ import { recordSent, saveSendSettings } from '../bd/sendqueue.js';
 import { bodyToHtml, LANGUAGES as OUTREACH_LANGUAGES, outreachInputs } from '../bd/outreach.js';
 import { generateDraft as generateOutreachDraft } from '../bd/draft.js';
 import { bulkCandidates, pickBestLinkedin } from '../bd/bulk.js';
+import { generateLarkMessage, pickLarkRecipient, spreadDates } from '../bd/lark.js';
+import type { LarkMessage } from '../sweep/types.js';
 import { projectionCsv } from '../stock/index.js';
 import { periodBounds } from '../reports/client.js';
 import type { IngestPayload } from '../health/index.js';
@@ -1276,6 +1278,14 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
         }
         return out;
       })(),
+      lark_job: scheduler.larkJob.state,
+      tts_contacts: q.listTtsContacts(),
+      lark_state: (() => {
+        const rank = { draft: 1, scheduled: 2, sent: 3, discarded: 0 } as const;
+        const out: Record<number, LarkMessage['status']> = {};
+        for (const m of q.listLarkMessages()) if (!out[m.prospect_id] || rank[m.status] > rank[out[m.prospect_id]]) out[m.prospect_id] = m.status;
+        return out;
+      })(),
       auto_enrich: q.getSetting('apollo_auto_enrich', '1') === '1',
     };
   };
@@ -1304,6 +1314,11 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
       patch.owner_id = id;
     }
     if (b.notes !== undefined) patch.notes = optText(b.notes);
+    if (b.tts_am_contact_id !== undefined) {
+      const id = b.tts_am_contact_id === null || b.tts_am_contact_id === '' ? null : Number(b.tts_am_contact_id);
+      if (id !== null && !q.listTtsContacts().some((c) => c.id === id)) throw new HttpError(400, 'Unknown TikTok Shop contact');
+      patch.tts_am_contact_id = id;
+    }
     if (b.website !== undefined) {
       patch.website = optText(b.website);
       patch.domain = normaliseDomain(patch.website);
@@ -1502,6 +1517,8 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
 
   const outreachData = (): OutreachData => ({
     send_queue: scheduler.sendQueue.state(),
+    lark_messages: q.listLarkMessages(),
+    lark_job: scheduler.larkJob.state,
     bulk_draft: scheduler.bulkDrafts.state,
     drafts: q.listDrafts(),
     examples: q.listExamples(),
@@ -1859,6 +1876,112 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const p = q.getProspect(idParam(req));
     if (!p) throw new HttpError(404, 'Prospect not found');
     res.json(suggestTtsContact(q.listTtsContacts(), p));
+  });
+
+  // ---- Lark messages to TikTok Shop AMs / TSP managers (drafted here, pasted into Lark by hand) ----
+  const larkOr404 = (req: Request): LarkMessage => {
+    const m = q.getLarkMessage(idParam(req));
+    if (!m) throw new HttpError(404, 'Lark message not found');
+    return m;
+  };
+  const isoDay = (v: unknown): string | null => (typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v) && !Number.isNaN(Date.parse(`${v}T00:00:00Z`)) ? v : null);
+
+  /** Draft a Lark message for each prospect (background job, one Claude call each). */
+  r.post('/outreach/lark/draft', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const ids = Array.isArray(b.ids) ? b.ids.map(Number).filter((n) => Number.isInteger(n)) : [];
+    if (!ids.length) throw new HttpError(400, 'Tick some shops first.');
+    if (scheduler.larkJob.state.running) throw new HttpError(409, 'A Lark drafting run is already going. Wait for it to finish or stop it.');
+    const status = scheduler.larkJob.start(ids, { actor: actorOf(req), instructions: optText(b.instructions), redo: bool(b.redo, false) });
+    res.status(202).json({ ...outreachData(), lark_job: status });
+  });
+  r.post('/outreach/lark/stop', (_req, res) => { scheduler.larkJob.stop(); res.json(outreachData()); });
+
+  /** Edit the text or change who it goes to. Picking the AM recorded on the prospect makes it "known"; anyone else is a manual pick. */
+  r.put('/outreach/lark/:id', (req, res) => {
+    const m = larkOr404(req);
+    if (m.status === 'sent') throw new HttpError(400, 'That message has already been sent.');
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const patch: Parameters<Queries['updateLarkMessage']>[1] = {};
+    if (b.body !== undefined) {
+      const body = optText(b.body);
+      if (!body) throw new HttpError(400, 'The message cannot be empty.');
+      patch.body = body;
+    }
+    if (b.contact_id !== undefined) {
+      const id = b.contact_id === null || b.contact_id === '' ? null : Number(b.contact_id);
+      const contact = id === null ? null : q.listTtsContacts().find((c) => c.id === id);
+      if (id !== null && !contact) throw new HttpError(400, 'Unknown TikTok Shop contact');
+      const p = q.getProspect(m.prospect_id);
+      patch.contact_id = id;
+      if (contact && p?.tts_am_contact_id === contact.id) { patch.confidence = 'known'; patch.reason = `Recorded as the TikTok AM on ${p.brand ?? p.shop_name}`; }
+      else if (contact) { patch.confidence = contact.is_agency_manager ? 'tsp' : 'known'; patch.reason = `Picked by ${actorOf(req) ?? 'the sender'}: ${contact.name}${contact.role ? `, ${contact.role}` : ''}`; }
+    }
+    if (b.scheduled_for !== undefined) {
+      const day = b.scheduled_for === null || b.scheduled_for === '' ? null : isoDay(b.scheduled_for);
+      if (b.scheduled_for && !day) throw new HttpError(400, 'Send date must be YYYY-MM-DD.');
+      patch.scheduled_for = day;
+      patch.status = day ? 'scheduled' : 'draft';
+    }
+    const saved = q.updateLarkMessage(m.id, patch);
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json({ message: saved, ...outreachData() });
+  });
+
+  /** Redraft one message from the prospect's current facts (keeps the recipient). */
+  r.post('/outreach/lark/:id/regenerate', async (req, res) => {
+    const m = larkOr404(req);
+    if (m.status === 'sent') throw new HttpError(400, 'That message has already been sent.');
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const p = q.getProspect(m.prospect_id);
+    if (!p) throw new HttpError(404, 'Prospect not found');
+    const picked = pickLarkRecipient(q, p);
+    const contact = m.contact_id ? q.listTtsContacts().find((c) => c.id === m.contact_id) ?? null : picked.contact;
+    const recipient = contact && contact.id === picked.contact?.id ? picked : { contact, confidence: m.confidence, reason: m.reason ?? picked.reason };
+    const g = await generateLarkMessage(q, p, recipient, { instructions: optText(b.instructions) });
+    const saved = q.updateLarkMessage(m.id, { body: g.body, facts: g.facts, generator: g.generator, contact_id: contact?.id ?? null, confidence: recipient.confidence, reason: recipient.reason });
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json({ message: saved, ...outreachData() });
+  });
+
+  /** Spread messages over days: `per_day` a day from `start`, weekdays only when asked. */
+  r.post('/outreach/lark/schedule', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const ids = Array.isArray(b.ids) ? b.ids.map(Number).filter((n) => Number.isInteger(n)) : [];
+    if (!ids.length) throw new HttpError(400, 'No messages given.');
+    const perDay = Math.max(1, Math.min(50, Number(b.per_day) || 5));
+    const start = isoDay(b.start) ?? new Date().toISOString().slice(0, 10);
+    const weekdaysOnly = bool(b.weekdays_only, true);
+    const msgs = ids.map((id) => q.getLarkMessage(id)).filter((m): m is LarkMessage => Boolean(m) && m!.status !== 'sent' && m!.status !== 'discarded');
+    const days = spreadDates(msgs.length, perDay, start, weekdaysOnly);
+    msgs.forEach((m, i) => q.updateLarkMessage(m.id, { status: 'scheduled', scheduled_for: days[i] }));
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json({ scheduled: msgs.length, last_day: days[days.length - 1] ?? null, ...outreachData() });
+  });
+
+  /** The sender pasted it into Lark: log it on the prospect's TikTok AM channel. */
+  r.post('/outreach/lark/:id/sent', (req, res) => {
+    const m = larkOr404(req);
+    if (m.status === 'sent') return res.json({ message: m, ...outreachData() });
+    const actor = actorOf(req);
+    const saved = q.updateLarkMessage(m.id, { status: 'sent', sent_at: new Date().toISOString(), sent_by: actor });
+    const who = m.contact_name ?? 'TikTok Shop';
+    const p = q.getProspect(m.prospect_id);
+    if (p) {
+      if (!p.outreach_tts_am) q.patchProspect(p.id, { outreach_tts_am: true, outreach_note: `Lark message to ${who}${m.contact_role ? ` (${m.contact_role})` : ''}`, outreach_contact: who }, actor);
+      else q.logOutreach(p.id, { channel: 'tts_am', action: 'contacted', note: `Lark message to ${who}${m.contact_role ? ` (${m.contact_role})` : ''}`, contact_name: who, actor });
+      if (p.status === 'new') q.patchProspect(p.id, { status: 'contacted' }, actor);
+    }
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json({ message: saved, ...outreachData() });
+  });
+
+  r.delete('/outreach/lark/:id', (req, res) => {
+    const m = larkOr404(req);
+    if (m.status === 'sent') q.updateLarkMessage(m.id, { status: 'discarded' });
+    else q.deleteLarkMessage(m.id);
+    liveEvents.emitUpdate({ kind: 'bd' });
+    res.json(outreachData());
   });
 
   r.put('/bd/tts-contacts', (req, res) => {

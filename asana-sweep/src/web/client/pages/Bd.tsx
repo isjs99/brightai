@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import type { BdContact, BdData, BdOutreachEvent, BdProspect, BdProspectPatch, BdStatus, TtsContact } from '../../../sweep/types';
 import { api, fmtMoney, fmtPct, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
 const LANGS: Record<string, string> = { en: 'English', de: 'German', fr: 'French', it: 'Italian', es: 'Spanish' };
 
@@ -39,7 +39,8 @@ export default function BdPage() {
   const [liMsg, setLiMsg] = useState<{ contact: BdContact; text: string; generator: string } | null>(null);
   const [ttsPoc, setTtsPoc] = useState<Record<number, { contact: TtsContact | null; fallback: TtsContact | null; reason: string; tier: 'category' | 'tsp_manager' | 'none' }>>({});
   useEffect(() => { if (open !== null && !ttsPoc[open]) api.ttsContactFor(open).then((r) => setTtsPoc((m) => ({ ...m, [open]: r }))).catch(() => undefined); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [f, setF] = useState({ market: '', status: '', category: '', owner: '', rise: '', type: '', launch: '', contact: '', q: '', sort: 'rise' as 'rise' | 'gmv' | 'name' | 'updated' | 'launched' | 'found', found: '', hideDone: false, hideClients: true });
+  const [params] = useSearchParams();
+  const [f, setF] = useState({ market: '', status: '', category: '', owner: '', rise: '', type: '', launch: '', contact: '', q: params.get('q') ?? '', sort: 'rise' as 'rise' | 'gmv' | 'name' | 'updated' | 'launched' | 'found', found: '', hideDone: false, hideClients: true });
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
@@ -216,6 +217,19 @@ export default function BdPage() {
             {p.fastmoss_url && <a className="button" href={p.fastmoss_url} target="_blank" rel="noreferrer">FastMoss shop page</a>}
           </div>
 
+          {isAdmin && (
+            <div className="inline-form" style={{ marginBottom: 8, alignItems: 'center' }}>
+              <label className="field" style={{ minWidth: 320 }} title="Only set this when you know for certain who the TikTok AM on this account is. Lark messages then go to them; otherwise they go to the TSP manager for the market."><span className="lbl">Known TikTok AM on this account</span>
+                <select value={p.tts_am_contact_id ?? ''} onChange={(e) => patch(p, { tts_am_contact_id: e.target.value ? Number(e.target.value) : null })}>
+                  <option value="">– not sure (Lark messages go to the TSP manager) –</option>
+                  {[...data.tts_contacts].sort((a, b) => (a.market === p.market ? 0 : 1) - (b.market === p.market ? 0 : 1) || a.market.localeCompare(b.market) || a.name.localeCompare(b.name)).map((c) => <option key={c.id} value={c.id}>{c.market} · {c.name}{c.role ? ` · ${c.role}` : ''}{c.is_agency_manager ? ' (TSP manager)' : ''}</option>)}
+                </select>
+              </label>
+              {data.lark_state[p.id]
+                ? <Link to="/outreach?tab=lark" className={`badge ${data.lark_state[p.id] === 'sent' ? 'good' : data.lark_state[p.id] === 'scheduled' ? 'accent' : 'muted'}`}>{data.lark_state[p.id] === 'sent' ? 'Lark message sent' : data.lark_state[p.id] === 'scheduled' ? 'Lark message scheduled' : 'Lark message drafted'}</Link>
+                : <button className="small" disabled={busy !== null || data.lark_job.running} onClick={() => run(`lark${p.id}`, async () => { await api.larkDraft([p.id]); return api.bd(); }, 'Drafting the Lark message. Review it under Outreach emails › Lark messages.')}>Draft Lark message</button>}
+            </div>
+          )}
           {ttsPoc[p.id] && (() => {
             const poc = ttsPoc[p.id];
             const person = (c: TtsContact, label: string) => (
@@ -385,6 +399,7 @@ export default function BdPage() {
         const fresh = ready.filter((p) => !data.draft_state[p.id]);
         const n = bulk.include_drafted ? ready.length : fresh.length;
         const li = chosen.filter((p) => p.contacts.some((c) => c.linkedin_url)).length;
+        const larkFresh = chosen.filter((p) => !p.is_client && !data.lark_state[p.id]).length;
         const who = new Map(selPreview.map((i) => [i.prospect_id, i]));
         return (
           <div className="card" style={{ marginBottom: 12, position: 'sticky', top: 8, zIndex: 2 }}>
@@ -398,6 +413,7 @@ export default function BdPage() {
             {data.gmail_connected && <button className="primary" disabled={busy === 'bulk' || data.bulk_draft.running || n === 0} onClick={() => window.confirm(`Draft ${n} email(s) and send them automatically from Gmail? They go out on the drip set under Outreach emails › Settings (default 30 a day, 2 minutes apart, office hours), without you reading each one first. You can pause the queue or take any draft out under Outreach emails.`) && run('bulk', () => api.bulkDraft({ ids: [...selected], limit: 500, language: bulk.language, style: bulk.style, auto_send: true, include_drafted: bulk.include_drafted }), (r) => `${r.pre_queued ? `${r.pre_queued} existing draft(s) queued to send. ` : ''}${r.state.total ? `Drafting ${r.state.total} new email(s), each queued as it is written. ` : r.pre_queued ? '' : 'Nothing to draft or queue: every ticked shop already has an email out or queued. '}${r.pre_skipped.length ? `${r.pre_skipped.length} not queued (${r.pre_skipped.slice(0, 2).map((x) => x.reason).join(' · ')}). ` : ''}Watch the queue under Outreach emails.`)} title="One email per selected shop, written now and sent from Gmail on the drip, no clicking in Gmail">{busy === 'bulk' ? 'Starting…' : `Draft & send via Gmail (${n})`}</button>}
             {!data.gmail_connected && <Link className="button small" to="/outreach?tab=settings">Connect Gmail</Link>}
             <button disabled={busy === 'li'} onClick={() => run('li', async () => { const r = await api.linkedinBulk([...selected], { log: false }); setLiBulk(r); setNotice(r.items.length ? `${r.items.length} LinkedIn profile(s) ready below${r.skipped.length ? `, ${r.skipped.length} skipped` : ''}. Click "Open all" (allow pop-ups for this site if only one tab opens).` : 'None of the selected shops has a contact with a LinkedIn profile yet.'); return r; })} title="One profile per selected shop (most senior contact with a LinkedIn URL), opened in tabs so you can send the connection requests by hand">{busy === 'li' ? 'Loading…' : `Bulk connect on LinkedIn (${li})`}</button>
+            <button disabled={busy === 'lark' || data.lark_job.running || larkFresh === 0} onClick={() => run('lark', async () => { await api.larkDraft([...selected]); return api.bd(); }, `Drafting ${larkFresh} Lark message(s): to the known AM where one is set on the shop, else to the TSP manager for the market. Review the facts and schedule them under Outreach emails › Lark messages.`)} title="One Lark DM per selected shop to the TikTok AM we know is on the account, else the market's TSP manager. Shops that already have one are skipped.">{busy === 'lark' ? 'Starting…' : `Draft Lark messages (${larkFresh})`}</button>
             <button className="small" onClick={() => setSelected(new Set())}>Clear</button>
           </div>
           {selPreview.length > 0 && (
@@ -539,7 +555,7 @@ export default function BdPage() {
                     <b>{p.shop_name}</b>{p.brand && p.brand !== p.shop_name && <span className="sub"> · {p.brand}</span>}
                     {p.fastmoss_url && <> <a href={p.fastmoss_url} target="_blank" rel="noreferrer" className="sub" title="Open on FastMoss">FastMoss ↗</a></>}
                     {p.is_client && <> <span className="badge muted">client</span></>}
-                    <div className="sub">{p.contacts.length ? `${p.contacts.length} contact${p.contacts.length === 1 ? '' : 's'}` : 'no contacts'}{p.contacts.some((c) => c.email) ? ' · email' : ''}{p.outreach_log.length ? ` · ${p.outreach_log.length} in history` : ''}{data.draft_state[p.id] && <> · <Link to={`/outreach`} className={`badge ${data.draft_state[p.id] === 'sent' ? 'good' : data.draft_state[p.id] === 'gmail' ? 'accent' : 'muted'}`} title="Open in Outreach emails">{data.draft_state[p.id] === 'sent' ? 'Email sent' : data.draft_state[p.id] === 'gmail' ? 'In Gmail drafts' : 'Drafted'}</Link></>}</div>
+                    <div className="sub">{p.contacts.length ? `${p.contacts.length} contact${p.contacts.length === 1 ? '' : 's'}` : 'no contacts'}{p.contacts.some((c) => c.email) ? ' · email' : ''}{p.outreach_log.length ? ` · ${p.outreach_log.length} in history` : ''}{data.draft_state[p.id] && <> · <Link to={`/outreach`} className={`badge ${data.draft_state[p.id] === 'sent' ? 'good' : data.draft_state[p.id] === 'gmail' ? 'accent' : 'muted'}`} title="Open in Outreach emails">{data.draft_state[p.id] === 'sent' ? 'Email sent' : data.draft_state[p.id] === 'gmail' ? 'In Gmail drafts' : 'Drafted'}</Link></>}{data.lark_state[p.id] && <> · <Link to="/outreach?tab=lark" className={`badge ${data.lark_state[p.id] === 'sent' ? 'good' : data.lark_state[p.id] === 'scheduled' ? 'accent' : 'muted'}`} title="Open under Outreach emails › Lark messages">{data.lark_state[p.id] === 'sent' ? 'Lark sent' : data.lark_state[p.id] === 'scheduled' ? 'Lark scheduled' : 'Lark drafted'}</Link></>}</div>
                   </td>
                   <td>{p.market}</td>
                   <td className="hide-sm sub">{p.category ?? ''}</td>
