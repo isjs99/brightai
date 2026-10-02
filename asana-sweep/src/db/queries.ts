@@ -55,7 +55,7 @@ import type {
   PersonInput,
 } from '../sweep/types.js';
 import { isSignedStage, leadKey, matchPerson, type SheetLead } from '../leads/sheet.js';
-import { fastmossShopUrl, launchFlags, matchesAccountName, outreachComplete, riseScore } from '../bd/score.js';
+import { fastmossShopUrl, launchFlags, matchesAccountName, outreachComplete, riseBand, riseScore } from '../bd/score.js';
 
 export interface HealthPullRow { id: number; shop_id: string; account_id: number | null; source: 'windsor' | 'cruva'; pull_date: string; pulled_at: string; ok: boolean; error: string | null; metrics: Record<string, unknown>; rows: Record<string, unknown> }
 
@@ -1122,6 +1122,8 @@ export class Queries {
     return {
       id: r.id as number, prospect_id: r.prospect_id as number, contact_id: (r.contact_id as number | null) ?? null,
       shop_name: (r.shop_name as string) ?? '', market: (r.market as string) ?? '',
+      brand: (r.brand as string | null) ?? null, category: (r.category as string | null) ?? null, gmv_7d: (r.gmv_7d as number | null) ?? null, currency: (r.currency as string) ?? 'EUR',
+      rise_band: riseBand(riseScore(r.gmv_7d as number | null, r.gmv_total as number | null)), prospect_status: ((r.prospect_status as string | null) ?? 'new') as BdEmailDraft['prospect_status'],
       to_name: r.to_name as string, to_email: r.to_email as string, subject: r.subject as string, body: r.body as string,
       language: r.language as string, style: r.style as BdEmailDraft['style'], status: r.status as BdEmailDraft['status'], generator: r.generator as BdEmailDraft['generator'],
       kind: ((r.kind as string | null) ?? 'cold') as BdEmailDraft['kind'], meeting_id: (r.meeting_id as string | null) ?? null, meeting_title: (r.meeting_title as string | null) ?? null,
@@ -1131,7 +1133,7 @@ export class Queries {
     };
   }
 
-  private static DRAFT_SELECT = `SELECT d.*, p.shop_name, p.market FROM bd_email_drafts d JOIN bd_prospects p ON p.id = d.prospect_id`;
+  private static DRAFT_SELECT = `SELECT d.*, p.shop_name, p.market, p.brand, p.category, p.gmv_7d, p.gmv_total, p.currency, p.status AS prospect_status FROM bd_email_drafts d JOIN bd_prospects p ON p.id = d.prospect_id`;
 
   listDrafts(opts: { prospectId?: number; includeDiscarded?: boolean } = {}): BdEmailDraft[] {
     const where: string[] = [];

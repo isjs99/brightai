@@ -1722,9 +1722,16 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const b = (req.body ?? {}) as Record<string, unknown>;
     const ids = Array.isArray(b.ids) ? b.ids.map(Number).filter((n) => Number.isInteger(n)) : [];
     if (!ids.length) throw new HttpError(400, 'No drafts given.');
-    let result: { queued: unknown[]; skipped: { id: number; reason: string }[] };
-    try { result = scheduler.sendQueue.queue(ids, actorOf(req), { force: bool(b.force, false) }); } catch (err) { throw new HttpError(400, (err as Error).message); }
-    res.json({ queued: result.queued.length, skipped: result.skipped, ...outreachData() });
+    let result: { queued: unknown[]; skipped: { id: number; reason: string }[]; unqueued: number };
+    try { result = scheduler.sendQueue.queue(ids, actorOf(req), { force: bool(b.force, false), only: bool(b.only, false) }); } catch (err) { throw new HttpError(400, (err as Error).message); }
+    res.json({ queued: result.queued.length, skipped: result.skipped, unqueued: result.unqueued, ...outreachData() });
+  });
+  /** Take drafts out of the queue: the given ids, or every queued draft with `all`. */
+  r.post('/outreach/drafts/unqueue', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const ids = bool(b.all, false) ? q.listDrafts({}).filter((d) => d.status === 'queued').map((d) => d.id) : Array.isArray(b.ids) ? b.ids.map(Number).filter((n) => Number.isInteger(n)) : [];
+    const unqueued = scheduler.sendQueue.unqueueMany(ids);
+    res.json({ unqueued, ...outreachData() });
   });
   r.post('/outreach/drafts/:id/unqueue', (req, res) => {
     const d = scheduler.sendQueue.unqueue(idParam(req));

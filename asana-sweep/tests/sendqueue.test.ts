@@ -142,4 +142,20 @@ describe('bulk draft resilience', () => {
     expect(job.state.queued).toBe(1);
     expect(job.state.errors[0]).toMatch(/Claude failed/);
   });
+
+  it('resets the queue to a segment and takes drafts out in bulk', async () => {
+    const { q, sq, mk } = await setup();
+    const a = mk('ann@acme.co'); const b = mk('bob@beta.co'); const c = mk('cat@gamma.co');
+    sq.queue([a.id, b.id], 'Isaac');
+    expect(q.listDrafts({}).filter((d) => d.status === 'queued').map((d) => d.id).sort()).toEqual([a.id, b.id].sort());
+    const r = sq.queue([c.id], 'Isaac', { only: true });
+    expect(r.unqueued).toBe(2);
+    expect(r.queued.map((d) => d.id)).toEqual([c.id]);
+    expect(q.getDraft(a.id)!.status).toBe('draft');
+    expect(q.getDraft(a.id)!.queued_at).toBeNull();
+    expect(q.getDraft(c.id)!.status).toBe('queued');
+    expect(sq.unqueueMany([a.id, c.id, 999])).toBe(1);
+    expect(q.getDraft(c.id)!.status).toBe('draft');
+    expect(q.listDrafts({})[0].rise_band).toBeDefined();
+  });
 });

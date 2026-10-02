@@ -132,9 +132,19 @@ function Drafts({ data, isAdmin, busy, run, onNotice, onError, kind, initialDraf
   const [edit, setEdit] = useState<{ subject: string; body: string; to_email: string } | null>(null);
   const [gen, setGen] = useState<{ language: string; style: 'short' | 'intro'; instructions: string }>({ language: 'en', style: 'short', instructions: '' });
   const [only, setOnly] = useState<'open' | 'all'>('open');
+  const [seg, setSeg] = useState({ market: '', band: '', category: '', state: '', q: '' });
   const [preview, setPreview] = useState(true);
   const s = data.settings;
-  const list = data.drafts.filter((d) => d.kind === kind && (only === 'all' || d.status !== 'sent'));
+  const ofKind = data.drafts.filter((d) => d.kind === kind && (only === 'all' || d.status !== 'sent'));
+  const qText = seg.q.trim().toLowerCase();
+  const list = kind === 'cold' ? ofKind.filter((d) => (!seg.market || d.market === seg.market) && (!seg.band || d.rise_band === seg.band) && (!seg.category || d.category === seg.category) && (!seg.state || d.status === seg.state) && (!qText || `${d.shop_name} ${d.brand ?? ''} ${d.to_name} ${d.to_email} ${d.subject}`.toLowerCase().includes(qText))) : ofKind;
+  const segmented = kind === 'cold' && Boolean(seg.market || seg.band || seg.category || seg.state || qText);
+  const segMarkets = [...new Set(ofKind.map((d) => d.market))].sort();
+  const segCategories = [...new Set(ofKind.map((d) => d.category).filter((c): c is string => Boolean(c)))].sort();
+  const queuedAll = data.drafts.filter((d) => d.kind === 'cold' && d.status === 'queued').length;
+  const shownQueueable = list.filter((d) => d.status === 'draft' || d.status === 'gmail');
+  const shownQueued = list.filter((d) => d.status === 'queued');
+  const segLabel = [seg.band && `${seg.band} momentum`, seg.market, seg.category, seg.state && `status ${seg.state}`, qText && `"${seg.q.trim()}"`].filter(Boolean).join(', ') || 'everything shown';
   const draft = data.drafts.find((d) => d.id === selected && d.kind === kind) ?? null;
   useEffect(() => {
     if (!draft) { setEdit(null); return; }
@@ -157,18 +167,40 @@ function Drafts({ data, isAdmin, busy, run, onNotice, onError, kind, initialDraf
           <span className={`badge ${s.llm_configured ? 'good' : 'muted'}`}>{s.llm_configured ? 'Claude drafting' : 'Template drafting (no ANTHROPIC_API_KEY)'}</span>
           <select value={only} onChange={(e) => setOnly(e.target.value as 'open' | 'all')}><option value="open">Open drafts</option><option value="all">All incl. sent</option></select>
           {isAdmin && kind === 'cold' && s.gmail_connected && list.some((d) => d.status === 'draft') && <button className="small" disabled={busy === 'gmailall'} onClick={() => run('gmailall', api.draftsToGmailAll, (r) => onNotice(`${r.saved} draft(s) saved to Gmail${r.errors.length ? `, ${r.errors.length} failed: ${r.errors.slice(0, 2).join(' · ')}` : ''}. Send them from your drafts folder, then mark each as sent.`))} title="Save every open draft into Gmail drafts in one go">{busy === 'gmailall' ? 'Saving…' : `Save all ${list.filter((d) => d.status === 'draft').length} to Gmail`}</button>}
-          {isAdmin && (s.gmail_connected || s.gmail_accounts.length > 0) && list.some((d) => d.status === 'draft' || d.status === 'gmail') && <button className="small primary" disabled={busy === 'qall'} title="Queue every open draft here to be sent automatically from Gmail, on the drip set in Settings" onClick={() => { const n = list.filter((d) => d.status === 'draft' || d.status === 'gmail').length; if (window.confirm(`Queue ${n} draft(s) to send automatically from Gmail? They go out one at a time inside the sending hours. Drafts with a [placeholder], no email, or a prospect already emailed are skipped.`)) run('qall', () => api.queueDrafts(list.filter((d) => d.status === 'draft' || d.status === 'gmail').map((d) => d.id)), (r) => onNotice(`${r.queued} queued${r.skipped.length ? `, ${r.skipped.length} skipped: ${r.skipped.slice(0, 3).map((x) => x.reason).join(' · ')}` : ''}.`)); }}>{busy === 'qall' ? 'Queuing…' : `Send all ${list.filter((d) => d.status === 'draft' || d.status === 'gmail').length} via Gmail`}</button>}
+          {isAdmin && (s.gmail_connected || s.gmail_accounts.length > 0) && shownQueueable.length > 0 && <button className="small primary" disabled={busy === 'qall'} title={segmented ? `Queue the ${shownQueueable.length} shown (${segLabel}) to be sent automatically from Gmail, on top of what is already queued` : 'Queue every open draft here to be sent automatically from Gmail, on the drip set in Settings'} onClick={() => { const n = shownQueueable.length; if (window.confirm(`Queue ${n} draft(s)${segmented ? ` (${segLabel})` : ''} to send automatically from Gmail? They go out one at a time inside the sending hours. Drafts with a [placeholder], no email, or a prospect already emailed are skipped.`)) run('qall', () => api.queueDrafts(shownQueueable.map((d) => d.id)), (r) => onNotice(`${r.queued} queued${r.skipped.length ? `, ${r.skipped.length} skipped: ${r.skipped.slice(0, 3).map((x) => x.reason).join(' · ')}` : ''}.`)); }}>{busy === 'qall' ? 'Queuing…' : segmented ? `Queue the ${shownQueueable.length} shown` : `Send all ${shownQueueable.length} via Gmail`}</button>}
           {isAdmin && kind === 'cold' && <Link className="button small" to="/bd">Bulk draft from the pipeline</Link>}
         </div>
         {kind === 'cold' && <span className="sub">Draft from a decision maker in the BD pipeline. Emails use the brand name, not the shop handle, and headings become real bold in Gmail.</span>}
       </div>
+      {kind === 'cold' && (
+        <div className="card" style={{ marginBottom: 12, padding: '10px 14px' }}>
+          <div className="inline-form" style={{ alignItems: 'center' }}>
+            <b>Segment</b>
+            <input type="text" placeholder="Search shop, brand, contact" value={seg.q} onChange={(e) => setSeg({ ...seg, q: e.target.value })} style={{ minWidth: 200 }} />
+            <select value={seg.market} onChange={(e) => setSeg({ ...seg, market: e.target.value })}><option value="">All countries</option>{segMarkets.map((m) => <option key={m} value={m}>{m}</option>)}</select>
+            <select value={seg.band} onChange={(e) => setSeg({ ...seg, band: e.target.value })}><option value="">All momentum</option><option value="surging">Surging</option><option value="rising">Rising</option><option value="steady">Steady</option><option value="unknown">No data</option></select>
+            <select value={seg.category} onChange={(e) => setSeg({ ...seg, category: e.target.value })}><option value="">All categories</option>{segCategories.map((c) => <option key={c} value={c}>{c}</option>)}</select>
+            <select value={seg.state} onChange={(e) => setSeg({ ...seg, state: e.target.value })}><option value="">Any state</option><option value="draft">Draft</option><option value="gmail">In Gmail</option><option value="queued">Queued</option>{only === 'all' && <option value="sent">Sent</option>}</select>
+            <span className="sub">{list.length} shown · {shownQueued.length} of them queued</span>
+            {segmented && <button className="small" onClick={() => setSeg({ market: '', band: '', category: '', state: '', q: '' })}>Clear</button>}
+          </div>
+          {isAdmin && (s.gmail_connected || s.gmail_accounts.length > 0) && (
+            <div className="actions" style={{ marginTop: 8 }}>
+              <button className="small primary" disabled={busy !== null || (shownQueueable.length === 0 && shownQueued.length === queuedAll)} title={`Everything queued drops back to Draft, then the ${segLabel} drafts shown here are queued. The drip then sends only this segment.`} onClick={() => window.confirm(`Reset the queue to ${segLabel}? ${queuedAll - shownQueued.length} queued draft(s) outside this segment go back to Draft, and the ${shownQueueable.length + shownQueued.length} shown here are queued.`) && run('qonly', () => api.queueDrafts([...shownQueueable, ...shownQueued].map((d) => d.id), false, true), (r) => onNotice(`Queue reset to ${segLabel}: ${r.unqueued} taken out, ${r.queued} queued${r.skipped.length ? `, ${r.skipped.length} skipped: ${r.skipped.slice(0, 3).map((x) => x.reason).join(' · ')}` : ''}.`))}>{busy === 'qonly' ? 'Working…' : `Reset queue to ${segmented ? 'this segment' : 'everything shown'} (${shownQueueable.length + shownQueued.length})`}</button>
+              <button className="small" disabled={busy !== null || shownQueued.length === 0} onClick={() => run('unqs', () => api.unqueueDrafts({ ids: shownQueued.map((d) => d.id) }), (r) => onNotice(`${r.unqueued} taken out of the queue; they stay drafts.`))}>Take the {shownQueued.length} shown out of queue</button>
+              <button className="small" disabled={busy !== null || queuedAll === 0} onClick={() => window.confirm(`Take all ${queuedAll} queued draft(s) out of the queue? Nothing more goes out until you queue again.`) && run('unqa', () => api.unqueueDrafts({ all: true }), (r) => onNotice(`${r.unqueued} taken out of the queue. Pick a segment above and "Reset queue" to send only those.`))}>Take all {queuedAll} out of queue</button>
+            </div>
+          )}
+        </div>
+      )}
       <SendQueueCard data={data} isAdmin={isAdmin} busy={busy} run={run} onNotice={onNotice} onError={onError} />
       <div className="inbox-split">
         <div className="inbox-list">
-          {list.length === 0 ? <div className="empty">{kind === 'cold' ? 'No drafts yet. Open a prospect in the BD pipeline and click "Draft email" next to a decision maker with an email address.' : 'No call follow-ups yet.'}</div> : list.map((d) => (
+          {list.length === 0 ? <div className="empty">{segmented ? 'Nothing matches this segment.' : kind === 'cold' ? 'No drafts yet. Open a prospect in the BD pipeline and click "Draft email" next to a decision maker with an email address.' : 'No call follow-ups yet.'}</div> : list.map((d) => (
             <button key={d.id} className={`conv ${selected === d.id ? 'active' : ''}`} onClick={() => setSelected(d.id)}>
               <div className="page-head" style={{ marginBottom: 2 }}><b>{d.kind === 'followup' ? d.meeting_title ?? d.shop_name : d.shop_name}</b> {statusBadge(d)}</div>
               <div className="sub">{d.to_name} · {d.to_email}</div>
+              {d.kind === 'cold' && <div className="sub">{d.market}{d.category ? ` · ${d.category}` : ''} · <span className={`badge ${d.rise_band === 'surging' ? 'good' : d.rise_band === 'rising' ? 'accent' : 'muted'}`} style={{ fontSize: 11 }}>{d.rise_band === 'unknown' ? 'No data' : d.rise_band[0].toUpperCase() + d.rise_band.slice(1)}</span></div>}
               <div style={{ fontSize: 13.5 }}>{d.subject}</div>
               <div className="sub">{fmtRelative(d.updated_at)} · {d.generator === 'claude' ? 'Claude' : 'template'} · {d.kind === 'followup' ? 'call follow-up' : `${d.style} · ${DRAFT_LANGS[d.language] ?? d.language}`}{d.created_by ? ` · ${d.created_by}` : ''}</div>
             </button>

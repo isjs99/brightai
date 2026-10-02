@@ -666,6 +666,13 @@ export interface BdEmailDraft {
   contact_id: number | null;
   shop_name: string;
   market: string;
+  /** Segment fields from the prospect, so the list can be filtered and queued by country, momentum or category. */
+  brand: string | null;
+  category: string | null;
+  gmv_7d: number | null;
+  currency: string;
+  rise_band: 'surging' | 'rising' | 'steady' | 'unknown';
+  prospect_status: BdStatus;
   to_name: string;
   to_email: string;
   subject: string;

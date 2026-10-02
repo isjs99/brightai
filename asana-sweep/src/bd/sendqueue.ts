@@ -88,11 +88,13 @@ export class SendQueue {
   constructor(private q: Queries, private gmail: GmailClient) {}
 
   /** Drafts queued by a person: their own Gmail when connected, else the shared account. */
-  queue(ids: number[], actor: string | null, opts: { force?: boolean } = {}): { queued: BdEmailDraft[]; skipped: { id: number; reason: string }[] } {
+  queue(ids: number[], actor: string | null, opts: { force?: boolean; only?: boolean } = {}): { queued: BdEmailDraft[]; skipped: { id: number; reason: string }[]; unqueued: number } {
     const queued: BdEmailDraft[] = [];
     const skipped: { id: number; reason: string }[] = [];
     const account = this.gmail.forActor(actor);
     if (!account.connected) throw new Error('Connect Gmail first (Growth › Outreach emails › Settings): your own, or the shared account.');
+    // `only`: the queue becomes exactly this segment; everything else queued drops back to Draft.
+    const unqueued = opts.only ? this.unqueueMany(this.q.listDrafts({}).filter((d) => d.status === 'queued' && !ids.includes(d.id)).map((d) => d.id)) : 0;
     for (const id of ids) {
       const d = this.q.getDraft(id);
       if (!d) { skipped.push({ id, reason: 'not found' }); continue; }
@@ -100,8 +102,21 @@ export class SendQueue {
       if (why) { skipped.push({ id, reason: why }); continue; }
       queued.push(this.q.updateDraft(id, { status: 'queued', queued_at: new Date().toISOString(), queued_by: actor, send_account: account.account, send_error: null })!);
     }
-    if (queued.length) liveEvents.emitUpdate({ kind: 'bd' });
-    return { queued, skipped };
+    if (queued.length || unqueued) liveEvents.emitUpdate({ kind: 'bd' });
+    return { queued, skipped, unqueued };
+  }
+
+  /** Take many drafts out of the queue (they stay drafts). Ids that are not queued are ignored. Returns how many changed. */
+  unqueueMany(ids: number[]): number {
+    let n = 0;
+    for (const id of ids) {
+      const d = this.q.getDraft(id);
+      if (!d || d.status !== 'queued') continue;
+      this.q.updateDraft(id, { status: 'draft', queued_at: null, queued_by: null, send_account: null });
+      n += 1;
+    }
+    if (n) liveEvents.emitUpdate({ kind: 'bd' });
+    return n;
   }
 
   unqueue(id: number): BdEmailDraft | null {
