@@ -5,7 +5,6 @@ import { api, fmtDate, fmtRelative } from '../api';
 import { useIsAdmin } from '../session';
 
 const EU = ['DE', 'FR', 'IT', 'ES', 'NL', 'BE', 'IE', 'AT', 'PL', 'UK'];
-const marketsOf = (m: string | null) => (m ? [...new Set(m.toUpperCase().split(/[\/,\s]+/).filter((x) => /^[A-Z]{2}$/.test(x)))] : []);
 
 const TYPE_LABEL: Record<string, string> = { DIRECT_DISCOUNT: 'Percentage off', FIXED_PRICE: 'Fixed price', FLASHSALE: 'Flash sale', SHIPPING_DISCOUNT: 'Shipping discount' };
 
