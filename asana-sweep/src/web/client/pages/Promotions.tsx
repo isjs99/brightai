@@ -46,16 +46,21 @@ function PromotionForm({ initial, accounts, tts, onSave, onCancel }: { initial: 
 
   const set = <K extends keyof PromotionInput>(k: K, v: PromotionInput[K]) => setForm((f) => ({ ...f, [k]: v }));
 
-  // Targets = picked accounts × (their active markets, optionally narrowed to the picked countries).
+  // Only accounts with a connected (authorised and linked) TikTok shop can get a promotion, and only in the markets those shops cover.
+  const connectedMarkets = (accountId: number): string[] => [...new Set(tts.shops.filter((sh) => sh.account_id === accountId && sh.market).map((sh) => sh.market as string))].sort();
+  const connectedAccounts = accounts.filter((a) => a.enabled && connectedMarkets(a.id).length);
+  const connectedAll = [...new Set(connectedAccounts.flatMap((a) => connectedMarkets(a.id)))];
+  const countryList = EU.filter((m) => connectedAll.includes(m));
+
+  // Targets = picked accounts × (their connected markets, optionally narrowed to the picked countries).
   useEffect(() => {
     const targets: { account_id: number; market: string }[] = [];
     for (const id of pickedAccounts) {
-      const a = accounts.find((x) => x.id === id);
-      if (!a) continue;
-      for (const m of marketsOf(a.markets)) if (scope === 'all' || pickedMarkets.includes(m)) targets.push({ account_id: id, market: m });
+      if (!connectedAccounts.some((a) => a.id === id)) continue;
+      for (const m of connectedMarkets(id)) if (scope === 'all' || pickedMarkets.includes(m)) targets.push({ account_id: id, market: m });
     }
     setForm((f) => ({ ...f, targets }));
-  }, [pickedAccounts, pickedMarkets, scope, accounts]);
+  }, [pickedAccounts, pickedMarkets, scope, accounts, tts.shops]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const shopsFor = (t: { account_id: number; market: string }) => tts.shops.filter((s) => s.account_id === t.account_id && s.market === t.market);
   const loadProducts = async (shopId: string) => {
@@ -123,15 +128,20 @@ function PromotionForm({ initial, accounts, tts, onSave, onCancel }: { initial: 
       <div className="grid">
         <div className="field">
           <span className="lbl">Accounts</span>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px' }}>
-            {accounts.filter((a) => a.enabled && marketsOf(a.markets).length).map((a) => (
-              <label key={a.id} className="toggle">
-                <input type="checkbox" checked={pickedAccounts.includes(a.id)} onChange={(e) => setPickedAccounts(e.target.checked ? [...pickedAccounts, a.id] : pickedAccounts.filter((x) => x !== a.id))} />
-                {a.name} <span className="sub">{marketsOf(a.markets).join('/')}</span>
-              </label>
-            ))}
-          </div>
-          <span className="help"><a href="#" onClick={(e) => { e.preventDefault(); setPickedAccounts(accounts.filter((a) => a.enabled && marketsOf(a.markets).length).map((a) => a.id)); }}>all</a> · <a href="#" onClick={(e) => { e.preventDefault(); setPickedAccounts([]); }}>none</a></span>
+          {connectedAccounts.length === 0 ? (
+            <span className="help">No account has a connected TikTok shop yet. Authorise the shop under "Connection" above and link it to its account; it then shows up here.</span>
+          ) : (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 14px' }}>
+              {connectedAccounts.map((a) => (
+                <label key={a.id} className="toggle" title={`Connected shops: ${tts.shops.filter((sh) => sh.account_id === a.id).map((sh) => sh.name).join(', ')}`}>
+                  <input type="checkbox" checked={pickedAccounts.includes(a.id)} onChange={(e) => setPickedAccounts(e.target.checked ? [...pickedAccounts, a.id] : pickedAccounts.filter((x) => x !== a.id))} />
+                  {a.name} <span className="sub">{connectedMarkets(a.id).join('/')}</span>
+                  {tts.shops.some((sh) => sh.account_id === a.id && !sh.token_ok) && <span className="badge warn" style={{ marginLeft: 6 }} title="Re-authorise this shop under Connection">needs re-auth</span>}
+                </label>
+              ))}
+            </div>
+          )}
+          <span className="help">Only accounts with a connected TikTok shop, in the markets those shops cover ({connectedAccounts.length} of {accounts.filter((a) => a.enabled).length} accounts). <a href="#" onClick={(e) => { e.preventDefault(); setPickedAccounts(connectedAccounts.map((a) => a.id)); }}>all</a> · <a href="#" onClick={(e) => { e.preventDefault(); setPickedAccounts([]); }}>none</a></span>
         </div>
         <div className="field">
           <span className="lbl">Countries</span>
@@ -139,9 +149,10 @@ function PromotionForm({ initial, accounts, tts, onSave, onCancel }: { initial: 
           <label className="toggle"><input type="radio" checked={scope === 'pick'} onChange={() => setScope('pick')} /> Only these countries</label>
           {scope === 'pick' && (
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 12px', marginTop: 4 }}>
-              {EU.map((m) => (
+              {countryList.map((m) => (
                 <label key={m} className="toggle"><input type="checkbox" checked={pickedMarkets.includes(m)} onChange={(e) => setPickedMarkets(e.target.checked ? [...pickedMarkets, m] : pickedMarkets.filter((x) => x !== m))} />{m}</label>
               ))}
+              {countryList.length === 0 && <span className="sub">No connected markets yet.</span>}
             </div>
           )}
           <span className="help">{form.targets.length} shop{form.targets.length === 1 ? '' : 's'} will get this promotion.</span>
