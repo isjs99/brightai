@@ -250,10 +250,11 @@ export class Scheduler {
     const today = this.q.getSetting('health_last_pull_at', '').slice(0, 10);
     if (opts.onlyIfMissing && today === new Date().toISOString().slice(0, 10)) return { pulled: 0, errors: [], reviewed: 0 };
     const pull = await this.health.pullWindsor();
+    const ttsPull = await this.health.pullTikTok({ force: true });
     await this.monitor.scan();
     const review = await this.health.review();
     if (review.reviewed) await this.monitor.scan();
-    return { pulled: pull.shops, errors: [...pull.errors, ...review.errors], reviewed: review.reviewed };
+    return { pulled: pull.shops + ttsPull.shops, errors: [...pull.errors, ...ttsPull.errors, ...review.errors], reviewed: review.reviewed };
   }
 
   /** (Re)register the daily checklist completion check from settings. */

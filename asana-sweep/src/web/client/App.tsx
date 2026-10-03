@@ -128,10 +128,10 @@ const NAV: { section: string; items: { to: string; label: string; end?: boolean 
   {
     section: 'Account management',
     items: [
+      { to: '/monitor', label: 'Account monitor' },
       { to: '/promotions', label: 'Promotions' },
       { to: '/gmv-max', label: 'GMV Max' },
       { to: '/inbox', label: 'CS & affiliate inbox' },
-      { to: '/monitor', label: 'Account monitor' },
       { to: '/stock', label: 'Stock' },
       { to: '/reports', label: 'Client reports' },
       { to: '/playbook', label: 'Cruva playbook' },

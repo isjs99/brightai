@@ -52,9 +52,9 @@ export function incidentSettings(q: Queries): IncidentSettings {
 /** Map account monitor flags to incident kinds (low stock is handled by the stock module). */
 export function incidentsFromFlags(flags: MonitorFlag[]): Detected[] {
   const map: Record<string, string> = {
-    tts_unshipped: 'overdue_shipment', tts_product_deactivated: 'violation', tts_auth_expiring: 'auth_expiring', gmv_drop_wow: 'gmv_drop', inbox_unanswered: 'inbox_sla',
+    t_ship_sla_breach: 'overdue_shipment', t_auto_cancel_risk: 'auto_cancel_risk', t_buyer_cancel_requests: 'cancel_requests', t_product_deactivated: 'violation', t_listing_failed: 'listing_failed', t_out_of_stock: 'stock_out', t_payout_failed: 'payout_issue', t_negative_statement: 'negative_balance', t_gmv_drop: 'gmv_drop', t_returns_waiting: 'inbox_sla', tts_auth_expiring: 'auth_expiring', gmv_drop_wow: 'gmv_drop', inbox_unanswered: 'inbox_sla',
     w_ship_sla_breach: 'overdue_shipment', w_auto_cancel_risk: 'auto_cancel_risk', w_buyer_cancel_requests: 'cancel_requests', w_product_deactivated: 'violation', w_listing_failed: 'listing_failed', w_out_of_stock: 'stock_out',
-    w_payout_failed: 'payout_issue', w_negative_statement: 'negative_balance', w_unsettled_backlog: 'unsettled_backlog', c_sps_low: 'sps_restricted', c_dms_stopped: 'outreach_stopped', ai_risk_red: 'account_at_risk',
+    w_payout_failed: 'payout_issue', w_negative_statement: 'negative_balance', w_unsettled_backlog: 'unsettled_backlog', ai_risk_red: 'account_at_risk',
   };
   return flags.filter((f) => !f.resolved_at && map[f.code]).map((f) => ({ account_id: f.account_id, shop_id: f.shop_id, kind: map[f.code], message: f.detail ? `${f.message}. ${f.detail}` : f.message, fingerprint: `flag:${f.code}`, source: 'monitor' }));
 }

@@ -60,7 +60,7 @@ describe('stock countdown and projection', () => {
 describe('incidents', () => {
   const account = (q: Queries, extra: Partial<Account> = {}) => q.createAccount({ name: 'Kijimea DE', markets: 'DE', am_name: 'Ana', aa_name: null, enabled: true, notes: null, commission_pct: null, commission_basis: 'gmv', settlement_pct: 100, slack_channel: '#acct-kijimea', client_slack_channel: null, client_domain: null, ...extra });
   it('maps monitor flags to incident kinds', () => {
-    const d = incidentsFromFlags([{ id: 1, account_id: 1, account_name: 'K', shop_id: 's', code: 'tts_unshipped', severity: 'crit', message: 'K: 3 orders waiting', detail: 'a, b', first_seen_at: '', last_seen_at: '', resolved_at: null, acknowledged_at: null }, { id: 2, account_id: 1, account_name: 'K', shop_id: null, code: 'tts_low_stock', severity: 'warn', message: 'x', detail: null, first_seen_at: '', last_seen_at: '', resolved_at: null, acknowledged_at: null }]);
+    const d = incidentsFromFlags([{ id: 1, account_id: 1, account_name: 'K', shop_id: 's', code: 't_ship_sla_breach', severity: 'crit', message: 'K: 3 orders waiting', detail: 'a, b', first_seen_at: '', last_seen_at: '', resolved_at: null, acknowledged_at: null }, { id: 2, account_id: 1, account_name: 'K', shop_id: null, code: 'tts_low_stock', severity: 'warn', message: 'x', detail: null, first_seen_at: '', last_seen_at: '', resolved_at: null, acknowledged_at: null }]);
     expect(d).toHaveLength(1);
     expect(d[0].kind).toBe('overdue_shipment');
     expect(d[0].message).toContain('a, b');

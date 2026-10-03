@@ -21,6 +21,11 @@ import type {
   BdFollowup,
   TtsContact,
   LarkMessage,
+  HealthSource,
+  AccountTarget,
+  AccountSkuPrice,
+  AccountCampaign,
+  TargetKey,
   WatchlistEntry,
   BdAlert,
   BdActivity,
@@ -57,7 +62,7 @@ import type {
 import { isSignedStage, leadKey, matchPerson, type SheetLead } from '../leads/sheet.js';
 import { fastmossShopUrl, launchFlags, matchesAccountName, outreachComplete, riseBand, riseScore } from '../bd/score.js';
 
-export interface HealthPullRow { id: number; shop_id: string; account_id: number | null; source: 'windsor' | 'cruva'; pull_date: string; pulled_at: string; ok: boolean; error: string | null; metrics: Record<string, unknown>; rows: Record<string, unknown> }
+export interface HealthPullRow { id: number; shop_id: string; account_id: number | null; source: HealthSource; pull_date: string; pulled_at: string; ok: boolean; error: string | null; metrics: Record<string, unknown>; rows: Record<string, unknown> }
 
 type Row = Record<string, unknown>;
 
@@ -1499,7 +1504,7 @@ export class Queries {
 
   // ---- Account health: daily pulls and AI assessments ----
 
-  upsertHealthPull(p: { shop_id: string; account_id: number | null; source: 'windsor' | 'cruva'; pull_date: string; ok: boolean; error?: string | null; metrics: Record<string, unknown>; rows?: Record<string, unknown> }): void {
+  upsertHealthPull(p: { shop_id: string; account_id: number | null; source: HealthSource; pull_date: string; ok: boolean; error?: string | null; metrics: Record<string, unknown>; rows?: Record<string, unknown> }): void {
     this.db.prepare(`INSERT INTO health_pulls (shop_id, account_id, source, pull_date, pulled_at, ok, error, metrics_json, rows_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(shop_id, source, pull_date) DO UPDATE SET account_id = excluded.account_id, pulled_at = excluded.pulled_at, ok = excluded.ok, error = excluded.error, metrics_json = excluded.metrics_json, rows_json = excluded.rows_json`)
       .run(p.shop_id, p.account_id, p.source, p.pull_date, new Date().toISOString(), p.ok ? 1 : 0, p.error ?? null, JSON.stringify(p.metrics), JSON.stringify(p.rows ?? {}));
@@ -1507,18 +1512,89 @@ export class Queries {
 
   private rowToPull(r: Row): HealthPullRow {
     const parse = <T,>(v: unknown, fallback: T): T => { try { return JSON.parse(String(v ?? '')) as T; } catch { return fallback; } };
-    return { id: r.id as number, shop_id: r.shop_id as string, account_id: (r.account_id as number | null) ?? null, source: r.source as 'windsor' | 'cruva', pull_date: r.pull_date as string, pulled_at: r.pulled_at as string, ok: Boolean(r.ok), error: (r.error as string | null) ?? null, metrics: parse<Record<string, unknown>>(r.metrics_json, {}), rows: parse<Record<string, unknown>>(r.rows_json, {}) };
+    return { id: r.id as number, shop_id: r.shop_id as string, account_id: (r.account_id as number | null) ?? null, source: r.source as HealthSource, pull_date: r.pull_date as string, pulled_at: r.pulled_at as string, ok: Boolean(r.ok), error: (r.error as string | null) ?? null, metrics: parse<Record<string, unknown>>(r.metrics_json, {}), rows: parse<Record<string, unknown>>(r.rows_json, {}) };
   }
 
   /** The most recent pull per shop for a source (any date). */
-  latestHealthPulls(source: 'windsor' | 'cruva'): HealthPullRow[] {
+  latestHealthPulls(source: HealthSource): HealthPullRow[] {
     return (this.db.prepare('SELECT p.* FROM health_pulls p WHERE p.source = ? AND p.pull_date = (SELECT MAX(pull_date) FROM health_pulls x WHERE x.shop_id = p.shop_id AND x.source = p.source) ORDER BY p.shop_id').all(source) as Row[]).map((r) => this.rowToPull(r));
   }
 
   /** Metrics history for a shop (no row payloads), newest last. */
-  healthMetricsHistory(shopId: string, source: 'windsor' | 'cruva', days: number): { pull_date: string; metrics: Record<string, unknown> }[] {
+  healthMetricsHistory(shopId: string, source: HealthSource, days: number): { pull_date: string; metrics: Record<string, unknown> }[] {
     const from = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
     return (this.db.prepare('SELECT pull_date, metrics_json FROM health_pulls WHERE shop_id = ? AND source = ? AND pull_date >= ? AND ok = 1 ORDER BY pull_date').all(shopId, source, from) as Row[]).map((r) => { let m: Record<string, unknown> = {}; try { m = JSON.parse(String(r.metrics_json)); } catch { m = {}; } return { pull_date: r.pull_date as string, metrics: m }; });
+  }
+
+  // ---- Account targets, SKU price list and platform campaigns (what the targets rules compare against) ----
+
+  listAccountTargets(accountId?: number): AccountTarget[] {
+    const rows = (accountId === undefined ? this.db.prepare('SELECT * FROM account_targets ORDER BY account_id, market, key').all() : this.db.prepare('SELECT * FROM account_targets WHERE account_id = ? ORDER BY market, key').all(accountId)) as Row[];
+    return rows.map((r) => ({ account_id: r.account_id as number, market: r.market as string, key: r.key as TargetKey, value: Number(r.value), updated_at: r.updated_at as string, updated_by: (r.updated_by as string | null) ?? null }));
+  }
+
+  /** Set (or clear with null) one target for an account, for every market ('') or one market. */
+  setAccountTarget(accountId: number, market: string, key: TargetKey, value: number | null, actor: string | null): void {
+    const m = market.trim().toUpperCase();
+    if (value === null) { this.db.prepare('DELETE FROM account_targets WHERE account_id = ? AND market = ? AND key = ?').run(accountId, m, key); return; }
+    this.db.prepare(`INSERT INTO account_targets (account_id, market, key, value, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(account_id, market, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by`).run(accountId, m, key, value, new Date().toISOString(), actor);
+  }
+
+  private rowToSkuPrice(r: Row): AccountSkuPrice {
+    const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+    return { id: r.id as number, account_id: r.account_id as number, market: r.market as string, tts_shop_id: (r.tts_shop_id as string | null) ?? null, product_id: (r.product_id as string | null) ?? null, sku_id: (r.sku_id as string | null) ?? null, seller_sku: (r.seller_sku as string | null) ?? null, name: r.name as string, list_price: num(r.list_price), floor_price: num(r.floor_price), promo_price: num(r.promo_price), current_price: num(r.current_price), currency: (r.currency as string) ?? 'EUR', updated_at: r.updated_at as string };
+  }
+
+  listSkuPrices(accountId?: number): AccountSkuPrice[] {
+    const rows = (accountId === undefined ? this.db.prepare('SELECT * FROM account_sku_prices ORDER BY account_id, market, name').all() : this.db.prepare('SELECT * FROM account_sku_prices WHERE account_id = ? ORDER BY market, name').all(accountId)) as Row[];
+    return rows.map((r) => this.rowToSkuPrice(r));
+  }
+
+  saveSkuPrice(p: Partial<AccountSkuPrice> & { account_id: number; market: string; name: string }): AccountSkuPrice {
+    const now = new Date().toISOString();
+    if (p.id) {
+      this.db.prepare(`UPDATE account_sku_prices SET market = ?, tts_shop_id = ?, product_id = ?, sku_id = ?, seller_sku = ?, name = ?, list_price = ?, floor_price = ?, promo_price = ?, current_price = COALESCE(?, current_price), currency = ?, updated_at = ? WHERE id = ?`)
+        .run(p.market, p.tts_shop_id ?? null, p.product_id ?? null, p.sku_id ?? null, p.seller_sku ?? null, p.name, p.list_price ?? null, p.floor_price ?? null, p.promo_price ?? null, p.current_price ?? null, p.currency ?? 'EUR', now, p.id);
+      return this.rowToSkuPrice(this.db.prepare('SELECT * FROM account_sku_prices WHERE id = ?').get(p.id) as Row);
+    }
+    // One row per SKU per account: a pull or a second paste updates the row it already has.
+    const existing = p.sku_id ? (this.db.prepare('SELECT id FROM account_sku_prices WHERE account_id = ? AND sku_id = ?').get(p.account_id, p.sku_id) as Row | undefined) : undefined;
+    if (existing) return this.saveSkuPrice({ ...p, id: existing.id as number });
+    const info = this.db.prepare(`INSERT INTO account_sku_prices (account_id, market, tts_shop_id, product_id, sku_id, seller_sku, name, list_price, floor_price, promo_price, current_price, currency, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(p.account_id, p.market, p.tts_shop_id ?? null, p.product_id ?? null, p.sku_id ?? null, p.seller_sku ?? null, p.name, p.list_price ?? null, p.floor_price ?? null, p.promo_price ?? null, p.current_price ?? null, p.currency ?? 'EUR', now);
+    return this.rowToSkuPrice(this.db.prepare('SELECT * FROM account_sku_prices WHERE id = ?').get(Number(info.lastInsertRowid)) as Row);
+  }
+
+  /** The product pull refreshes what the shop currently charges, without touching the agreed prices. */
+  setSkuCurrentPrice(accountId: number, skuId: string, price: number | null, currency: string | null): boolean {
+    return this.db.prepare('UPDATE account_sku_prices SET current_price = ?, currency = COALESCE(?, currency), updated_at = ? WHERE account_id = ? AND sku_id = ?').run(price, currency, new Date().toISOString(), accountId, skuId).changes > 0;
+  }
+
+  deleteSkuPrice(id: number): boolean {
+    return this.db.prepare('DELETE FROM account_sku_prices WHERE id = ?').run(id).changes > 0;
+  }
+
+  private rowToCampaign(r: Row): AccountCampaign {
+    return { id: r.id as number, account_id: r.account_id as number, market: r.market as string, name: r.name as string, begin_at: r.begin_at as string, end_at: r.end_at as string, participation: (r.participation as AccountCampaign['participation']) ?? 'full', discount_pct: r.discount_pct === null || r.discount_pct === undefined ? null : Number(r.discount_pct), sku_scope: (r.sku_scope as string | null) ?? null, notes: (r.notes as string | null) ?? null, created_at: r.created_at as string, updated_at: r.updated_at as string };
+  }
+
+  listAccountCampaigns(accountId?: number): AccountCampaign[] {
+    const rows = (accountId === undefined ? this.db.prepare('SELECT * FROM account_campaigns ORDER BY begin_at DESC, id DESC').all() : this.db.prepare('SELECT * FROM account_campaigns WHERE account_id = ? ORDER BY begin_at DESC, id DESC').all(accountId)) as Row[];
+    return rows.map((r) => this.rowToCampaign(r));
+  }
+
+  saveAccountCampaign(c: Partial<AccountCampaign> & { account_id: number; market: string; name: string; begin_at: string; end_at: string }): AccountCampaign {
+    const now = new Date().toISOString();
+    if (c.id) {
+      this.db.prepare(`UPDATE account_campaigns SET market = ?, name = ?, begin_at = ?, end_at = ?, participation = ?, discount_pct = ?, sku_scope = ?, notes = ?, updated_at = ? WHERE id = ?`).run(c.market, c.name, c.begin_at, c.end_at, c.participation ?? 'full', c.discount_pct ?? null, c.sku_scope ?? null, c.notes ?? null, now, c.id);
+      return this.rowToCampaign(this.db.prepare('SELECT * FROM account_campaigns WHERE id = ?').get(c.id) as Row);
+    }
+    const info = this.db.prepare(`INSERT INTO account_campaigns (account_id, market, name, begin_at, end_at, participation, discount_pct, sku_scope, notes, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(c.account_id, c.market, c.name, c.begin_at, c.end_at, c.participation ?? 'full', c.discount_pct ?? null, c.sku_scope ?? null, c.notes ?? null, now, now);
+    return this.rowToCampaign(this.db.prepare('SELECT * FROM account_campaigns WHERE id = ?').get(Number(info.lastInsertRowid)) as Row);
+  }
+
+  deleteAccountCampaign(id: number): boolean {
+    return this.db.prepare('DELETE FROM account_campaigns WHERE id = ?').run(id).changes > 0;
   }
 
   pruneHealthPulls(olderThanDays: number): number {

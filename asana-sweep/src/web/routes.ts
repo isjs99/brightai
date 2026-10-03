@@ -775,7 +775,8 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
         { key: 'fastmoss', name: 'FastMoss', role: 'Daily pull of fast-rising shops', configured: fm.configured, ok: fm.configured && !fm.last_error, detail: !fm.configured ? 'FASTMOSS_API_KEY not set' : fm.last_error ? fm.last_error : fm.last_pull_at ? `last pull ${fm.last_pull_at}` : 'no pull yet', link: '/bd', testable: true },
         { key: 'gmail', name: 'Gmail', role: 'Outreach drafts and the TikTok Shop contact import', configured: gmailClient.configured, ok: gmailClient.connected, detail: !gmailClient.configured ? 'GOOGLE_CLIENT_ID / SECRET not set' : gmailClient.connected ? `connected as ${gmailClient.email ?? 'unknown'}` : 'not connected: Outreach emails › Settings › Connect Gmail', link: '/outreach?tab=settings', testable: false },
         { key: 'health', name: 'Account health (Windsor daily pull)', role: 'Orders, ship-by deadlines, stock, payouts, statements and unsettled money per shop, daily at 06:30, feeding the Monitor flags and the AI review', configured: w.configured && wShops.length > 0, ok: w.configured && wShops.length > 0 && Boolean(hs.last_pull_at) && !hs.last_pull_error, detail: !w.configured ? 'Needs Windsor.ai' : !wShops.length ? 'Link shops to accounts below' : hs.last_pull_at ? `${hs.pulls.filter((p) => p.source === 'windsor').length} shop(s) pulled, last ${hs.last_pull_at}${hs.last_pull_error ? `; ${hs.last_pull_error}` : ''}` : 'No pull yet (runs at 06:30, or press Run daily pass on the Monitor page)', link: '/monitor', testable: false },
-        { key: 'routine', name: 'Daily review routine (Cruva via Claude)', role: 'A scheduled Claude routine reads Cruva over MCP for every linked shop and posts the metrics, its findings and an assessment per account to /api/flags/ingest', configured: Boolean(config.ingestToken), ok: Boolean(config.ingestToken) && Boolean(hs.last_ingest_at) && Date.now() - Date.parse(hs.last_ingest_at ?? '') < 2 * 86400000, detail: !config.ingestToken ? 'INGEST_TOKEN not set in .env' : hs.last_ingest_at ? `Last post ${hs.last_ingest_at}, ${hs.pulls.filter((p) => p.source === 'cruva').length} shop(s) with metrics` : 'Token set, nothing posted yet: the routine needs DASHBOARD_URL and INGEST_TOKEN in its environment (README › Daily review routine)', link: '/monitor?tab=review', testable: false },
+        { key: 'tts_monitor', name: 'Account monitor (TikTok Shop API)', role: 'Every authorised shop linked to an account is pulled on each monitor scan (analytics, orders, products, returns, samples, CS, finance, as far as the app\'s scopes allow) and checked against the targets per account', configured: tts.configured, ok: tts.configured && Boolean(hs.tts_last_pull_at) && !hs.tts_last_pull_error, detail: !tts.configured ? 'Needs TTS_APP_KEY / TTS_APP_SECRET' : !q.listTtsShops().some((s) => s.account_id) ? 'Authorise shops under Promotions › Connection and link them to accounts' : hs.tts_last_pull_at ? `${hs.pulls.filter((p) => p.source === 'tts').length} shop(s) pulled, last ${hs.tts_last_pull_at}${hs.tts_last_pull_error ? `; ${hs.tts_last_pull_error}` : ''}` : 'No pull yet (runs on the next scan, or press Pull TikTok now on the Account monitor)', link: '/monitor', testable: false },
+        { key: 'routine', name: 'Daily review routine (Claude)', role: 'An optional scheduled Claude routine can post findings and an assessment per account to /api/flags/ingest; the fixed rules no longer depend on it', configured: Boolean(config.ingestToken), ok: Boolean(config.ingestToken) && Boolean(hs.last_ingest_at) && Date.now() - Date.parse(hs.last_ingest_at ?? '') < 2 * 86400000, detail: !config.ingestToken ? 'INGEST_TOKEN not set in .env' : hs.last_ingest_at ? `Last post ${hs.last_ingest_at}` : 'Token set, nothing posted yet', link: '/monitor?tab=review', testable: false },
         { key: 'slack', name: 'Slack bot', role: 'AM reminders, incident alerts, client reports', configured: slackBot.configured, ok: slackBot.configured, detail: slackBot.configured ? 'SLACK_BOT_TOKEN set' : 'SLACK_BOT_TOKEN not set', link: '/people', testable: false },
         { key: 'tldv', name: 'tl;dv', role: 'Follow-up emails after calls', configured: tldv.configured, ok: tldv.configured, detail: tldv.configured ? 'TLDV_API_KEY set' : 'TLDV_API_KEY not set', link: '/outreach', testable: false },
         { key: 'anthropic', name: 'Anthropic API', role: 'Drafting replies, reports and the copilot', configured: Boolean(config.anthropicApiKey), ok: Boolean(config.anthropicApiKey), detail: config.anthropicApiKey ? `model ${config.replyModel}` : 'ANTHROPIC_API_KEY not set', link: '/inbox', testable: false },
@@ -2225,6 +2226,97 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   r.post('/monitor/flags/:id/ack', (req, res) => {
     if (!q.acknowledgeFlag(idParam(req))) throw new HttpError(404, 'Flag not found');
     res.json(monitor.data());
+  });
+
+  // ---- Account monitor: per-account overview, targets, SKU price list, campaigns, TikTok pull ----
+  const overviewOr404 = (id: number) => {
+    const o = scheduler.health.accountOverview(id, monitor.rules());
+    if (!o) throw new HttpError(404, 'Account not found');
+    return o;
+  };
+  r.get('/monitor/accounts/:id', (req, res) => res.json(overviewOr404(idParam(req))));
+
+  /** Pull every authorised shop now (all blocks, ignoring the hourly cache for the daily ones) and re-run the rules. */
+  r.post('/monitor/pull', async (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const r2 = await scheduler.health.pullTikTok({ force: true, shopIds: Array.isArray(b.shop_ids) ? b.shop_ids.map(String) : undefined });
+    const scan = await monitor.scan();
+    res.json({ ...r2, scan, ...monitor.data() });
+  });
+
+  const TARGET_KEYS = new Set(['samples_per_week', 'samples_min_per_week', 'gmv_target_month', 'gmv_max_weekly_spend', 'gmv_max_min_roi', 'gmv_max_gmv_target_week', 'gmv_max_spend_actual_week', 'gmv_max_gmv_actual_week', 'promo_max_discount_pct', 'campaign_full_participation', 'campaign_max_discount_pct']);
+  /** Set one or many targets: { targets: [{ market, key, value|null }] }. */
+  r.put('/monitor/accounts/:id/targets', async (req, res) => {
+    const id = idParam(req);
+    if (!q.getAccount(id)) throw new HttpError(404, 'Account not found');
+    const b = (req.body ?? {}) as { targets?: { market?: unknown; key?: unknown; value?: unknown }[] };
+    if (!Array.isArray(b.targets) || !b.targets.length) throw new HttpError(400, 'Send { targets: [{ market, key, value }] }');
+    for (const t of b.targets) {
+      const key = String(t.key ?? '');
+      if (!TARGET_KEYS.has(key)) throw new HttpError(400, `Unknown target "${key}"`);
+      const value = t.value === null || t.value === '' || t.value === undefined ? null : Number(t.value);
+      if (value !== null && !Number.isFinite(value)) throw new HttpError(400, `${key}: not a number`);
+      q.setAccountTarget(id, String(t.market ?? ''), key as Parameters<Queries['setAccountTarget']>[2], value, actorOf(req));
+    }
+    await monitor.scan();
+    res.json(overviewOr404(id));
+  });
+
+  r.put('/monitor/accounts/:id/sku-prices', async (req, res) => {
+    const id = idParam(req);
+    if (!q.getAccount(id)) throw new HttpError(404, 'Account not found');
+    const b = (req.body ?? {}) as { rows?: Record<string, unknown>[] };
+    if (!Array.isArray(b.rows)) throw new HttpError(400, 'Send { rows: [...] }');
+    const numOrNull = (v: unknown) => (v === null || v === undefined || v === '' ? null : Number(v));
+    for (const row of b.rows) {
+      const name = optText(row.name);
+      if (!name) continue;
+      q.saveSkuPrice({ id: row.id ? Number(row.id) : undefined, account_id: id, market: String(row.market ?? '').toUpperCase(), tts_shop_id: optText(row.tts_shop_id), product_id: optText(row.product_id), sku_id: optText(row.sku_id), seller_sku: optText(row.seller_sku), name, list_price: numOrNull(row.list_price), floor_price: numOrNull(row.floor_price), promo_price: numOrNull(row.promo_price), current_price: numOrNull(row.current_price), currency: optText(row.currency) ?? 'EUR' });
+    }
+    await monitor.scan();
+    res.json(overviewOr404(id));
+  });
+  /** Fill the price list from the last product pull of the account's shops (adds missing SKUs, refreshes current prices). */
+  r.post('/monitor/accounts/:id/sku-prices/import', async (req, res) => {
+    const id = idParam(req);
+    if (!q.getAccount(id)) throw new HttpError(404, 'Account not found');
+    const shops = q.listTtsShops().filter((sh) => sh.account_id === id);
+    let added = 0;
+    for (const p of q.latestHealthPulls('tts').filter((x) => shops.some((sh) => sh.id === x.shop_id))) {
+      const sh = shops.find((x) => x.id === p.shop_id)!;
+      const rows = p.rows as { products?: { id: string; title: string; status: string; skus: { id: string; seller_sku: string | null; price: number | null; currency: string | null }[] }[]; scopes?: Record<string, { ok: boolean }> };
+      if (!rows.scopes?.product?.ok) continue;
+      for (const prod of rows.products ?? []) for (const sku of prod.skus) {
+        q.saveSkuPrice({ account_id: id, market: sh.market ?? '', tts_shop_id: sh.id, product_id: prod.id, sku_id: sku.id, seller_sku: sku.seller_sku, name: `${prod.title}${sku.seller_sku ? ` (${sku.seller_sku})` : ''}`, list_price: sku.price, current_price: sku.price, currency: sku.currency ?? 'EUR' });
+        added += 1;
+      }
+    }
+    if (!added) throw new HttpError(400, shops.length ? 'No product pull yet for this account: the Product management scope must be live on the app.' : 'No TikTok shop is linked to this account.');
+    res.json({ imported: added, ...overviewOr404(id) });
+  });
+  r.delete('/monitor/sku-prices/:id', (req, res) => {
+    const row = q.listSkuPrices().find((x) => x.id === idParam(req));
+    if (!row || !q.deleteSkuPrice(row.id)) throw new HttpError(404, 'Row not found');
+    res.json(overviewOr404(row.account_id));
+  });
+
+  r.put('/monitor/accounts/:id/campaigns', async (req, res) => {
+    const id = idParam(req);
+    if (!q.getAccount(id)) throw new HttpError(404, 'Account not found');
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const name = optText(b.name); const begin = optText(b.begin_at); const end = optText(b.end_at);
+    if (!name || !begin || !end) throw new HttpError(400, 'Name, start and end are required.');
+    if (Number.isNaN(Date.parse(begin)) || Number.isNaN(Date.parse(end)) || begin >= end) throw new HttpError(400, 'Start must be before end (YYYY-MM-DD).');
+    const participation = (['full', 'partial', 'none'] as const).find((x) => x === b.participation) ?? 'full';
+    q.saveAccountCampaign({ id: b.id ? Number(b.id) : undefined, account_id: id, market: String(b.market ?? '').toUpperCase(), name, begin_at: begin, end_at: end, participation, discount_pct: b.discount_pct === null || b.discount_pct === '' || b.discount_pct === undefined ? null : Number(b.discount_pct), sku_scope: optText(b.sku_scope), notes: optText(b.notes) });
+    await monitor.scan();
+    res.json(overviewOr404(id));
+  });
+  r.delete('/monitor/campaigns/:id', async (req, res) => {
+    const c = q.listAccountCampaigns().find((x) => x.id === idParam(req));
+    if (!c || !q.deleteAccountCampaign(c.id)) throw new HttpError(404, 'Campaign not found');
+    await monitor.scan();
+    res.json(overviewOr404(c.account_id));
   });
 
   r.post('/bd/followups/remind', async (_req, res) => res.json({ ...(await scheduler.remindFollowups()), ...outreachData() }));

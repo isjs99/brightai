@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { openTestDb } from '../src/db/index';
 import { Queries } from '../src/db/queries';
-import { DEFAULT_THRESHOLDS, evaluateCruva, evaluateWindsor, parseThresholds, type WindsorRows } from '../src/health/rules';
+import { DEFAULT_THRESHOLDS, evaluateWindsor, parseThresholds, type WindsorRows } from '../src/health/rules';
 import { HealthEngine, parseAssessment } from '../src/health/index';
 import { AccountMonitor } from '../src/monitor/index';
 import { incidentsFromFlags } from '../src/incidents/index';
@@ -114,31 +114,9 @@ describe('windsor rules', () => {
   it('honours disabled rules and parses thresholds safely', () => {
     const rows: WindsorRows = { ...empty, orders: [order({ order_status: 'AWAITING_SHIPMENT', order_rts_sla_datetime: ago(3) })] };
     expect(evaluateWindsor(shop, rows, DEFAULT_THRESHOLDS, { now: NOW, enabled: new Set(['w_low_stock']) }).flags).toHaveLength(0);
-    const t = parseThresholds({ low_stock_units: '25', sps_min: -1, nonsense: 5 });
+    const t = parseThresholds({ low_stock_units: '25', gmv_drop_pct: -1, nonsense: 5 });
     expect(t.low_stock_units).toBe(25);
-    expect(t.sps_min).toBe(DEFAULT_THRESHOLDS.sps_min);
-  });
-});
-
-describe('cruva rules', () => {
-  const ref = { shop_id: '6973a15e06f8df59ef3f02eb', shop_name: 'Clearly DE', account_id: 1 };
-  it('flags a restricted score, outreach stopping, sample drops and waiting requests', () => {
-    const flags = evaluateCruva(ref, { sps: 2.9, dms_sent_7d: 284, dms_sent_prev_7d: 79000, samples_approved_7d: 69, samples_approved_prev_7d: 106, samples_shipped_7d: 66, samples_shipped_prev_7d: 113, samples_pending_review: 12, samples_pending_review_oldest_hours: 96, automations_active: 3, automations_total: 5, videos_posted_7d: 194, videos_with_sales_7d: 5 }, DEFAULT_THRESHOLDS, { previous: { sps: 3.4 } });
-    const codes = flags.map((f) => f.code);
-    expect(codes).toEqual(expect.arrayContaining(['c_sps_low', 'c_sps_drop', 'c_dms_stopped', 'c_samples_drop', 'c_samples_waiting']));
-    expect(codes).not.toContain('c_videos_no_sales');
-    expect(codes).not.toContain('c_automations_off');
-    expect(flags.find((f) => f.code === 'c_samples_drop')!.message).toContain('samples approved 69 vs 106');
-  });
-  it('flags zero DMs with automations active, no automations, and stale metrics', () => {
-    expect(evaluateCruva(ref, { dms_sent_7d: 0, automations_active: 2 }, DEFAULT_THRESHOLDS).map((f) => f.code)).toContain('c_dms_stopped');
-    expect(evaluateCruva(ref, { automations_active: 0, automations_total: 4 }, DEFAULT_THRESHOLDS)[0].message).toContain('(4 set up)');
-    expect(evaluateCruva(ref, {}, DEFAULT_THRESHOLDS, { stale: true })[0].code).toBe('c_data_stale');
-    expect(evaluateCruva(ref, {}, DEFAULT_THRESHOLDS)).toHaveLength(0);
-  });
-  it('flags affiliate share and affiliate GMV falling', () => {
-    const flags = evaluateCruva(ref, { affiliate_gmv_7d: 400, affiliate_gmv_prev_7d: 900, total_gmv_7d: 1000, total_gmv_prev_7d: 1000 }, DEFAULT_THRESHOLDS);
-    expect(flags.map((f) => f.code).sort()).toEqual(['c_affiliate_gmv_drop', 'c_affiliate_share_drop']);
+    expect(t.gmv_drop_pct).toBe(DEFAULT_THRESHOLDS.gmv_drop_pct);
   });
 });
 
@@ -182,7 +160,8 @@ describe('health engine', () => {
     expect(again.resolved).toBe(0);
     const rules = monitor.rules();
     expect(rules.find((x) => x.code === 'w_ship_sla_breach')!.section).toBe('Orders');
-    expect(rules.some((x) => x.source === 'cruva') && rules.some((x) => x.source === 'ai')).toBe(true);
+    expect(rules.some((x) => x.source === 'tts') && rules.some((x) => x.source === 'targets') && rules.some((x) => x.source === 'ai')).toBe(true);
+    expect(rules.find((x) => x.code === 't_ship_sla_breach')!.scope).toBe('order');
     // Thresholds change the outcome on the next scan without a new pull.
     health.setThresholds({ low_stock_units: 0 });
     expect(health.thresholds().low_stock_units).toBe(0);
@@ -190,11 +169,11 @@ describe('health engine', () => {
     expect(monitor.data().health.pulls[0].shop_name).toBe('Clearly_Spain');
   });
 
-  it('ingests the routine payload: Cruva metrics become rule flags, findings and assessments are stored, and rescans do not wipe them', async () => {
+  it('ingests the routine payload: findings and assessments are stored, Cruva metrics no longer make flags, and rescans do not wipe them', async () => {
     const { q, clearly, health, monitor } = setup();
     const cruvaShop = q.listShops('cruva').find((s) => s.account_id === clearly.id)!;
     const r = health.ingest({ source: 'routine', accounts: [
-      { account: 'Clearly', shops: [{ shop_id: cruvaShop.shop_id, metrics: { sps: 2.9, dms_sent_7d: 0, automations_active: 2 } }], findings: [{ message: 'Two automations are throttled by TikTok', severity: 'warn' }], assessment: { risk: 'red', summary: 'Outreach is blocked while the score sits at 2.9.', action: 'Switch automations to invites and fix late dispatch.', watch: ['SPS'] } },
+      { account: 'Clearly', shops: [{ shop_id: cruvaShop.shop_id, metrics: { sps: 2.9, dms_sent_7d: 0, automations_active: 2 } }], findings: [{ message: 'Two automations are throttled by TikTok', severity: 'warn' }], assessment: { risk: 'red', summary: 'Score restricts DMs.', action: 'Fix late dispatch.', watch: ['SPS'] } },
       { account: 'Nobody', shops: [] },
     ] });
     expect(r.accounts).toBe(1);
@@ -204,7 +183,8 @@ describe('health engine', () => {
     expect(r.errors).toEqual(['Unknown account "Nobody"']);
     await monitor.scan();
     const codes = q.listFlags(false).filter((f) => f.account_id === clearly.id).map((f) => f.code);
-    expect(codes).toEqual(expect.arrayContaining(['c_sps_low', 'c_dms_stopped', 'c_custom', 'ai_risk_red']));
+    expect(codes).toEqual(expect.arrayContaining(['c_custom', 'ai_risk_red']));
+    expect(codes.some((c) => c.startsWith('c_sps') || c === 'c_dms_stopped')).toBe(false);
     // The routine finding is not owned by the scan, so a rescan leaves it; the next ingest replaces it.
     await monitor.scan();
     expect(q.listFlags(false).filter((f) => f.code === 'c_custom')).toHaveLength(1);
@@ -215,10 +195,10 @@ describe('health engine', () => {
     expect(a[0].risk).toBe('red');
     expect(a[0].source).toBe('routine');
     expect(a[0].watch).toEqual(['SPS']);
-    const ctx = health.accountContext(clearly) as { open_flags: unknown[]; shops: { source: string; latest: Record<string, unknown> | null }[] };
+    const ctx = health.accountContext(clearly) as { open_flags: unknown[]; targets: unknown[] };
     expect(ctx.open_flags.length).toBeGreaterThan(0);
-    expect(ctx.shops.find((s) => s.source === 'cruva')!.latest!.sps).toBe(2.9);
-    expect(incidentsFromFlags(q.listFlags(false)).map((i) => i.kind)).toEqual(expect.arrayContaining(['sps_restricted', 'account_at_risk', 'outreach_stopped']));
+    expect(ctx.targets).toEqual([]);
+    expect(incidentsFromFlags(q.listFlags(false)).map((i) => i.kind)).toEqual(expect.arrayContaining(['account_at_risk']));
   });
 
   it('runs the AI review with the LLM it is given and stores the verdict as a flag', async () => {

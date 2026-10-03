@@ -1291,6 +1291,54 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 33,
+    name: 'Account monitor targets: per-account targets, SKU price list and platform campaigns',
+    up(db) {
+      db.exec(`
+        CREATE TABLE account_targets (
+          account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          market TEXT NOT NULL DEFAULT '',
+          key TEXT NOT NULL,
+          value REAL NOT NULL,
+          updated_at TEXT NOT NULL,
+          updated_by TEXT,
+          PRIMARY KEY (account_id, market, key)
+        );
+        CREATE TABLE account_sku_prices (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          market TEXT NOT NULL DEFAULT '',
+          tts_shop_id TEXT,
+          product_id TEXT,
+          sku_id TEXT,
+          seller_sku TEXT,
+          name TEXT NOT NULL,
+          list_price REAL,
+          floor_price REAL,
+          promo_price REAL,
+          current_price REAL,
+          currency TEXT NOT NULL DEFAULT 'EUR',
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX account_sku_prices_account ON account_sku_prices(account_id, sku_id);
+        CREATE TABLE account_campaigns (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          market TEXT NOT NULL DEFAULT '',
+          name TEXT NOT NULL,
+          begin_at TEXT NOT NULL,
+          end_at TEXT NOT NULL,
+          participation TEXT NOT NULL DEFAULT 'full',
+          discount_pct REAL,
+          sku_scope TEXT,
+          notes TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

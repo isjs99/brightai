@@ -896,7 +896,12 @@ export interface MonitorFlag {
   acknowledged_at: string | null;
 }
 
-export type MonitorSource = 'tts' | 'dashboard' | 'cruva' | 'checklist' | 'windsor' | 'ai';
+export type MonitorSource = 'tts' | 'dashboard' | 'cruva' | 'checklist' | 'windsor' | 'ai' | 'targets';
+
+/** TikTok Shop OpenAPI scopes the app can hold; each rule names the one it needs so the UI can say what is missing. */
+export type TtsScope = 'analytics' | 'order' | 'product' | 'return_refund' | 'affiliate_seller' | 'customer_service' | 'finance' | 'promotion' | 'seller' | 'none';
+export type TtsScopeState = 'ok' | 'denied' | 'error' | 'unknown';
+export interface TtsScopeStatus { scope: TtsScope; state: TtsScopeState; message: string | null; checked_at: string | null; shops_ok: number; shops_total: number }
 
 export interface MonitorRule {
   code: string;
@@ -906,6 +911,8 @@ export interface MonitorRule {
   source: MonitorSource;
   /** Checklist section the flag belongs to (shown against the AM's daily lines). */
   section?: string | null;
+  /** The TikTok Shop API scope the rule reads from ('none' for rules on the dashboard's own data). */
+  scope?: TtsScope;
   enabled: boolean;
 }
 
@@ -913,12 +920,125 @@ export interface MonitorData {
   flags: MonitorFlag[];
   rules: MonitorRule[];
   health: HealthSummary;
-  accounts: { id: number; name: string; open: number; crit: number; warn: number }[];
+  accounts: MonitorAccountRow[];
+  scopes: TtsScopeStatus[];
+  /** Every account's targets, for the Targets tab. */
+  targets: AccountTarget[];
   last_scan_at: string | null;
   last_scan_error: string | null;
   scanning: boolean;
   interval_minutes: number;
   tts_configured: boolean;
+  /** Authorised TikTok shops, so the overview can say which accounts are connected. */
+  tts_shops: number;
+}
+
+/** One line per account on the monitor's Accounts tab. */
+export interface MonitorAccountRow {
+  id: number;
+  name: string;
+  markets: string | null;
+  am_name: string | null;
+  open: number;
+  crit: number;
+  warn: number;
+  info: number;
+  risk: HealthRisk | null;
+  /** Authorised TikTok shops linked to this account. */
+  shops: number;
+  gmv_7d: number | null;
+  gmv_prev_7d: number | null;
+  currency: string;
+  /** Progress against the targets on file, when there is one (1 = on target). */
+  gmv_pace: number | null;
+  samples_pace: number | null;
+  roi_pace: number | null;
+  last_pull_at: string | null;
+}
+
+/** Per-account targets (settings the rules compare against), per market or for every market (market ''). */
+export type TargetKey = 'samples_per_week' | 'samples_min_per_week' | 'gmv_target_month' | 'gmv_max_weekly_spend' | 'gmv_max_min_roi' | 'gmv_max_gmv_target_week' | 'gmv_max_spend_actual_week' | 'gmv_max_gmv_actual_week' | 'promo_max_discount_pct' | 'campaign_full_participation' | 'campaign_max_discount_pct';
+export interface AccountTarget { account_id: number; market: string; key: TargetKey; value: number; updated_at: string; updated_by: string | null }
+
+/** The agreed price list per SKU for an account (list, floor and promo price), used by the promotion rules. */
+export interface AccountSkuPrice {
+  id: number;
+  account_id: number;
+  market: string;
+  tts_shop_id: string | null;
+  product_id: string | null;
+  sku_id: string | null;
+  seller_sku: string | null;
+  name: string;
+  list_price: number | null;
+  floor_price: number | null;
+  promo_price: number | null;
+  /** The price the shop currently shows, from the last product pull (null until pulled). */
+  current_price: number | null;
+  currency: string;
+  updated_at: string;
+}
+
+/** A platform campaign the account takes part in (typed in; TikTok has no API for campaign enrolment). */
+export interface AccountCampaign {
+  id: number;
+  account_id: number;
+  market: string;
+  name: string;
+  begin_at: string;
+  end_at: string;
+  participation: 'full' | 'partial' | 'none';
+  discount_pct: number | null;
+  sku_scope: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+/** What the monitor shows when one account is opened: numbers against targets, series for the charts, and the checklist walk-through. */
+export interface AccountOverview {
+  account: Account;
+  shops: { id: string; name: string; region: string; market: string | null; token_ok: boolean; last_pull_at: string | null; pull_ok: boolean; pull_error: string | null }[];
+  currency: string;
+  kpis: AccountKpi[];
+  series: { date: string; gmv: number; orders: number; visitors: number; video_gmv: number; live_gmv: number; card_gmv: number; ads_gmv: number | null }[];
+  sections: AccountSection[];
+  flags: MonitorFlag[];
+  resolved_14d: MonitorFlag[];
+  targets: AccountTarget[];
+  sku_prices: AccountSkuPrice[];
+  campaigns: AccountCampaign[];
+  assessment: HealthAssessment | null;
+}
+
+export interface AccountKpi {
+  key: string;
+  label: string;
+  value: number | null;
+  /** The target it is measured against (null when none is set). */
+  target: number | null;
+  /** Previous period for the up/down arrow. */
+  previous: number | null;
+  unit: 'money' | 'count' | 'pct' | 'ratio';
+  /** 'good' on or above target, 'warn' within the behind-threshold, 'crit' further behind; null without data. */
+  state: 'good' | 'warn' | 'crit' | null;
+  /** Why there is no value: the scope that is missing, or where the number lives when the API has none. */
+  note: string | null;
+  /** 'higher' when more is better, 'lower' when less is better. */
+  direction: 'higher' | 'lower';
+}
+
+/** One checklist section in the account walk-through: what the scan checks for it, and what it found. */
+export interface AccountSection {
+  section: string;
+  /** Plain-words list of what the AM checks here (from the checklist guidance). */
+  guidance: string | null;
+  state: 'good' | 'warn' | 'crit' | 'nodata' | 'manual';
+  flags: MonitorFlag[];
+  /** Rules that cover this section, with whether their data source is live. */
+  rules: { code: string; title: string; scope: TtsScope; available: boolean; enabled: boolean }[];
+  /** What is missing to automate this section (scopes to approve, or things only Seller Center shows). */
+  missing: string[];
 }
 
 // ---- Account health (daily Windsor and Cruva pulls, rules with thresholds, AI review) ----
@@ -945,15 +1065,20 @@ export interface HealthThresholds {
   unsettled_age_days: number;
   fee_share_pct: number;
   data_stale_hours: number;
-  /** Cruva */
-  sps_min: number;
-  sps_drop: number;
-  dms_drop_pct: number;
-  samples_drop_pct: number;
+  /** Affiliate (samples, from the TikTok Shop Affiliate seller scope) */
   samples_review_hours: number;
-  content_pending_max: number;
-  affiliate_share_drop_pts: number;
-  affiliate_gmv_drop_pct: number;
+  samples_drop_pct: number;
+  /** Returns and CS */
+  return_response_grace_hours: number;
+  cs_response_pct_min: number;
+  cs_satisfaction_pct_min: number;
+  /** Analytics */
+  gmv_drop_pct: number;
+  visitors_drop_pct: number;
+  conversion_drop_pct: number;
+  /** Targets */
+  target_behind_pct: number;
+  gmv_max_overspend_pct: number;
 }
 
 export type HealthRisk = 'green' | 'amber' | 'red';
@@ -971,12 +1096,14 @@ export interface HealthAssessment {
   watch: string[];
 }
 
+export type HealthSource = 'windsor' | 'cruva' | 'tts';
+
 export interface HealthPullSummary {
   shop_id: string;
   shop_name: string;
   account_id: number | null;
   account_name: string | null;
-  source: 'windsor' | 'cruva';
+  source: HealthSource;
   pull_date: string;
   pulled_at: string;
   ok: boolean;
@@ -995,6 +1122,9 @@ export interface HealthSummary {
   last_ingest_at: string | null;
   pulling: boolean;
   reviewing: boolean;
+  tts_last_pull_at: string | null;
+  tts_last_pull_error: string | null;
+  pulling_tts: boolean;
   thresholds: HealthThresholds;
   pulls: HealthPullSummary[];
   assessments: HealthAssessment[];

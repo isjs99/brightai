@@ -303,3 +303,28 @@ tr.dim td, .card.dim { opacity: .55; }
 
 /* Small inline caution, e.g. "not emailed" under a timestamp */
 .warn-text { color: var(--warn, #b45309); }
+
+/* Chart series (validated for colour-vision separation in both themes): 1 Video, 2 LIVE, 3 Product card. */
+:root { --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; }
+:root[data-theme="dark"] { --s1: #3987e5; --s2: #d95926; --s3: #199e70; }
+@media (prefers-color-scheme: dark) { :root[data-theme="system"] { --s1: #3987e5; --s2: #d95926; --s3: #199e70; } }
+.kpis { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.kpi { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); padding: 10px 12px; display: flex; flex-direction: column; gap: 3px; }
+.kpi .k { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
+.kpi .v { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.kpi .v.nodata { color: var(--faint); font-size: 14px; font-weight: 600; }
+.kpi .t { font-size: 12px; color: var(--muted); }
+.pace { height: 6px; border-radius: 3px; background: var(--surface-3); overflow: hidden; margin-top: 4px; }
+.pace > span { display: block; height: 100%; border-radius: 3px; background: var(--muted); }
+.pace.good > span { background: var(--good); } .pace.warn > span { background: var(--warn); } .pace.crit > span { background: var(--crit); }
+.chart { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-card); padding: 10px 12px; }
+.chart h4 { margin: 0 0 6px; font-size: 13px; }
+.chart .legend { display: flex; gap: 12px; font-size: 12px; color: var(--muted); flex-wrap: wrap; }
+.chart .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.chart .tip { position: absolute; pointer-events: none; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 8px; padding: 6px 8px; font-size: 12px; box-shadow: var(--shadow-card); white-space: nowrap; z-index: 2; }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.sections { display: flex; flex-direction: column; gap: 8px; }
+.section-row { border: 1px solid var(--border); border-radius: var(--r-card); background: var(--surface); padding: 10px 12px; }
+.section-row .head { display: flex; gap: 10px; align-items: center; cursor: pointer; }
+.section-row .head b { flex: 1; }
+.scope-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }

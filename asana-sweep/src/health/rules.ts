@@ -30,14 +30,16 @@ export const DEFAULT_THRESHOLDS: HealthThresholds = {
   unsettled_age_days: 30,
   fee_share_pct: 35,
   data_stale_hours: 36,
-  sps_min: 3.5,
-  sps_drop: 0.3,
-  dms_drop_pct: 60,
-  samples_drop_pct: 30,
   samples_review_hours: 48,
-  content_pending_max: 50,
-  affiliate_share_drop_pts: 15,
-  affiliate_gmv_drop_pct: 30,
+  samples_drop_pct: 30,
+  return_response_grace_hours: 24,
+  cs_response_pct_min: 90,
+  cs_satisfaction_pct_min: 70,
+  gmv_drop_pct: 30,
+  visitors_drop_pct: 40,
+  conversion_drop_pct: 30,
+  target_behind_pct: 15,
+  gmv_max_overspend_pct: 10,
 };
 
 export const THRESHOLD_LABELS: Record<keyof HealthThresholds, { label: string; unit: string; group: string }> = {
@@ -59,14 +61,16 @@ export const THRESHOLD_LABELS: Record<keyof HealthThresholds, { label: string; u
   unsettled_age_days: { label: 'Unsettled orders older than', unit: 'days', group: 'Finance' },
   fee_share_pct: { label: 'Fees above', unit: '% of revenue', group: 'Finance' },
   data_stale_hours: { label: 'Data older than', unit: 'hours', group: 'Account health' },
-  sps_min: { label: 'Shop performance score under', unit: 'score', group: 'Cruva' },
-  sps_drop: { label: 'Shop performance score dropped by', unit: 'points', group: 'Cruva' },
-  dms_drop_pct: { label: 'DMs sent down by', unit: '%', group: 'Cruva' },
-  samples_drop_pct: { label: 'Samples approved or shipped down by', unit: '%', group: 'Cruva' },
-  samples_review_hours: { label: 'Sample requests waiting on review for', unit: 'hours', group: 'Cruva' },
-  content_pending_max: { label: 'Creators awaiting content above', unit: 'creators', group: 'Cruva' },
-  affiliate_share_drop_pts: { label: 'Affiliate share of GMV down by', unit: 'points', group: 'Cruva' },
-  affiliate_gmv_drop_pct: { label: 'Affiliate GMV down by', unit: '%', group: 'Cruva' },
+  samples_review_hours: { label: 'Sample requests waiting on review for', unit: 'hours', group: 'Affiliate' },
+  samples_drop_pct: { label: 'Samples approved or shipped down by', unit: '%', group: 'Affiliate' },
+  return_response_grace_hours: { label: 'Return waiting on the seller for', unit: 'hours', group: 'CS and returns' },
+  cs_response_pct_min: { label: 'CS answered within 24h under', unit: '%', group: 'CS and returns' },
+  cs_satisfaction_pct_min: { label: 'CS satisfaction under', unit: '%', group: 'CS and returns' },
+  gmv_drop_pct: { label: 'GMV down week on week by', unit: '%', group: 'Analytics' },
+  visitors_drop_pct: { label: 'Visitors down week on week by', unit: '%', group: 'Analytics' },
+  conversion_drop_pct: { label: 'Conversion rate down week on week by', unit: '%', group: 'Analytics' },
+  target_behind_pct: { label: 'Behind target by more than', unit: '%', group: 'Targets' },
+  gmv_max_overspend_pct: { label: 'GMV Max spend over the weekly ceiling by', unit: '%', group: 'Targets' },
 };
 
 export function parseThresholds(raw: unknown): HealthThresholds {
@@ -130,7 +134,8 @@ export const AI_RULES: RuleDef[] = [
   { code: 'ai_risk_amber', title: 'Daily review: watch this account', description: 'The AI review of the day rated the account amber.', severity: 'warn', source: 'ai', section: 'Account health' },
 ];
 
-export const HEALTH_RULES: RuleDef[] = [...WINDSOR_RULES, ...CRUVA_RULES, ...AI_RULES];
+/** Cruva rules are no longer part of the scan: the creator side comes from the TikTok Shop Affiliate scope (see tts-rules.ts). */
+export const HEALTH_RULES: RuleDef[] = [...WINDSOR_RULES, ...AI_RULES];
 export const HEALTH_RULE_CODES = new Set(HEALTH_RULES.map((r) => r.code));
 
 // ---- Windsor ----
@@ -306,50 +311,6 @@ export function parseCruvaMetrics(raw: unknown): CruvaMetrics {
     else if (v !== undefined && v !== '' && Number.isFinite(Number(v))) out[k] = Number(v);
   }
   return out;
-}
-
-export function evaluateCruva(shop: ShopRef, m: CruvaMetrics, t: HealthThresholds, opts: { enabled?: Set<string>; previous?: CruvaMetrics | null; stale?: boolean } = {}): Found[] {
-  const on = (code: string) => !opts.enabled || opts.enabled.has(code);
-  const flags: Found[] = [];
-  const push = (code: string, message: string, detail?: string | null) => {
-    if (!on(code)) return;
-    const def = CRUVA_RULES.find((r) => r.code === code)!;
-    flags.push({ account_id: shop.account_id, shop_id: shop.shop_id, code, severity: def.severity, message: `${shop.shop_name}: ${message}`, detail: detail ?? null });
-  };
-  if (opts.stale) { push('c_data_stale', 'no Cruva metrics posted in the last 2 days'); return flags; }
-  const has = (k: keyof CruvaMetrics) => typeof m[k] === 'number';
-  const v = (k: keyof CruvaMetrics) => m[k] as number;
-  if (has('sps') && v('sps') < t.sps_min) push('c_sps_low', `shop performance score ${v('sps').toFixed(1)} is under ${t.sps_min}, DM sending is restricted`);
-  const prevSps = opts.previous?.sps;
-  if (has('sps') && typeof prevSps === 'number' && prevSps - v('sps') >= t.sps_drop) push('c_sps_drop', `shop performance score fell from ${prevSps.toFixed(1)} to ${v('sps').toFixed(1)}`);
-  if (has('dms_sent_7d')) {
-    const cur = v('dms_sent_7d');
-    const prev = has('dms_sent_prev_7d') ? v('dms_sent_prev_7d') : null;
-    const change = prev !== null ? pctChange(cur, prev) : null;
-    if (prev !== null && prev >= 20 && change !== null && change <= -t.dms_drop_pct) push('c_dms_stopped', `${cur} DMs sent in the last 7 days vs ${prev} the week before (${Math.round(change)}%)`);
-    else if (cur === 0 && has('automations_active') && v('automations_active') > 0) push('c_dms_stopped', `0 DMs sent in the last 7 days with ${v('automations_active')} automation(s) active`);
-  }
-  const drop = (curK: keyof CruvaMetrics, prevK: keyof CruvaMetrics, what: string) => {
-    if (!has(curK) || !has(prevK)) return null;
-    const change = pctChange(v(curK), v(prevK));
-    return v(prevK) >= 10 && change !== null && change <= -t.samples_drop_pct ? `${what} ${v(curK)} vs ${v(prevK)} the week before (${Math.round(change)}%)` : null;
-  };
-  const sd = [drop('samples_approved_7d', 'samples_approved_prev_7d', 'samples approved'), drop('samples_shipped_7d', 'samples_shipped_prev_7d', 'samples shipped')].filter((x): x is string => Boolean(x));
-  if (sd.length) push('c_samples_drop', sd.join('; '));
-  if (has('samples_pending_review') && v('samples_pending_review') > 0 && has('samples_pending_review_oldest_hours') && v('samples_pending_review_oldest_hours') >= t.samples_review_hours) push('c_samples_waiting', `${v('samples_pending_review')} sample request(s) waiting on review, the oldest for ${Math.round(v('samples_pending_review_oldest_hours') / 24)} day(s)`);
-  if (has('content_pending') && v('content_pending') > t.content_pending_max) push('c_content_pending', `${v('content_pending')} creators have a sample and no post yet`);
-  if (has('affiliate_gmv_7d') && has('total_gmv_7d') && has('affiliate_gmv_prev_7d') && has('total_gmv_prev_7d') && v('total_gmv_7d') > 0 && v('total_gmv_prev_7d') > 0) {
-    const share = (v('affiliate_gmv_7d') / v('total_gmv_7d')) * 100;
-    const prevShare = (v('affiliate_gmv_prev_7d') / v('total_gmv_prev_7d')) * 100;
-    if (prevShare - share >= t.affiliate_share_drop_pts) push('c_affiliate_share_drop', `affiliate share of GMV ${Math.round(share)}% vs ${Math.round(prevShare)}% the week before`);
-  }
-  if (has('affiliate_gmv_7d') && has('affiliate_gmv_prev_7d')) {
-    const change = pctChange(v('affiliate_gmv_7d'), v('affiliate_gmv_prev_7d'));
-    if (v('affiliate_gmv_prev_7d') >= 100 && change !== null && change <= -t.affiliate_gmv_drop_pct) push('c_affiliate_gmv_drop', `affiliate GMV ${Math.round(v('affiliate_gmv_7d')).toLocaleString('en-GB')} in the last 7 days vs ${Math.round(v('affiliate_gmv_prev_7d')).toLocaleString('en-GB')} the week before (${Math.round(change)}%)`);
-  }
-  if (has('videos_posted_7d') && has('videos_with_sales_7d') && v('videos_posted_7d') >= 10 && v('videos_with_sales_7d') === 0) push('c_videos_no_sales', `${v('videos_posted_7d')} videos posted in the last 7 days, none with a sale`);
-  if (has('automations_active') && v('automations_active') === 0) push('c_automations_off', `no active automation${has('automations_total') ? ` (${v('automations_total')} set up)` : ''}`);
-  return flags;
 }
 
 /** Which checklist section a flag code belongs to (for the Checklists page). */
