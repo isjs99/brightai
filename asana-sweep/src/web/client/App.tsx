@@ -154,7 +154,7 @@ export default function App() {
         <header className="topbar">
           <div className="brand">
             <button className="small menu-btn" onClick={() => setMenuOpen((o) => !o)} aria-label="Menu">☰</button>
-            <Link to="/checklists">Brightform.</Link>
+            <Link to="/today">Brightform<span className="dot">.</span></Link>
             <span>AM Ops</span>
           </div>
           <nav>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 
 /**
  * Small SVG charts for the account monitor: a single-series line with a crosshair tooltip, stacked daily
@@ -17,10 +17,11 @@ export const fmtValue = fmt;
 
 const shortDate = (iso: string) => { const d = new Date(`${iso}T00:00:00Z`); return `${d.getUTCDate()} ${d.toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' })}`; };
 
-export function LineChart({ title, points, kind, currency, height = 150 }: { title: string; points: { date: string; value: number }[]; kind: 'money' | 'count' | 'pct' | 'ratio'; currency?: string; height?: number }) {
+export function LineChart({ title, headline, footer, points, kind, currency, height = 150 }: { title: string; headline?: ReactNode; footer?: ReactNode; points: { date: string; value: number }[]; kind: 'money' | 'count' | 'pct' | 'ratio'; currency?: string; height?: number }) {
   const [hover, setHover] = useState<number | null>(null);
   const w = 600; const h = height; const padL = 44; const padR = 10; const padT = 8; const padB = 22;
-  if (points.length < 2) return <div className="chart"><h4>{title}</h4><div className="sub" style={{ padding: '20px 0' }}>Not enough days yet.</div></div>;
+  const head = <div className="chart-head"><h4>{title}</h4>{headline !== undefined && <div className="headline">{headline}</div>}</div>;
+  if (points.length < 2) return <div className="chart">{head}<div className="sub" style={{ padding: '20px 0' }}>Not enough days yet.</div></div>;
   const max = Math.max(...points.map((p) => p.value), 1);
   const x = (i: number) => padL + (i / (points.length - 1)) * (w - padL - padR);
   const y = (v: number) => padT + (1 - v / max) * (h - padT - padB);
@@ -31,7 +32,7 @@ export function LineChart({ title, points, kind, currency, height = 150 }: { tit
   const hp = hover !== null ? points[hover] : null;
   return (
     <div className="chart">
-      <h4>{title}</h4>
+      {head}
       <svg viewBox={`0 0 ${w} ${h}`} width="100%" height={h} role="img" aria-label={title}
         onMouseLeave={() => setHover(null)}
         onMouseMove={(e) => { const r = (e.currentTarget as SVGSVGElement).getBoundingClientRect(); const px = ((e.clientX - r.left) / r.width) * w; const i = Math.round(((px - padL) / (w - padL - padR)) * (points.length - 1)); setHover(Math.max(0, Math.min(points.length - 1, i))); }}>
@@ -42,14 +43,16 @@ export function LineChart({ title, points, kind, currency, height = 150 }: { tit
         {hp && hover !== null && <g><line x1={x(hover)} x2={x(hover)} y1={padT} y2={h - padB} stroke="var(--border-strong)" strokeDasharray="3 3" /><circle cx={x(hover)} cy={y(hp.value)} r="4" fill="var(--s1)" stroke="var(--surface)" strokeWidth="2" /></g>}
       </svg>
       {hp && hover !== null && <div className="tip" style={{ left: `${(x(hover) / w) * 100}%`, top: 8, transform: hover > points.length / 2 ? 'translateX(-105%)' : 'translateX(8px)' }}><b>{shortDate(hp.date)}</b><br />{fmt(hp.value, kind, currency)}</div>}
+      {footer}
     </div>
   );
 }
 
-export function StackedBars({ title, days, series, currency, height = 170 }: { title: string; days: { date: string; values: number[] }[]; series: { label: string; color: string }[]; currency?: string; height?: number }) {
+export function StackedBars({ title, headline, days, series, currency, height = 170 }: { title: string; headline?: ReactNode; days: { date: string; values: number[] }[]; series: { label: string; color: string }[]; currency?: string; height?: number }) {
   const [hover, setHover] = useState<number | null>(null);
   const w = 600; const h = height; const padL = 44; const padR = 10; const padT = 8; const padB = 22;
-  if (!days.length) return <div className="chart"><h4>{title}</h4><div className="sub" style={{ padding: '20px 0' }}>No data yet.</div></div>;
+  const head = <div className="chart-head"><h4>{title}</h4>{headline !== undefined && <div className="headline">{headline}</div>}</div>;
+  if (!days.length) return <div className="chart">{head}<div className="sub" style={{ padding: '20px 0' }}>No data yet.</div></div>;
   const totals = days.map((d) => d.values.reduce((a, b) => a + b, 0));
   const max = Math.max(...totals, 1);
   const slot = (w - padL - padR) / days.length;
@@ -59,7 +62,7 @@ export function StackedBars({ title, days, series, currency, height = 170 }: { t
   const hd = hover !== null ? days[hover] : null;
   return (
     <div className="chart">
-      <h4>{title}</h4>
+      {head}
       <svg viewBox={`0 0 ${w} ${h}`} width="100%" height={h} role="img" aria-label={title} onMouseLeave={() => setHover(null)}>
         {[0, 0.5, 1].map((f) => <g key={f}><line x1={padL} x2={w - padR} y1={y(max * f)} y2={y(max * f)} stroke="var(--border)" /><text x={padL - 6} y={y(max * f) + 4} fontSize="10" textAnchor="end" fill="var(--muted)">{fmt(max * f, 'money', currency)}</text></g>)}
         {days.map((d, i) => {

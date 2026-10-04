@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { BdAlert, BdEmailDraft, BdFollowup, LarkMessage, OutreachData, OutreachExample, TtsContact } from '../../../sweep/types';
-import { api, currentActor, fmtRelative, useLiveUpdates } from '../api';
+import { api, currentActor, fmtRelative, useActor, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
 
 type Tab = 'drafts' | 'lark' | 'followups' | 'calls' | 'activity' | 'alerts' | 'settings';
@@ -540,7 +540,7 @@ function Alerts({ data, isAdmin, busy, run, onNotice }: Ctx) {
 
 function Settings({ data, isAdmin, busy, run, onNotice }: Ctx) {
   const s = data.settings;
-  const actor = currentActor();
+  const actor = useActor();
   const mine = s.gmail_accounts.find((a) => a.person && a.person === actor) ?? null;
   const others = s.gmail_accounts.filter((a) => a.person && a.person !== actor);
   const [settings, setSettings] = useState({ sender_name: s.sender_name, sender_title: s.sender_title, booking_url: s.booking_url, pitch: s.pitch, sent_query: s.sent_query, watchlist_sheet_tab: s.watchlist_sheet_tab, linkedin_check_days: s.linkedin_check_days });

@@ -150,6 +150,19 @@ export function currentActor(): string {
 }
 export function setCurrentActor(name: string): void {
   try { if (name) localStorage.setItem('actor', name); else localStorage.removeItem('actor'); } catch { /* ignore */ }
+  window.dispatchEvent(new CustomEvent('sweep:actor', { detail: name }));
+}
+
+/** The current actor, re-rendering the component when it changes in the top bar (no page refresh needed). */
+export function useActor(): string {
+  const [actor, setActor] = useState(currentActor());
+  useEffect(() => {
+    const on = () => setActor(currentActor());
+    window.addEventListener('sweep:actor', on);
+    window.addEventListener('storage', on);
+    return () => { window.removeEventListener('sweep:actor', on); window.removeEventListener('storage', on); };
+  }, []);
+  return actor;
 }
 
 async function call<T>(method: string, path: string, body?: unknown): Promise<T> {

@@ -1009,6 +1009,26 @@ export interface AccountOverview {
   sku_prices: AccountSkuPrice[];
   campaigns: AccountCampaign[];
   assessment: HealthAssessment | null;
+  /** The traffic lights: one per area, worst first, with the flags, numbers and checks behind each light. */
+  areas: AccountArea[];
+  /** The overall light: the worst area. */
+  light: AreaLight;
+}
+
+export type AreaLight = 'red' | 'amber' | 'green' | 'grey';
+
+export interface AccountArea {
+  key: string;
+  label: string;
+  light: AreaLight;
+  /** One line: the worst open flag, "All clear" with the live check count, or why there is no data. */
+  summary: string;
+  flags: MonitorFlag[];
+  /** The area's numbers against their targets. */
+  metrics: AccountKpi[];
+  checks: { code: string; title: string; scope: TtsScope; available: boolean; enabled: boolean }[];
+  missing: string[];
+  links: { label: string; to: string }[];
 }
 
 export interface AccountKpi {

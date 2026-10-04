@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { InquiriesData, InquiryHistory, SiteInquiry } from '../../../sweep/types';
-import { api, currentActor, fmtDate, fmtRelative, useLiveUpdates } from '../api';
+import { api, currentActor, useActor, fmtDate, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
 
 const STATUS: Record<SiteInquiry['status'], { label: string; cls: string }> = { new: { label: 'New', cls: 'crit' }, replied: { label: 'Replied', cls: 'good' }, qualified: { label: 'Qualified', cls: 'good' }, closed: { label: 'Closed', cls: 'muted' } };
@@ -70,7 +70,7 @@ export default function InquiriesPage() {
   if (!data) return <p>{error ?? 'Loading…'}</p>;
   const list = data.inquiries.filter((i) => (only === 'all' || i.status === 'new' || i.status === 'qualified') && (kind === 'all' || i.kind === kind));
   const forwardOn = Boolean(data.forward_to);
-  const me = currentActor();
+  const me = useActor();
   const myGmail = data.gmail_accounts.find((a) => a.person && a.person === me) ?? null;
   return (
     <>

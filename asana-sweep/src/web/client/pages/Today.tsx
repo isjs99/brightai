@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { AccountStatusRow, InboxData, MonitorData, OutreachData } from '../../../sweep/types';
-import { api, currentActor, fmtRelative, useLiveUpdates } from '../api';
+import { api, fmtRelative, useActor, useLiveUpdates } from '../api';
 
 /** The landing page: what needs a person today across the accounts you look after. Built from the monitor, the checklist, the inbox and outreach, nothing new to maintain. */
 export default function TodayPage() {
@@ -10,8 +10,9 @@ export default function TodayPage() {
   const [inbox, setInbox] = useState<InboxData | null>(null);
   const [outreach, setOutreach] = useState<OutreachData | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [mine, setMine] = useState(Boolean(currentActor()));
-  const actor = currentActor();
+  const actor = useActor();
+  const [mine, setMine] = useState(Boolean(actor));
+  useEffect(() => { setMine(Boolean(actor)); }, [actor]);
   const load = useCallback(() => {
     api.monitor().then(setMonitor).catch((e) => setError((e as Error).message));
     api.listAccounts().then((r) => setRows(r.accounts)).catch(() => setRows([]));

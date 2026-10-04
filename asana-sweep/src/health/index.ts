@@ -13,7 +13,7 @@ import { tts, type TtsClient } from '../tts/client.js';
 import { shopCredentials } from '../tts/promotions.js';
 import { currencyForMarket } from '../tts/markets.js';
 import { CHECKLIST_TEMPLATE } from '../checklist/template.js';
-import type { AccountKpi, AccountOverview, AccountSection, MonitorAccountRow, MonitorRule, TtsScope, TtsScopeStatus } from '../sweep/types.js';
+import type { AccountArea, AccountKpi, AccountOverview, AccountSection, AreaLight, MonitorAccountRow, MonitorRule, TtsScope, TtsScopeStatus } from '../sweep/types.js';
 
 /**
  * Account health engine: the daily Windsor pull per linked shop (orders, products, payouts,
@@ -408,6 +408,43 @@ export class HealthEngine {
     const other = flags.filter((f) => !covered.has(f.id));
     if (other.length) sections.push({ section: 'Other', guidance: null, state: other.some((f) => f.severity === 'crit') ? 'crit' : other.some((f) => f.severity === 'warn') ? 'warn' : 'good', flags: other, rules: [], missing: [] });
 
+    // Traffic lights: eight areas, each owning a set of rule codes and a few of the numbers above.
+    const inboxWaiting = this.q.listConversations({ accountId }).filter((c) => c.needs_reply).length;
+    const livePromos = this.q.listPromotions().filter((p) => p.targets.some((x) => x.account_id === accountId && x.status !== 'error') && Date.parse(p.end_at) > now && Date.parse(p.begin_at) <= now).length;
+    const todayChecks = this.q.listChecksForDate(this.today()).filter((c) => c.account_id === accountId).sort((x, y) => y.checked_at.localeCompare(x.checked_at))[0];
+    const K = (k: string) => kpis.find((x) => x.key === k)!;
+    const extra = (key: string, label: string, value: number | null, unit: AccountKpi['unit'], direction: AccountKpi['direction'], target: number | null = null, note: string | null = null): AccountKpi => ({ key, label, value, target, previous: null, unit, direction, state: state(value, target, direction), note });
+    const defs: { key: string; label: string; codes: (code: string) => boolean; metrics: AccountKpi[]; links: { label: string; to: string }[]; manual?: string[] }[] = [
+      { key: 'orders', label: 'Orders and logistics', codes: (c) => /^(t|w)_(ship_|auto_cancel|buyer_cancel|on_hold|cancel_rate|order_drop|late_pickup|late_delivery|aov_shift)/.test(c), metrics: [K('ship_late'), extra('awaiting', 'Awaiting shipment', live('order') ? sumM('awaiting_shipment') : null, 'count', 'lower'), extra('cancel_rate', 'Cancel rate 7d', live('order') ? avgM('cancel_rate_7d') : null, 'pct', 'lower', t.cancel_rate_pct)], links: [] },
+      { key: 'products', label: 'Products and stock', codes: (c) => /^(t|w)_(out_of_stock|low_stock|product_deactivated|listing_|no_live_products|drafts_pending)|^g_price_drift/.test(c), metrics: [K('oos'), extra('low', 'Low stock SKUs', live('product') ? sumM('low_stock_skus') : null, 'count', 'lower'), extra('active', 'Live products', live('product') ? sumM('active_products') : null, 'count', 'higher')], links: [{ label: 'Stock', to: '/stock' }] },
+      { key: 'returns_cs', label: 'Returns and CS', codes: (c) => /^t_(returns_waiting|return_rate|buyer_notes|refund_share|cs_)|^w_buyer_notes|^inbox_unanswered/.test(c), metrics: [K('returns_waiting'), extra('inbox', 'Inbox waiting', inboxWaiting, 'count', 'lower', 0), K('cs_response')], links: [{ label: 'Inbox', to: '/inbox' }] },
+      { key: 'affiliate', label: 'Affiliate and samples', codes: (c) => /^t_samples_/.test(c), metrics: [K('samples_week'), K('samples_pending')], links: [], manual: live('affiliate_seller') ? [] : [missing('affiliate_seller')] },
+      { key: 'marketing', label: 'Marketing', codes: (c) => /^g_(gmv_max_|promo_|campaign_)|^no_live_promotion/.test(c), metrics: [K('gmv_max_spend'), K('gmv_max_roi'), extra('promos', 'Live promotions', livePromos, 'count', 'higher')], links: [{ label: 'Promotions', to: '/promotions' }, { label: 'GMV Max', to: '/gmv-max' }] },
+      { key: 'finance', label: 'Finance', codes: (c) => /^(t|w)_(payout_|reserve_spike|negative_statement|adjustment_spike|unsettled_backlog|fee_share)|^no_deal_terms/.test(c), metrics: [extra('fee_share', 'Fees share of revenue', live('finance') ? avgM('fee_share_30d') : null, 'pct', 'lower', t.fee_share_pct)], links: [], manual: live('finance') ? [] : [missing('finance')] },
+      { key: 'growth', label: 'Growth and traffic', codes: (c) => /^t_(gmv_drop|visitors_drop|conversion_drop|channel_drop|no_live_gmv)|^g_gmv_behind_target|^gmv_(drop_wow|stale)/.test(c), metrics: [K('gmv_7d'), K('gmv_mtd'), K('visitors'), K('conversion')], links: [] },
+      { key: 'health', label: 'Account health', codes: (c) => /^tts_auth_expiring|^checklist_|^t_analytics_stale|^w_data_stale|^ai_risk_|^c_custom|^g_no_targets/.test(c), metrics: [extra('checklist', 'Checklist done today', todayChecks ? todayChecks.am_done + todayChecks.aa_done : null, 'count', 'higher', todayChecks ? todayChecks.am_total + todayChecks.aa_total : null, todayChecks ? null : 'No checklist run yet today'), extra('scopes', 'API scopes live', scopes.filter((s) => s.state === 'ok').length, 'count', 'higher', scopes.filter((s) => s.state !== 'unavailable').length)], links: [{ label: 'Checklist', to: '/checklists' }], manual: ['Shop score, violations and points are Seller Center only'] },
+    ];
+    const taken = new Set<number>();
+    const areas: AccountArea[] = defs.map((d) => {
+      const checks = rules.filter((r) => d.codes(r.code) && r.source !== 'windsor' && r.source !== 'cruva').map((r) => ({ code: r.code, title: r.title, scope: r.scope ?? 'none', available: live(r.scope ?? 'none'), enabled: r.enabled }));
+      const myFlags = flags.filter((f) => d.codes(f.code) && !taken.has(f.id));
+      myFlags.forEach((f) => taken.add(f.id));
+      const metrics = d.metrics.filter(Boolean);
+      const worstFlag = myFlags.find((f) => f.severity === 'crit') ?? myFlags.find((f) => f.severity === 'warn') ?? myFlags[0] ?? null;
+      const metricCrit = metrics.some((m) => m.state === 'crit'); const metricWarn = metrics.some((m) => m.state === 'warn');
+      const liveChecks = checks.filter((c) => c.available && c.enabled).length;
+      const hasData = liveChecks > 0 || metrics.some((m) => m.value !== null);
+      const light: AreaLight = myFlags.some((f) => f.severity === 'crit') || metricCrit ? 'red' : myFlags.some((f) => f.severity === 'warn') || metricWarn ? 'amber' : hasData ? 'green' : 'grey';
+      const miss = [...new Set([...checks.filter((c) => !c.available).map((c) => missing(c.scope)), ...(d.manual ?? [])])];
+      const summary = worstFlag ? `${rules.find((r) => r.code === worstFlag.code)?.title ?? worstFlag.code}: ${worstFlag.message.replace(/^[^:]+:\s*/, '')}` : light === 'green' ? `All clear · ${liveChecks} check${liveChecks === 1 ? '' : 's'} live${myFlags.length ? ` · ${myFlags.length} info` : ''}` : light === 'grey' ? (miss[0] ?? 'No data yet') : metrics.find((m) => m.state === 'crit' || m.state === 'warn') ? `${metrics.find((m) => m.state === 'crit' || m.state === 'warn')!.label} behind target` : 'Watch';
+      return { key: d.key, label: d.label, light, summary, flags: myFlags, metrics, checks, missing: miss, links: d.links };
+    });
+    const leftover = flags.filter((f) => !taken.has(f.id));
+    if (leftover.length) areas.find((a) => a.key === 'health')!.flags.push(...leftover);
+    const order: AreaLight[] = ['red', 'amber', 'green', 'grey'];
+    areas.sort((a, b) => order.indexOf(a.light) - order.indexOf(b.light));
+    const overall: AreaLight = areas.some((a) => a.light === 'red') ? 'red' : areas.some((a) => a.light === 'amber') ? 'amber' : areas.some((a) => a.light === 'green') ? 'green' : 'grey';
+
     return {
       account,
       shops: shops.map((sh) => { const p = pulls.find((x) => x.shop_id === sh.id); return { id: sh.id, name: sh.name, region: sh.region, market: sh.market, token_ok: sh.token_ok, last_pull_at: p?.pulled_at ?? null, pull_ok: p?.ok ?? false, pull_error: p?.error ?? null }; }),
@@ -421,6 +458,8 @@ export class HealthEngine {
       sku_prices: this.q.listSkuPrices(accountId),
       campaigns: this.q.listAccountCampaigns(accountId),
       assessment: this.q.latestAssessments().find((a) => a.account_id === accountId) ?? null,
+      areas,
+      light: overall,
     };
   }
 

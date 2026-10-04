@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import type { AccountCampaign, AccountKpi, AccountOverview, AccountSection, AccountSkuPrice, AccountTarget, HealthAssessment, HealthThresholds, Incident, IncidentsData, MonitorAccountRow, MonitorData, MonitorFlag, MonitorRule, TargetKey, TtsScope, TtsScopeStatus } from '../../../sweep/types';
+import type { AccountArea, AccountCampaign, AccountKpi, AccountOverview, AccountSkuPrice, AccountTarget, AreaLight, HealthAssessment, HealthThresholds, Incident, IncidentsData, MonitorAccountRow, MonitorData, MonitorFlag, MonitorRule, TargetKey, TtsScope, TtsScopeStatus } from '../../../sweep/types';
 import { api, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
 import { fmtValue, LineChart, PaceBar, StackedBars } from '../charts';
@@ -44,22 +44,20 @@ function Modal({ title, onClose, wide, children }: { title: string; onClose: () 
   );
 }
 
-type Dialog = 'targets' | 'skus' | 'campaigns' | 'all-targets' | 'coverage' | 'thresholds' | null;
+type Dialog = 'targets' | 'skus' | 'campaigns' | 'all-targets' | 'coverage' | 'thresholds' | 'flags' | 'review' | 'incidents' | null;
+
+const LIGHT: Record<AreaLight, { cls: string; label: string }> = { red: { cls: 'crit', label: 'Red' }, amber: { cls: 'warn', label: 'Amber' }, green: { cls: 'good', label: 'Green' }, grey: { cls: 'muted', label: 'No data' } };
 
 /** Account management > Account monitor: one connected account at a time against the TikTok Shop API and its targets, scanned continuously. */
 export default function MonitorPage() {
   const [params, setParams] = useSearchParams();
-  const tabs = ['account', 'flags', 'review', 'incidents'] as const;
-  type Tab = (typeof tabs)[number];
-  const tab: Tab = tabs.find((t) => t === params.get('tab')) ?? 'account';
   const selectedParam = params.get('account') ? Number(params.get('account')) : null;
-  const setTab = (t: Tab) => { const n = new URLSearchParams(params); if (t === 'account') n.delete('tab'); else n.set('tab', t); setParams(n); };
   const select = (id: number | null) => { const n = new URLSearchParams(params); if (id === null) n.delete('account'); else n.set('account', String(id)); n.delete('tab'); setParams(n); };
   const [data, setData] = useState<MonitorData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [dialog, setDialog] = useState<Dialog>(null);
+  const [dialog, setDialog] = useState<Dialog>(params.get('tab') === 'flags' ? 'flags' : params.get('tab') === 'review' ? 'review' : params.get('tab') === 'incidents' ? 'incidents' : null);
   const [menu, setMenu] = useState(false);
   const isAdmin = useIsAdmin();
   const load = useCallback(() => api.monitor().then(setData).catch((e) => setError((e as Error).message)), []);
@@ -79,13 +77,14 @@ export default function MonitorPage() {
   const unconnected = data.accounts.filter((a) => a.shops === 0);
   const selected = selectedParam !== null && data.accounts.some((a) => a.id === selectedParam) ? selectedParam : connectedAccounts[0]?.id ?? null;
   const pullLabel = h.pulling_tts ? 'Pulling TikTok…' : h.tts_last_pull_at ? `Pulled ${fmtRelative(h.tts_last_pull_at)}` : data.tts_configured ? (data.tts_shops ? 'No pull yet' : 'No shop authorised') : 'TikTok app not configured';
+  const scoped = { ...data, accounts: connectedAccounts };
 
   return (
     <>
-      <div className="page-head">
+      <div className="page-head" style={{ marginBottom: 8 }}>
         <div>
           <h1>Account monitor</h1>
-          <p className="hint" style={{ margin: 0 }}>Connected accounts checked every {data.interval_minutes} minutes against the TikTok Shop API and their targets. Pick an account; everything else opens in a dialog.</p>
+          <p className="hint" style={{ margin: 0 }}>Connected accounts checked every {data.interval_minutes} minutes against the TikTok Shop API and their targets.</p>
         </div>
         <div className="actions">
           {connected && <span className="badge muted">Live</span>}
@@ -96,11 +95,14 @@ export default function MonitorPage() {
             <button onClick={() => setMenu(!menu)}>More ▾</button>
             {menu && (
               <div className="menu-list" onMouseLeave={() => setMenu(false)}>
-                {isAdmin && <button disabled={busy !== null || data.scanning} onClick={() => { setMenu(false); run('scan', api.monitorScan, (r) => setNotice(`Rules re-run: ${r.found} flag(s), ${r.opened} new, ${r.resolved} resolved.`)); }}>Re-run rules</button>}
-                {isAdmin && <button disabled={busy !== null || data.scanning || h.pulling} onClick={() => { setMenu(false); run('daily', api.healthDaily, (r) => setNotice(`Daily pass done: ${r.pulled} shop(s) pulled, ${r.reviewed} account(s) reviewed${r.errors.length ? `; ${r.errors.slice(0, 2).join(' · ')}` : ''}.`)); }}>Daily pass (pull, scan, AI review)</button>}
+                <button onClick={() => { setMenu(false); setDialog('flags'); }}>All flags ({data.flags.filter((f) => connectedAccounts.some((a) => a.id === f.account_id)).length})</button>
+                <button onClick={() => { setMenu(false); setDialog('review'); }}>Daily review, every account</button>
+                <button onClick={() => { setMenu(false); setDialog('incidents'); }}>Slack alerts</button>
                 <button onClick={() => { setMenu(false); setDialog('all-targets'); }}>All targets</button>
                 <button onClick={() => { setMenu(false); setDialog('coverage'); }}>Rules &amp; API coverage</button>
                 <button onClick={() => { setMenu(false); setDialog('thresholds'); }}>Thresholds</button>
+                {isAdmin && <button disabled={busy !== null || data.scanning} onClick={() => { setMenu(false); run('scan', api.monitorScan, (r) => setNotice(`Rules re-run: ${r.found} flag(s), ${r.opened} new, ${r.resolved} resolved.`)); }}>Re-run rules</button>}
+                {isAdmin && <button disabled={busy !== null || data.scanning || h.pulling} onClick={() => { setMenu(false); run('daily', api.healthDaily, (r) => setNotice(`Daily pass done: ${r.pulled} shop(s) pulled, ${r.reviewed} account(s) reviewed${r.errors.length ? `; ${r.errors.slice(0, 2).join(' · ')}` : ''}.`)); }}>Daily pass (pull, scan, AI review)</button>}
                 <Link to="/promotions" onClick={() => setMenu(false)} style={{ padding: '8px 10px', textDecoration: 'none' }}>Connect a shop ↗</Link>
               </div>
             )}
@@ -111,32 +113,21 @@ export default function MonitorPage() {
       {notice && <div className="banner info">{notice}</div>}
       {data.last_scan_error && <div className="banner crit">Last scan failed: {data.last_scan_error}</div>}
 
-      <div className="tabs">
-        <button className={`tab ${tab === 'account' ? 'active' : ''}`} onClick={() => setTab('account')}>Account</button>
-        <button className={`tab ${tab === 'flags' ? 'active' : ''}`} onClick={() => setTab('flags')}>All flags <span className="sub">{data.flags.filter((f) => connectedAccounts.some((a) => a.id === f.account_id)).length}</span></button>
-        <button className={`tab ${tab === 'review' ? 'active' : ''}`} onClick={() => setTab('review')}>Daily review</button>
-        <button className={`tab ${tab === 'incidents' ? 'active' : ''}`} onClick={() => setTab('incidents')}>Slack alerts</button>
+      <div className="account-pick" style={{ marginBottom: 14 }}>
+        <select value={selected ?? ''} onChange={(e) => select(e.target.value ? Number(e.target.value) : null)}>
+          {connectedAccounts.length === 0 && <option value="">No account has a TikTok shop connected yet</option>}
+          {connectedAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}{a.markets ? ` · ${a.markets}` : ''}{a.crit ? ` · ${a.crit} critical` : a.warn ? ` · ${a.warn} warning${a.warn === 1 ? '' : 's'}` : ' · clean'}</option>)}
+        </select>
+        {connectedAccounts.length > 1 && <span className="actions">{connectedAccounts.slice(0, 8).map((a) => <button key={a.id} className={`small ${a.id === selected ? 'primary' : ''}`} onClick={() => select(a.id)}>{a.name}{a.crit ? <span className="badge crit" style={{ marginLeft: 6 }}>{a.crit}</span> : a.warn ? <span className="badge warn" style={{ marginLeft: 6 }}>{a.warn}</span> : null}</button>)}</span>}
+        {unconnected.length > 0 && <span className="sub">{unconnected.length} account{unconnected.length === 1 ? ' has' : 's have'} no TikTok shop yet · <Link to="/promotions">connect</Link></span>}
       </div>
+      {selected === null ? <div className="empty">Authorise a shop under <Link to="/promotions">Promotions › Connection</Link> and link it to its account; it then shows up here.</div>
+        : <AccountDetail key={selected} id={selected} data={data} isAdmin={isAdmin} onError={setError} onNotice={setNotice} reload={load} dialog={dialog} setDialog={setDialog} />}
 
-      {tab === 'account' && (
-        <>
-          <div className="account-pick" style={{ marginBottom: 14 }}>
-            <select value={selected ?? ''} onChange={(e) => select(e.target.value ? Number(e.target.value) : null)}>
-              {connectedAccounts.length === 0 && <option value="">No account has a TikTok shop connected yet</option>}
-              {connectedAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}{a.markets ? ` · ${a.markets}` : ''}{a.crit ? ` · ${a.crit} critical` : a.warn ? ` · ${a.warn} warning${a.warn === 1 ? '' : 's'}` : ' · clean'}</option>)}
-            </select>
-            {connectedAccounts.length > 1 && <span className="actions">{connectedAccounts.slice(0, 8).map((a) => <button key={a.id} className={`small ${a.id === selected ? 'primary' : ''}`} onClick={() => select(a.id)} title={`${a.crit} critical · ${a.warn} warning · ${a.info} info`}>{a.name}{a.crit ? <span className="badge crit" style={{ marginLeft: 6 }}>{a.crit}</span> : a.warn ? <span className="badge warn" style={{ marginLeft: 6 }}>{a.warn}</span> : null}</button>)}</span>}
-            {unconnected.length > 0 && <span className="sub">{unconnected.length} account{unconnected.length === 1 ? ' has' : 's have'} no TikTok shop yet · <Link to="/promotions">connect</Link></span>}
-          </div>
-          {selected === null ? <div className="empty">Authorise a shop under <Link to="/promotions">Promotions › Connection</Link> and link it to its account; it then shows up here.</div>
-            : <AccountDetail key={selected} id={selected} data={data} isAdmin={isAdmin} onError={setError} onNotice={setNotice} reload={load} dialog={dialog} setDialog={setDialog} />}
-        </>
-      )}
-      {tab === 'flags' && <Flags data={{ ...data, accounts: connectedAccounts }} isAdmin={isAdmin} run={run} onSelect={select} />}
-      {tab === 'incidents' && <Incidents isAdmin={isAdmin} onError={setError} onNotice={setNotice} />}
-      {tab === 'review' && <DailyReview data={{ ...data, accounts: connectedAccounts, health: { ...h, assessments: h.assessments.filter((a) => connectedAccounts.some((c) => c.id === a.account_id)) } }} isAdmin={isAdmin} busy={busy} onRun={(id) => run(`rev${id ?? 'all'}`, () => api.healthReview(id), (r) => setNotice(`${r.reviewed} account(s) reviewed${r.errors.length ? `; ${r.errors.slice(0, 2).join(' · ')}` : ''}.`))} />}
-
-      {dialog === 'all-targets' && <Modal title="Targets for every connected account" wide onClose={() => setDialog(null)}><Targets data={{ ...data, accounts: connectedAccounts }} isAdmin={isAdmin} onError={setError} onNotice={setNotice} reload={load} onSelect={(id) => { setDialog(null); select(id); }} /></Modal>}
+      {dialog === 'flags' && <Modal title="All open flags" wide onClose={() => setDialog(null)}><Flags data={scoped} isAdmin={isAdmin} run={run} onSelect={(id) => { setDialog(null); select(id); }} /></Modal>}
+      {dialog === 'review' && <Modal title="Daily review" wide onClose={() => setDialog(null)}><DailyReview data={{ ...scoped, health: { ...h, assessments: h.assessments.filter((a) => connectedAccounts.some((c) => c.id === a.account_id)) } }} isAdmin={isAdmin} busy={busy} onRun={(id) => run(`rev${id ?? 'all'}`, () => api.healthReview(id), (r) => setNotice(`${r.reviewed} account(s) reviewed${r.errors.length ? `; ${r.errors.slice(0, 2).join(' · ')}` : ''}.`))} /></Modal>}
+      {dialog === 'incidents' && <Modal title="Slack alerts" wide onClose={() => setDialog(null)}><Incidents isAdmin={isAdmin} onError={setError} onNotice={setNotice} /></Modal>}
+      {dialog === 'all-targets' && <Modal title="Targets for every connected account" wide onClose={() => setDialog(null)}><Targets data={scoped} isAdmin={isAdmin} onError={setError} onNotice={setNotice} reload={load} onSelect={(id) => { setDialog(null); select(id); }} /></Modal>}
       {dialog === 'coverage' && <Modal title="Rules and API coverage" wide onClose={() => setDialog(null)}><Rules data={data} isAdmin={isAdmin} run={run} /></Modal>}
       {dialog === 'thresholds' && <Modal title="Thresholds" wide onClose={() => setDialog(null)}><Thresholds isAdmin={isAdmin} initial={h.thresholds} onSaved={() => { load(); setNotice('Thresholds saved. The rules re-run on the next scan.'); }} onError={setError} /></Modal>}
     </>
@@ -167,10 +158,51 @@ function kpiValue(k: AccountKpi, currency: string): string {
 
 type RunOverview = (key: string, fn: () => Promise<AccountOverview>, after?: (r: AccountOverview) => void) => Promise<void>;
 
+/** One traffic light: the area, its light, a one-line summary and its numbers; expands to the flags, the numbers against targets and the checks behind it. */
+function AreaRow({ area, currency, rules, open, onToggle }: { area: AccountArea; currency: string; rules: MonitorRule[]; open: boolean; onToggle: () => void }) {
+  const l = LIGHT[area.light];
+  const inline = area.metrics.filter((m) => m.value !== null).slice(0, 3);
+  return (
+    <div className={`area ${area.light}`}>
+      <div className="head" onClick={onToggle} role="button" aria-expanded={open}>
+        <span className={`light ${l.cls}`} title={l.label} />
+        <b>{area.label}</b>
+        <span className="summary">{area.summary}</span>
+        <span className="nums">{inline.map((m) => <span key={m.key} className={`num ${m.state ?? ''}`}><span className="k">{m.label}</span> <span className="v">{kpiValue(m, currency)}{m.target !== null && m.unit !== 'count' ? ` / ${fmtValue(m.target, m.unit, currency)}` : m.target !== null && m.direction === 'higher' && m.target > 0 ? ` / ${fmtValue(m.target, m.unit, currency)}` : ''}</span></span>)}</span>
+        <span className="actions">{area.flags.filter((f) => f.severity === 'crit').length > 0 && <span className="badge crit">{area.flags.filter((f) => f.severity === 'crit').length}</span>}{area.flags.filter((f) => f.severity === 'warn').length > 0 && <span className="badge warn">{area.flags.filter((f) => f.severity === 'warn').length}</span>}<span className="sub">{open ? '▾' : '▸'}</span></span>
+      </div>
+      {open && (
+        <div className="area-body">
+          {area.flags.length > 0 && <ul className="flaglist">{area.flags.map((f) => <li key={f.id} className={f.severity}>{sev(f.severity)} <span><b>{rules.find((r) => r.code === f.code)?.title ?? f.code}.</b> {f.message.replace(/^[^:]+:\s*/, '')}{f.detail ? <span className="sub"> · {f.detail}</span> : null}</span></li>)}</ul>}
+          {area.metrics.length > 0 && (
+            <div className="kpis" style={{ marginTop: area.flags.length ? 10 : 0 }}>
+              {area.metrics.map((m) => (
+                <div key={m.key} className="kpi" title={m.note ?? ''}>
+                  <span className="k">{m.label}</span>
+                  <span className={`v ${m.value === null ? 'nodata' : ''}`}>{m.value === null ? (m.note ?? 'no data') : kpiValue(m, currency)} {m.value !== null && arrow(m.value, m.previous, m.direction)}</span>
+                  {m.target !== null && m.value !== null && <span className="t">{m.direction === 'higher' ? 'target' : 'limit'} {fmtValue(m.target, m.unit, currency)} · {m.state === 'good' ? 'on track' : m.state === 'warn' ? 'slightly behind' : 'behind'}</span>}
+                  {m.value !== null && m.target === null && m.previous !== null && <span className="t">vs {fmtValue(m.previous, m.unit, currency)} the week before</span>}
+                  <PaceBar value={m.value} target={m.target} direction={m.direction} state={m.state} />
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="checks" style={{ marginTop: 10 }}>
+            {area.checks.map((c) => <span key={c.code} className={`badge ${!c.enabled ? 'muted' : c.available ? 'good' : 'warn'}`} title={`${SCOPE_LABEL[c.scope]}${c.enabled ? '' : ' · switched off'}`}>{c.title}{!c.enabled ? ' (off)' : c.available ? '' : ` · needs ${SCOPE_LABEL[c.scope]}`}</span>)}
+            {area.links.map((lnk) => <Link key={lnk.to} className="button small" to={lnk.to}>{lnk.label} ▸</Link>)}
+          </div>
+          {area.missing.length > 0 && <ul className="sub" style={{ margin: '8px 0 0 18px' }}>{area.missing.map((m, i) => <li key={i}>{m}</li>)}</ul>}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AccountDetail({ id, data, isAdmin, onError, onNotice, reload, dialog, setDialog }: { id: number; data: MonitorData; isAdmin: boolean; onError: (e: string | null) => void; onNotice: (n: string | null) => void; reload: () => void; dialog: Dialog; setDialog: (d: Dialog) => void }) {
   const [o, setO] = useState<AccountOverview | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [open, setOpen] = useState<Record<string, boolean> | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
   const load = useCallback(() => api.monitorAccount(id).then(setO).catch((e) => onError((e as Error).message)), [id, onError]);
   useEffect(() => { load(); }, [load, data.last_scan_at]);
   const run: RunOverview = async (key, fn, after) => {
@@ -181,18 +213,23 @@ function AccountDetail({ id, data, isAdmin, onError, onNotice, reload, dialog, s
   const cur = o.currency;
   const series28 = o.series.slice(-28);
   const series14 = o.series.slice(-14);
-  const stateCls = (s: AccountSection['state']) => (s === 'crit' ? 'crit' : s === 'warn' ? 'warn' : s === 'good' ? 'good' : 'muted');
-  const stateLabel = (s: AccountSection['state']) => (s === 'crit' ? 'Critical' : s === 'warn' ? 'Warning' : s === 'good' ? 'Clear' : s === 'nodata' ? 'No data' : 'Manual');
+  const k = (key: string) => o.kpis.find((x) => x.key === key) ?? null;
+  const headline = (key: string) => { const m = k(key); return m && m.value !== null ? <>{fmtValue(m.value, m.unit, cur)} {arrow(m.value, m.previous, m.direction)}</> : <span className="sub">no data</span>; };
+  const isOpen = (a: AccountArea) => (open ? Boolean(open[a.key]) : a.light === 'red');
   const needsReauth = o.shops.some((sh) => sh.pull_error && /no permission|scope|unauthori|403/i.test(sh.pull_error));
+  const gmvMtd = k('gmv_mtd');
   return (
     <>
       <div className="page-head" style={{ marginBottom: 10 }}>
         <div>
-          <h2 style={{ margin: 0 }}>{o.account.name} <span className="sub" style={{ fontWeight: 400 }}>{o.account.markets ?? ''}{o.account.am_name ? ` · AM ${o.account.am_name}` : ''}{o.account.aa_name ? ` · AA ${o.account.aa_name}` : ''}</span></h2>
+          <div className="actions" style={{ alignItems: 'baseline' }}>
+            <span className={`light big ${LIGHT[o.light].cls}`} title={LIGHT[o.light].label} />
+            <h2 style={{ margin: 0 }}>{o.account.name}</h2>
+            <span className="sub">{o.account.markets ?? ''}{o.account.am_name ? ` · AM ${o.account.am_name}` : ''}{o.account.aa_name ? ` · AA ${o.account.aa_name}` : ''}</span>
+          </div>
           <div className="actions" style={{ marginTop: 4 }}>
-            {o.assessment && <span className={`badge ${RISK[o.assessment.risk].cls}`} title={o.assessment.summary}>{RISK[o.assessment.risk].label} · {o.assessment.assess_date}</span>}
             {o.shops.map((sh) => <span key={sh.id} className={`badge ${!sh.token_ok ? 'crit' : sh.pull_error ? 'warn' : sh.last_pull_at ? 'good' : 'muted'}`} title={sh.pull_error ?? (sh.last_pull_at ? `Pulled ${fmtRelative(sh.last_pull_at)}` : 'Not pulled yet')}>{sh.name}{sh.market ? ` · ${sh.market}` : ''}{!sh.token_ok ? ' · re-authorise' : sh.pull_error ? ' · pull issue' : ''}</span>)}
-            <span className="badge muted">{o.flags.filter((f) => f.severity === 'crit').length} critical · {o.flags.filter((f) => f.severity === 'warn').length} warning · {o.flags.filter((f) => f.severity === 'info').length} info</span>
+            <span className="sub">{o.flags.filter((f) => f.severity === 'crit').length} critical · {o.flags.filter((f) => f.severity === 'warn').length} warning · {o.flags.filter((f) => f.severity === 'info').length} info</span>
           </div>
         </div>
         <div className="actions">
@@ -200,57 +237,28 @@ function AccountDetail({ id, data, isAdmin, onError, onNotice, reload, dialog, s
           <button className="small" onClick={() => setDialog('targets')}>Targets{o.targets.length ? '' : ' (none set)'}</button>
           <button className="small" onClick={() => setDialog('skus')}>SKU prices{o.sku_prices.length ? ` (${o.sku_prices.length})` : ''}</button>
           <button className="small" onClick={() => setDialog('campaigns')}>Campaigns{o.campaigns.length ? ` (${o.campaigns.length})` : ''}</button>
-          <Link className="button small" to="/checklists">Checklist</Link>
         </div>
       </div>
       {needsReauth && <div className="banner warn">A scope added in Partner Center is not in this shop's token yet. Remove and re-authorise the shop under <Link to="/promotions">Promotions › Connection</Link>, then pull again.</div>}
-      {o.assessment && <div className={`banner ${o.assessment.risk === 'red' ? 'crit' : o.assessment.risk === 'amber' ? 'warn' : 'good'}`}><b>Daily review:</b> {o.assessment.summary} <b>Today:</b> {o.assessment.action}</div>}
-
-      <div className="kpis">
-        {o.kpis.map((k) => (
-          <div key={k.key} className="kpi" title={k.note ?? ''}>
-            <span className="k">{k.label}</span>
-            <span className={`v ${k.value === null ? 'nodata' : ''}`}>{k.value === null ? (k.note ?? 'no data') : kpiValue(k, cur)} {k.value !== null && arrow(k.value, k.previous, k.direction)}</span>
-            {k.target !== null && k.value !== null && <span className="t">{k.direction === 'higher' ? 'target' : 'limit'} {fmtValue(k.target, k.unit, cur)} · {k.state === 'good' ? 'on track' : k.state === 'warn' ? 'slightly behind' : 'behind'}</span>}
-            {k.target === null && k.value !== null && k.note && <span className="t">{k.note}</span>}
-            {k.value !== null && k.target === null && k.previous !== null && <span className="t">vs {fmtValue(k.previous, k.unit, cur)} the week before</span>}
-            <PaceBar value={k.value} target={k.target} direction={k.direction} state={k.state} />
-          </div>
-        ))}
-      </div>
+      {o.assessment && (
+        <div className={`review ${o.assessment.risk === 'red' ? 'crit' : o.assessment.risk === 'amber' ? 'warn' : 'good'}`} onClick={() => setReviewOpen(!reviewOpen)}>
+          <span className={`badge ${RISK[o.assessment.risk].cls}`}>{RISK[o.assessment.risk].label}</span>
+          <span><b>Daily review:</b> {reviewOpen ? o.assessment.summary : `${o.assessment.summary.split(/(?<=\.)\s/)[0]}`}{reviewOpen ? <> <b>Today:</b> {o.assessment.action}{o.assessment.watch.length ? <span className="sub"> · Watch: {o.assessment.watch.join(', ')}</span> : null}</> : null}</span>
+          <span className="sub" style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }}>{o.assessment.assess_date} {reviewOpen ? '▾' : '▸'}</span>
+        </div>
+      )}
 
       {series28.length ? (
-        <div className="charts">
-          <LineChart title={`GMV per day (${cur})`} points={series28.map((d) => ({ date: d.date, value: d.gmv }))} kind="money" currency={cur} />
-          <StackedBars title="GMV by channel, last 14 days" days={series14.map((d) => ({ date: d.date, values: [d.video_gmv, d.live_gmv, d.card_gmv] }))} series={[{ label: 'Video', color: 'var(--s1)' }, { label: 'LIVE', color: 'var(--s2)' }, { label: 'Product card', color: 'var(--s3)' }]} currency={cur} />
-          <LineChart title="Orders per day" points={series28.map((d) => ({ date: d.date, value: d.orders }))} kind="count" />
-          <LineChart title="Visitors per day" points={series28.map((d) => ({ date: d.date, value: d.visitors }))} kind="count" />
+        <div className="charts four">
+          <LineChart title="GMV per day" headline={<>{headline('gmv_7d')}<span className="sub"> last 7 days</span></>} points={series28.map((d) => ({ date: d.date, value: d.gmv }))} kind="money" currency={cur} height={120} footer={gmvMtd && gmvMtd.value !== null ? <div className="sub">Month to date {fmtValue(gmvMtd.value, 'money', cur)}{gmvMtd.target !== null ? <> · target so far {fmtValue(gmvMtd.target, 'money', cur)} · {gmvMtd.state === 'good' ? 'on track' : 'behind'}</> : ' · no monthly target set'}<PaceBar value={gmvMtd.value} target={gmvMtd.target} direction="higher" state={gmvMtd.state} /></div> : null} />
+          <StackedBars title="GMV by channel" headline={<span className="sub">last 14 days</span>} days={series14.map((d) => ({ date: d.date, values: [d.video_gmv, d.live_gmv, d.card_gmv] }))} series={[{ label: 'Video', color: 'var(--s1)' }, { label: 'LIVE', color: 'var(--s2)' }, { label: 'Product card', color: 'var(--s3)' }]} currency={cur} height={120} />
+          <LineChart title="Orders per day" headline={<>{headline('orders_7d')}<span className="sub"> last 7 days</span></>} points={series28.map((d) => ({ date: d.date, value: d.orders }))} kind="count" height={120} />
+          <LineChart title="Visitors per day" headline={<>{headline('visitors')}<span className="sub"> a day · conversion {k('conversion')?.value !== null && k('conversion') ? fmtValue(k('conversion')!.value!, 'pct') : '–'}</span></>} points={series28.map((d) => ({ date: d.date, value: d.visitors }))} kind="count" height={120} />
         </div>
       ) : <div className="empty" style={{ marginBottom: 14 }}>No analytics pulled yet. Press "Pull this account".</div>}
 
-      <div className="page-head" style={{ marginBottom: 6 }}>
-        <h3 style={{ margin: 0 }}>Daily checklist, scanned</h3>
-        <span className="sub">"No data" names the scope still missing; "Manual" is what only Seller Center shows.</span>
-      </div>
-      <div className="sections">
-        {o.sections.map((s) => (
-          <div key={s.section} className="section-row">
-            <div className="head" onClick={() => setOpen({ ...open, [s.section]: !open[s.section] })}>
-              <span className={`badge ${stateCls(s.state)}`}>{stateLabel(s.state)}</span>
-              <b>{s.section}</b>
-              <span className="sub">{s.flags.length ? `${s.flags.length} flag(s)` : s.rules.length ? `${s.rules.filter((r) => r.available && r.enabled).length}/${s.rules.length} checks live` : 'no automated check'}</span>
-              <span className="sub">{open[s.section] ? '▾' : '▸'}</span>
-            </div>
-            {open[s.section] && (
-              <div style={{ marginTop: 8 }}>
-                {s.guidance && <p className="sub" style={{ marginTop: 0 }}><b>AM checks:</b> {s.guidance}</p>}
-                {s.flags.length > 0 && <ul className="flaglist">{s.flags.map((f) => <li key={f.id} className={f.severity}>{sev(f.severity)} <span><b>{data.rules.find((r) => r.code === f.code)?.title ?? f.code}.</b> {f.message}{f.detail ? <span className="sub"> · {f.detail}</span> : null}</span></li>)}</ul>}
-                {s.rules.length > 0 && <div className="actions" style={{ marginTop: 6 }}>{s.rules.map((r) => <span key={r.code} className={`badge ${!r.enabled ? 'muted' : r.available ? 'good' : 'warn'}`} title={`${SCOPE_LABEL[r.scope]}${r.enabled ? '' : ' · switched off'}`}>{r.title}{!r.enabled ? ' (off)' : r.available ? '' : ` · needs ${SCOPE_LABEL[r.scope]}`}</span>)}</div>}
-                {s.missing.length > 0 && <ul className="sub" style={{ margin: '6px 0 0 18px' }}>{s.missing.map((m, i) => <li key={i}>{m}</li>)}</ul>}
-              </div>
-            )}
-          </div>
-        ))}
+      <div className="areas">
+        {o.areas.map((a) => <AreaRow key={a.key} area={a} currency={cur} rules={data.rules} open={isOpen(a)} onToggle={() => setOpen({ ...(open ?? Object.fromEntries(o.areas.map((x) => [x.key, x.light === 'red']))), [a.key]: !isOpen(a) })} />)}
       </div>
 
       {o.resolved_14d.length > 0 && (

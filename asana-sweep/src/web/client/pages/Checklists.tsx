@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { AccountStatusRow, Check, CheckItem, CheckSettings, CheckWithItems, MonitorData, MonitorFlag } from '../../../sweep/types';
-import { api, currentActor, fmtDate, fmtRelative, useLiveUpdates } from '../api';
+import { api, currentActor, fmtDate, fmtRelative, useActor, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
 import { useAccountScope } from '../hubs';
 
@@ -183,7 +183,9 @@ export default function Checklists() {
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
   const [open, setOpen] = useState<Set<number>>(new Set());
-  const [filterAm, setFilterAm] = useState(() => currentActor());
+  const actor = useActor();
+  const [filterAm, setFilterAm] = useState(() => actor);
+  useEffect(() => { setFilterAm(actor); }, [actor]);
   const [version, setVersion] = useState(0);
   const [monitor, setMonitor] = useState<MonitorData | null>(null);
 
