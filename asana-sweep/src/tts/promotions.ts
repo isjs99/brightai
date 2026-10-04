@@ -17,6 +17,21 @@ export async function shopCredentials(q: Queries, shopId: string, client: TtsCli
   return { accessToken: shop.access_token, cipher: shop.cipher };
 }
 
+/** Same as shopCredentials, for the token the shop granted to a second app (the affiliate app). Null when the shop has not authorised that app. */
+export async function appCredentials(q: Queries, shopId: string, app: string, client: TtsClient): Promise<{ accessToken: string; cipher: string } | null> {
+  const shop = q.getTtsShop(shopId);
+  const t = q.getTtsShopApp(shopId, app);
+  if (!shop || !t) return null;
+  const now = Math.floor(Date.now() / 1000);
+  if (t.access_expires_at - now < 3600) {
+    if (t.refresh_expires_at && t.refresh_expires_at < now) throw new TtsError(`The ${app} app authorisation for ${shop.name} has expired. Re-authorise the shop under that app.`);
+    const r = await client.refreshToken(t.refresh_token);
+    q.updateTtsShopAppTokens(shopId, app, r);
+    return { accessToken: r.access_token, cipher: shop.cipher };
+  }
+  return { accessToken: t.access_token, cipher: shop.cipher };
+}
+
 const toUnix = (iso: string) => Math.floor(Date.parse(iso) / 1000);
 
 /** Build the CreateActivity body for one target. */

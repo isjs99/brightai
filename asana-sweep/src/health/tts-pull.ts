@@ -27,7 +27,10 @@ export function classifyError(err: unknown): { state: 'denied' | 'error'; messag
 export const BLOCK_SCOPES: TtsScope[] = ['analytics', 'order', 'product', 'return_refund', 'affiliate_seller', 'customer_service', 'finance'];
 const DAILY_BLOCKS: TtsScope[] = ['analytics', 'finance'];
 
-export interface PullOptions { now?: number; analyticsDays?: number; previous?: TtsRows | null; refreshDailyAfterMinutes?: number; blocks?: TtsScope[] }
+/** How the affiliate block is read: through the affiliate app's own client and token, 'unauthorised' when that app is configured but this shop has not granted it yet, or undefined to use the main app. */
+export type AffiliateAccess = { client: TtsClient; creds: Creds } | 'unauthorised' | undefined;
+
+export interface PullOptions { now?: number; analyticsDays?: number; previous?: TtsRows | null; refreshDailyAfterMinutes?: number; blocks?: TtsScope[]; affiliate?: AffiliateAccess }
 
 /** Pull every block for a shop, reusing the previous pull's rows for daily blocks that are still fresh. */
 export async function pullShop(client: TtsClient, creds: Creds, opts: PullOptions = {}): Promise<TtsRows> {
@@ -73,7 +76,9 @@ export async function pullShop(client: TtsClient, creds: Creds, opts: PullOption
   }, () => { if (prev) rows.returns = prev.returns; });
 
   await run('affiliate_seller', async () => {
-    rows.samples = await searchSamples(client, creds);
+    if (opts.affiliate === 'unauthorised') throw new TtsError('Shop not authorised under the affiliate app yet: authorise it under Promotions › Connection (no access until then)', 105002);
+    const via = opts.affiliate ?? { client, creds };
+    rows.samples = await searchSamples(via.client, via.creds);
   }, () => { if (prev) rows.samples = prev.samples; });
 
   await run('customer_service', async () => {

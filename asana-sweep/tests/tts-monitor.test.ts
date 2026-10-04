@@ -206,6 +206,19 @@ describe('TikTok pull', () => {
     expect(again.scopes.analytics?.state).toBe('skipped');
     expect(again.analytics).toHaveLength(1);
   });
+  it('reads the affiliate block through the affiliate app, and marks a shop that has not authorised it as denied', async () => {
+    const mainCalls: string[] = []; const affCalls: string[] = [];
+    const main = { configured: true, async call(_m: string, path: string) { mainCalls.push(path); if (path.startsWith('/affiliate_seller')) throw new Error('main app must not be used'); return { return_orders: [], orders: [], products: [], payments: [], statements: [], performance: {} }; } } as unknown as TtsClient;
+    const affiliate = { configured: true, async call(_m: string, path: string) { affCalls.push(path); return { sample_applications: [{ id: 'a', status: 'PENDING' }] }; } } as unknown as TtsClient;
+    const rows = await pullShop(main, { accessToken: 't', cipher: 'c' }, { now: NOW, blocks: ['affiliate_seller'], affiliate: { client: affiliate, creds: { accessToken: 'aff', cipher: 'c' } } });
+    expect(rows.scopes.affiliate_seller?.state).toBe('ok');
+    expect(rows.samples).toHaveLength(1);
+    expect(affCalls[0]).toContain('/affiliate_seller/');
+    expect(mainCalls.some((c) => c.startsWith('/affiliate_seller'))).toBe(false);
+    const denied = await pullShop(main, { accessToken: 't', cipher: 'c' }, { now: NOW, blocks: ['affiliate_seller'], affiliate: 'unauthorised' });
+    expect(denied.scopes.affiliate_seller?.state).toBe('denied');
+    expect(denied.scopes.affiliate_seller?.message).toMatch(/affiliate app/);
+  });
 });
 
 describe('health engine with TikTok shops', () => {

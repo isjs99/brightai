@@ -8,12 +8,12 @@ import { liveEvents } from '../live/events.js';
 import { log } from '../logger.js';
 import { AI_RULES, CRUVA_METRIC_KEYS, DEFAULT_THRESHOLDS, evaluateWindsor, parseCruvaMetrics, parseThresholds, WINDSOR_RULES, type Found, type WindsorRows } from './rules.js';
 import { ALL_TTS_RULES, emptyTtsRows, evaluateTargets, evaluateTts, lastDays, SCOPE_LABELS, SECTIONS, startOfWeek, targetValue, TARGET_RULES, type TtsRows } from './tts-rules.js';
-import { BLOCK_SCOPES, pullShop } from './tts-pull.js';
-import { tts, type TtsClient } from '../tts/client.js';
-import { shopCredentials } from '../tts/promotions.js';
+import { BLOCK_SCOPES, parseDay, pullShop, type AffiliateAccess } from './tts-pull.js';
+import { tts, ttsAffiliate, type TtsClient } from '../tts/client.js';
+import { appCredentials, shopCredentials } from '../tts/promotions.js';
 import { currencyForMarket } from '../tts/markets.js';
 import { CHECKLIST_TEMPLATE } from '../checklist/template.js';
-import type { AccountArea, AccountKpi, AccountOverview, AccountSection, AreaLight, MonitorAccountRow, MonitorRule, TtsScope, TtsScopeStatus } from '../sweep/types.js';
+import type { AccountArea, AccountKpi, AccountOverview, AccountSection, AccountSeries, AccountSeriesPoint, AreaLight, MonitorAccountRow, MonitorRule, TtsScope, TtsScopeStatus } from '../sweep/types.js';
 
 /**
  * Account health engine: the daily Windsor pull per linked shop (orders, products, payouts,
@@ -38,10 +38,18 @@ export class HealthEngine {
   pulling = false;
   reviewing = false;
 
-  constructor(private q: Queries, private deps: { windsor?: WindsorClient; tts?: TtsClient; llm?: ((system: string, user: string) => Promise<string>) | null } = {}) {}
+  constructor(private q: Queries, private deps: { windsor?: WindsorClient; tts?: TtsClient; ttsAffiliate?: TtsClient; llm?: ((system: string, user: string) => Promise<string>) | null } = {}) {}
 
   private get client(): WindsorClient { return this.deps.windsor ?? windsor; }
   private get ttsClient(): TtsClient { return this.deps.tts ?? tts; }
+  private get affiliateClient(): TtsClient { return this.deps.ttsAffiliate ?? ttsAffiliate; }
+
+  /** The affiliate block reads through the affiliate app once that app is configured; a shop that has not granted it reads as denied with the reason. */
+  private async affiliateAccess(shopId: string): Promise<AffiliateAccess> {
+    if (!this.affiliateClient.configured) return undefined;
+    const creds = await appCredentials(this.q, shopId, 'affiliate', this.affiliateClient);
+    return creds ? { client: this.affiliateClient, creds } : 'unauthorised';
+  }
 
   private get llm(): ((system: string, user: string) => Promise<string>) | null {
     if (this.deps.llm !== undefined) return this.deps.llm;
@@ -160,7 +168,8 @@ export class HealthEngine {
           const creds = await shopCredentials(this.q, sh.id, this.ttsClient);
           const prev = previous.get(sh.id);
           const unavailable = this.unavailableScopes();
-          const rows = await pullShop(this.ttsClient, creds, { now, previous: prev ? (prev.rows as unknown as TtsRows) : null, refreshDailyAfterMinutes: opts.force ? 0 : 55, blocks: BLOCK_SCOPES.filter((b) => !unavailable.has(b)) });
+          const affiliate = await this.affiliateAccess(sh.id).catch((err) => { errors.push(`${sh.name}: ${(err as Error).message}`); return 'unauthorised' as const; });
+          const rows = await pullShop(this.ttsClient, creds, { now, previous: prev ? (prev.rows as unknown as TtsRows) : null, refreshDailyAfterMinutes: opts.force ? 0 : 55, blocks: BLOCK_SCOPES.filter((b) => !unavailable.has(b)), affiliate });
           const ref = { shop_id: sh.id, shop_name: sh.name, account_id: sh.account_id, currency: currencyForMarket(sh.market ?? ''), market: sh.market };
           const { metrics } = evaluateTts(ref, rows, this.thresholds(), { now, targets: this.sampleTargets(sh.account_id!, sh.market) });
           const failed = Object.entries(rows.scopes).filter(([, r]) => r && r.state === 'error').map(([k, r]) => `${k}: ${r!.message}`);
@@ -318,6 +327,46 @@ export class HealthEngine {
     });
   }
 
+  private seriesCache = new Map<string, { at: number; days: AccountSeriesPoint[] }>();
+
+  /**
+   * Daily analytics for an account between two dates (inclusive), read live from the Analytics API per linked shop
+   * and summed, with the period of the same length before it. Cached for 15 minutes per shop and range.
+   */
+  async accountSeries(accountId: number, from: string, to: string, now = Date.now()): Promise<AccountSeries | null> {
+    const account = this.q.getAccount(accountId);
+    if (!account) return null;
+    const shops = this.q.listTtsShops().filter((sh) => sh.account_id === accountId && sh.token_ok);
+    const markets = (account.markets ?? '').toUpperCase().split(/[\/,\s]+/).filter((m) => /^[A-Z]{2}$/.test(m));
+    const currency = currencyForMarket(shops[0]?.market ?? markets[0] ?? '');
+    const errors: string[] = [];
+    const dayMs = 86400000;
+    const span = Math.round((Date.parse(to) - Date.parse(from)) / dayMs) + 1;
+    const prevTo = new Date(Date.parse(from) - dayMs).toISOString().slice(0, 10);
+    const prevFrom = new Date(Date.parse(from) - span * dayMs).toISOString().slice(0, 10);
+    const read = async (sh: { id: string; name: string }, a: string, b: string): Promise<AccountSeriesPoint[]> => {
+      const key = `${sh.id}:${a}:${b}`;
+      const hit = this.seriesCache.get(key);
+      if (hit && now - hit.at < 15 * 60000) return hit.days;
+      const creds = await shopCredentials(this.q, sh.id, this.ttsClient);
+      const out: AccountSeriesPoint[] = [];
+      // The API takes [start, end) and a window at a time; 90 days a call keeps well inside its limits.
+      for (let start = Date.parse(a); start <= Date.parse(b); start += 90 * dayMs) {
+        const end = Math.min(start + 90 * dayMs, Date.parse(b) + dayMs);
+        const data = await this.ttsClient.call<{ performance?: { intervals?: Record<string, unknown>[] } }>('GET', '/analytics/202509/shop/performance', { accessToken: creds.accessToken, shopCipher: creds.cipher, query: { start_date_ge: new Date(start).toISOString().slice(0, 10), end_date_lt: new Date(end).toISOString().slice(0, 10), granularity: '1D', currency: 'LOCAL' } });
+        for (const iv of data.performance?.intervals ?? []) { const d = parseDay(iv); if (d) out.push(toPoint(d)); }
+      }
+      this.seriesCache.set(key, { at: now, days: out });
+      return out;
+    };
+    const cur: AccountSeriesPoint[][] = []; const prev: AccountSeriesPoint[][] = [];
+    for (const sh of shops) {
+      try { cur.push(await read(sh, from, to)); prev.push(await read(sh, prevFrom, prevTo)); } catch (err) { errors.push(`${sh.name}: ${(err as Error).message}`); }
+    }
+    if (!shops.length) errors.push('No authorised TikTok shop is linked to this account');
+    return { from, to, currency, series: sumPoints(cur), previous: sumPoints(prev), errors };
+  }
+
   accountOverview(accountId: number, rules: MonitorRule[], now = Date.now()): AccountOverview | null {
     const account = this.q.getAccount(accountId);
     if (!account) return null;
@@ -334,18 +383,7 @@ export class HealthEngine {
     const tv = (k: Parameters<typeof targetValue>[1]) => targetValue(targets, k);
 
     // Daily series summed over the account's shops.
-    const byDate = new Map<string, AccountOverview['series'][number]>();
-    for (const p of pulls) {
-      const rows = p.rows as unknown as Partial<TtsRows>;
-      if (!rows.scopes?.analytics?.ok) continue;
-      for (const d of rows.analytics ?? []) {
-        const cur = byDate.get(d.date) ?? { date: d.date, gmv: 0, orders: 0, visitors: 0, video_gmv: 0, live_gmv: 0, card_gmv: 0, ads_gmv: null };
-        cur.gmv += d.gmv; cur.orders += d.orders; cur.visitors += d.visitors; cur.video_gmv += d.video_gmv; cur.live_gmv += d.live_gmv; cur.card_gmv += d.card_gmv;
-        if (d.ads_gmv !== null) cur.ads_gmv = (cur.ads_gmv ?? 0) + d.ads_gmv;
-        byDate.set(d.date, cur);
-      }
-    }
-    const series = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+    const series = sumDays(pulls.filter((p) => (p.rows as unknown as Partial<TtsRows>).scopes?.analytics?.ok).map((p) => ((p.rows as unknown as Partial<TtsRows>).analytics ?? [])));
     const sumM = (k: string) => { let any = false; let n = 0; for (const p of pulls) { const v = p.metrics[k]; if (typeof v === 'number') { any = true; n += v; } } return any ? n : null; };
     const avgM = (k: string) => { const vals = pulls.map((p) => p.metrics[k]).filter((v): v is number => typeof v === 'number'); return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null; };
     const missing = (scope: TtsScope) => { const st = scopes.find((s) => s.scope === scope); return st?.state === 'unavailable' ? `${SCOPE_LABELS[scope]} is not offered on this app: manual check in Seller Center` : st?.state === 'denied' ? `Needs the ${SCOPE_LABELS[scope]} scope on the app` : st?.state === 'error' ? `${SCOPE_LABELS[scope]} pull failed (see Rules & API coverage)` : shops.length ? `Not pulled yet (${SCOPE_LABELS[scope]})` : 'No TikTok shop authorised for this account'; };
@@ -655,4 +693,26 @@ export function parseAssessment(text: string): { risk: HealthAssessment['risk'];
   if (!risk || !summary) throw new Error('reply is missing risk or summary');
   const watch = Array.isArray(j.watch) ? j.watch.map((w) => String(w).trim()).filter(Boolean).slice(0, 5) : [];
   return { risk, summary: summary.slice(0, 900), action: (action || 'Nothing today.').slice(0, 600), watch };
+}
+
+/** One analytics day as a chart point (conversion kept so a range can show it visitor-weighted). */
+function toPoint(d: { date: string; gmv: number; orders: number; visitors: number; conversion: number; video_gmv: number; live_gmv: number; card_gmv: number; ads_gmv: number | null }): AccountSeriesPoint {
+  return { date: d.date, gmv: d.gmv, orders: d.orders, visitors: d.visitors, conversion: d.conversion, video_gmv: d.video_gmv, live_gmv: d.live_gmv, card_gmv: d.card_gmv, ads_gmv: d.ads_gmv };
+}
+
+/** Sum the daily series of several shops into one per date; conversion is weighted by visitors. */
+function sumPoints(perShop: AccountSeriesPoint[][]): AccountSeriesPoint[] {
+  const byDate = new Map<string, AccountSeriesPoint & { _cw: number }>();
+  for (const days of perShop) for (const d of days) {
+    const cur = byDate.get(d.date) ?? { date: d.date, gmv: 0, orders: 0, visitors: 0, conversion: null, video_gmv: 0, live_gmv: 0, card_gmv: 0, ads_gmv: null, _cw: 0 };
+    cur.gmv += d.gmv; cur.orders += d.orders; cur.visitors += d.visitors; cur.video_gmv += d.video_gmv; cur.live_gmv += d.live_gmv; cur.card_gmv += d.card_gmv;
+    if (d.ads_gmv !== null) cur.ads_gmv = (cur.ads_gmv ?? 0) + d.ads_gmv;
+    if (d.conversion !== null) { cur._cw += d.conversion * Math.max(1, d.visitors); }
+    byDate.set(d.date, cur);
+  }
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)).map(({ _cw, ...p }) => ({ ...p, conversion: _cw ? _cw / Math.max(1, p.visitors) : p.conversion }));
+}
+
+function sumDays(perShop: { date: string; gmv: number; orders: number; visitors: number; conversion: number; video_gmv: number; live_gmv: number; card_gmv: number; ads_gmv: number | null }[][]): AccountSeriesPoint[] {
+  return sumPoints(perShop.map((days) => days.map(toPoint)));
 }

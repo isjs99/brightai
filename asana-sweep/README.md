@@ -156,6 +156,8 @@ Account management > Promotions plans one promotion across many shops: pick acco
 2. Under Promotions > Connection, paste the service id and open the authorisation link for each seller. Authorised shops appear and can be linked to a roster account and market.
 3. Create the promotion, review the targets and push. Sync reads the live status back; Deactivate ends it on TikTok.
 
+**Affiliate app.** Partner Center grants the Affiliate seller scope on a separate app with its own key and secret. Set `TTS_AFFILIATE_APP_KEY` and `TTS_AFFILIATE_APP_SECRET`, give that app the redirect URL `<PUBLIC_URL>/api/tts/affiliate/callback`, paste its service id under Promotions > Connection > Affiliate app and authorise each shop with that link. The shop's affiliate token is stored next to its main one; the sample rules, the samples numbers on the overview and the creator conversations in the inbox then read through the affiliate app, and a shop that has not authorised it yet shows "not authorised under the affiliate app" on its pull instead of a missing scope.
+
 ## GMV Max
 
 GMV Max campaigns live in the TikTok Marketing API (Business Center), which is a separate app from the Shop OpenAPI, so this page is a planner: one row per account, market and campaign type with daily budget, bid strategy, target ROI and status, editable in bulk, with CSV export to mirror into Ads Manager.
@@ -219,7 +221,8 @@ Account management › Account monitor is the first thing an AM opens. Every man
 
 **Overview.** Pick the account at the top of the Accounts hub (only accounts with a connected TikTok shop are listed). The page is one overall light, four headline charts and a traffic-light list, worst first:
 
-- Charts: GMV per day over 28 days with the month-to-date pace against the target, GMV by channel (Video / LIVE / Product card) over 14 days, orders per day and visitors per day with the conversion rate. All from the Analytics API, each with its headline figure and the week-on-week arrow.
+- Charts: GMV per day with the month-to-date pace against the target, GMV by channel (Video / LIVE / Product card), orders per day and visitors per day with the conversion rate, over a range you pick (last 7, 14, 28 or 90 days, this month, last month, or any two dates up to a year apart). 7 and 14 days come from the stored pull; longer ranges are read live from the Analytics API and cached for 15 minutes. The headline on each chart is the range total (visitors: the daily average) with the arrow against the period of the same length before it.
+- With "All accounts" picked at the top, every connected brand is one collapsible block (light, worst flag, GMV last 7 days, pace against the monthly target, flag counts); expand one for its full overview, or expand and collapse all at once.
 - Areas: Orders and logistics, Products and stock, Returns and CS, Affiliate and samples, Marketing, Finance, Growth and traffic, Account health. Each row is a light (red = a critical flag or a number badly off target, amber = a warning, green = checks live and clear, grey = nothing feeding it yet), a one-line summary, its key numbers and the flag count. Red rows open by default; click any row for its flags, its numbers against targets with a pace bar, the checks behind it (green = live, amber = names the scope still to approve, grey = switched off), the link to the matching tab, and what is Seller Center only.
 - The daily checklist, scanned, folds under the account name; the full flag list, the daily review, all targets, rules, thresholds and the connect-a-shop flow sit behind More.
 - Targets for the account (per market where it trades in several), its SKU price list (list, floor and promo price, with what the shop currently charges from the product pull, importable from the shop), and the platform campaigns it takes part in.
@@ -341,7 +344,8 @@ Auth is a single shared password behind a signed cookie, in `src/web/auth.ts` be
 | `CRUVA_BASE_URL`, `CRUVA_STATS_PATH` | Optional overrides for the Cruva stats endpoint |
 | `CRUVA_ENDPOINTS` | Optional JSON of Cruva CRM paths for the playbook (`{"automation": "/v1/automations", ...}`) |
 | `AM_PASSWORD` | Optional read-only login for account managers |
-| `TTS_APP_KEY`, `TTS_APP_SECRET` | TikTok Shop Partner Center app, for promotions and the inbox |
+| `TTS_APP_KEY`, `TTS_APP_SECRET` | TikTok Shop Partner Center app, for promotions, the monitor and the inbox |
+| `TTS_AFFILIATE_APP_KEY`, `TTS_AFFILIATE_APP_SECRET` | The second Partner Center app that holds the Affiliate seller scope; samples and creator conversations read through it once each shop has authorised it |
 | `LEADS_CSV_URL` | Optional CSV URL to mirror as the lead list instead of the Google Sheet export |
 | `APOLLO_API_KEY` | Optional Apollo.io key for decision-maker search and reveal |
 | `FASTMOSS_API_KEY`, `FASTMOSS_TRANSPORT` | Optional FastMoss API key so the server pulls the fast risers itself over MCP; `FASTMOSS_TRANSPORT=cli` routes through the official CLI |

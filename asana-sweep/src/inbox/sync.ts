@@ -1,8 +1,8 @@
 import { Queries } from '../db/queries.js';
 import { log } from '../logger.js';
 import { liveEvents } from '../live/events.js';
-import { tts, TtsClient } from '../tts/client.js';
-import { shopCredentials } from '../tts/promotions.js';
+import { tts, TtsClient, ttsAffiliate } from '../tts/client.js';
+import { appCredentials, shopCredentials } from '../tts/promotions.js';
 import { config } from '../config.js';
 import type { InboxConversation, InboxMessage, InboxSettings } from '../sweep/types.js';
 import { buildContext, renderPrompt } from './context.js';
@@ -64,6 +64,14 @@ export function mapAffMessage(m: Record<string, unknown>, creatorImId: string | 
   return { message_id: id, sender_role: system ? 'system' : creatorImId && sender === creatorImId ? 'them' : !creatorImId ? 'them' : 'us', sender_name: null, type, text: parseText(body.content), created_at: iso(body.create_time) ?? new Date().toISOString() };
 }
 
+/** The client and token to read affiliate conversations with: the affiliate app once configured (the shop must have authorised it), else the main app. */
+async function affiliateVia(q: Queries, shopId: string, client: TtsClient, creds: { accessToken: string; cipher: string }): Promise<{ client: TtsClient; creds: { accessToken: string; cipher: string } }> {
+  if (!ttsAffiliate.configured || client !== tts) return { client, creds };
+  const c = await appCredentials(q, shopId, 'affiliate', ttsAffiliate);
+  if (!c) throw new Error('shop not authorised under the affiliate app yet (Promotions › Connection)');
+  return { client: ttsAffiliate, creds: c };
+}
+
 /** Pull conversations and new messages for every authorised shop, then auto-reply where switched on. */
 export async function syncInbox(q: Queries, client: TtsClient = tts): Promise<{ ok: boolean; error?: string; conversations: number; new_messages: number; auto_replies: number }> {
   if (syncing) return { ok: false, error: 'Inbox sync already running.', conversations: 0, new_messages: 0, auto_replies: 0 };
@@ -114,9 +122,10 @@ export async function syncInbox(q: Queries, client: TtsClient = tts): Promise<{ 
       } catch (err) {
         errors.push(`${shop.name} CS: ${(err as Error).message}`);
       }
-      // Affiliates
+      // Affiliates: through the affiliate app (its own token) when that app is configured.
       try {
-        const { conversations } = await client.affConversations(creds);
+        const aff = await affiliateVia(q, shop.id, client, creds);
+        const { conversations } = await aff.client.affConversations(aff.creds);
         for (const c of conversations) {
           const creatorId = (c.creator_im_id as string | null) ?? null;
           const up = q.upsertConversation({ tts_shop_id: shop.id, channel: 'affiliate', conversation_id: String(c.id), counterpart_name: (c.username as string | null) ?? null, counterpart_id: creatorId, unread_count: Number(c.unread_count ?? 0), can_send: true });
@@ -125,7 +134,7 @@ export async function syncInbox(q: Queries, client: TtsClient = tts): Promise<{ 
           // No latest-message summary in the listing, so pull the thread when it is new, has unread, or on a slow cadence.
           const stale = !prev.synced_at || Date.now() - Date.parse(prev.updated_at) > 6 * 3600000;
           if (up.changed || Number(c.unread_count ?? 0) > 0 || stale) {
-            const { messages } = await client.affMessages(creds, String(c.id));
+            const { messages } = await aff.client.affMessages(aff.creds, String(c.id));
             const rows = messages.map((m) => mapAffMessage(m, creatorId)).filter((m): m is NonNullable<typeof m> => m !== null);
             const added = q.upsertMessages(up.id, rows);
             result.new_messages += added;
@@ -206,7 +215,8 @@ async function autoReplyPass(q: Queries, client: TtsClient, ids: number[]): Prom
 export async function sendReply(q: Queries, c: InboxConversation, replyId: number, text: string, client: TtsClient = tts): Promise<{ message_id: string }> {
   try {
     const creds = await shopCredentials(q, c.tts_shop_id, client);
-    const res = c.channel === 'cs' ? await client.csSendText(creds, c.conversation_id, text) : await client.affSendText(creds, c.conversation_id, text);
+    const aff = c.channel === 'cs' ? null : await affiliateVia(q, c.tts_shop_id, client, creds);
+    const res = c.channel === 'cs' ? await client.csSendText(creds, c.conversation_id, text) : await aff!.client.affSendText(aff!.creds, c.conversation_id, text);
     q.markReplySent(replyId, res.message_id, null);
     const reply = q.getReply(replyId)!;
     q.upsertMessages(c.id, [{ message_id: res.message_id, sender_role: 'us', sender_name: reply.mode === 'auto' ? 'auto-reply' : (reply.created_by ?? 'dashboard'), type: 'TEXT', text, created_at: new Date().toISOString() }]);

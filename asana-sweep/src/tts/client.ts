@@ -24,6 +24,17 @@ export const ttsConfig: TtsConfig = {
 
 export const ttsConfigured = (): boolean => Boolean(ttsConfig.appKey && ttsConfig.appSecret);
 
+/**
+ * The affiliate app: Partner Center grants the Affiliate (seller) scope on a separate app with its own key and
+ * secret, so every shop authorises it separately and its token lives next to the main one (tts_shop_apps).
+ */
+export const ttsAffiliateConfig: TtsConfig = {
+  appKey: process.env.TTS_AFFILIATE_APP_KEY?.trim() ?? '',
+  appSecret: process.env.TTS_AFFILIATE_APP_SECRET?.trim() ?? '',
+  baseUrl: ttsConfig.baseUrl,
+  authUrl: ttsConfig.authUrl,
+};
+
 export class TtsError extends Error {
   constructor(message: string, public code: number | null = null, public status: number | null = null) {
     super(message);
@@ -226,3 +237,4 @@ export class TtsClient {
 }
 
 export const tts = new TtsClient();
+export const ttsAffiliate = new TtsClient(ttsAffiliateConfig);

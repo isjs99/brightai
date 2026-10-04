@@ -397,7 +397,12 @@ export interface TtsShopRow {
   refresh_expires_at: number;
   authorized_at: string;
   token_ok: boolean;
+  /** The affiliate app (separate Partner Center app): when this shop authorised it, and whether that token still works. */
+  affiliate_authorized_at: string | null;
+  affiliate_token_ok: boolean;
 }
+
+export interface TtsAppStatus { configured: boolean; service_id: string; authorize_url: string | null; callback_url: string }
 
 export interface TtsStatus {
   configured: boolean;
@@ -405,6 +410,8 @@ export interface TtsStatus {
   authorize_url: string | null;
   callback_url: string;
   shops: TtsShopRow[];
+  /** The affiliate app, granted separately in Partner Center. */
+  affiliate: TtsAppStatus;
 }
 
 export type ActivityType = 'DIRECT_DISCOUNT' | 'FIXED_PRICE' | 'FLASHSALE' | 'SHIPPING_DISCOUNT';
@@ -931,6 +938,9 @@ export interface MonitorData {
   tts_configured: boolean;
   /** Authorised TikTok shops, so the overview can say which accounts are connected. */
   tts_shops: number;
+  /** The affiliate app (separate key and secret) and how many linked shops have authorised it. */
+  tts_affiliate_configured: boolean;
+  tts_affiliate_shops: number;
 }
 
 /** One line per account on the monitor's Accounts tab. */
@@ -996,12 +1006,25 @@ export interface AccountCampaign {
 }
 
 /** What the monitor shows when one account is opened: numbers against targets, series for the charts, and the checklist walk-through. */
+export interface AccountSeriesPoint { date: string; gmv: number; orders: number; visitors: number; conversion: number | null; video_gmv: number; live_gmv: number; card_gmv: number; ads_gmv: number | null }
+
+/** Daily analytics for an account over a chosen range, straight from the Analytics API, with the period before it for comparison. */
+export interface AccountSeries {
+  from: string;
+  to: string;
+  currency: string;
+  series: AccountSeriesPoint[];
+  previous: AccountSeriesPoint[];
+  /** Shops that could not be read (token expired, scope missing). */
+  errors: string[];
+}
+
 export interface AccountOverview {
   account: Account;
   shops: { id: string; name: string; region: string; market: string | null; token_ok: boolean; last_pull_at: string | null; pull_ok: boolean; pull_error: string | null }[];
   currency: string;
   kpis: AccountKpi[];
-  series: { date: string; gmv: number; orders: number; visitors: number; video_gmv: number; live_gmv: number; card_gmv: number; ads_gmv: number | null }[];
+  series: AccountSeriesPoint[];
   sections: AccountSection[];
   flags: MonitorFlag[];
   resolved_14d: MonitorFlag[];

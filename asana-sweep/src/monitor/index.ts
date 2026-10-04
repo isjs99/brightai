@@ -1,6 +1,6 @@
 import type { Queries } from '../db/queries.js';
 import type { MonitorData, MonitorFlag, MonitorRule } from '../sweep/types.js';
-import { tts, type TtsClient } from '../tts/client.js';
+import { tts, type TtsClient, ttsAffiliate } from '../tts/client.js';
 import { todayIn } from '../checklist/checker.js';
 import { liveEvents } from '../live/events.js';
 import { log } from '../logger.js';
@@ -57,7 +57,7 @@ export class AccountMonitor {
   data(): MonitorData {
     const flags = this.q.listFlags(false);
     const health = this.health ?? new HealthEngine(this.q);
-    return { flags, rules: this.rules(), health: health.data(), accounts: health.accountRows(flags), scopes: health.scopeStatus(), targets: this.q.listAccountTargets(), last_scan_at: this.q.getSetting('monitor_last_scan_at', '') || null, last_scan_error: this.q.getSetting('monitor_last_scan_error', '') || null, scanning: this.scanning, interval_minutes: this.intervalMinutes, tts_configured: this.client.configured, tts_shops: this.q.listTtsShops().filter((s) => s.token_ok && s.account_id !== null).length };
+    return { flags, rules: this.rules(), health: health.data(), accounts: health.accountRows(flags), scopes: health.scopeStatus(), targets: this.q.listAccountTargets(), last_scan_at: this.q.getSetting('monitor_last_scan_at', '') || null, last_scan_error: this.q.getSetting('monitor_last_scan_error', '') || null, scanning: this.scanning, interval_minutes: this.intervalMinutes, tts_configured: this.client.configured, tts_shops: this.q.listTtsShops().filter((s) => s.token_ok && s.account_id !== null).length, tts_affiliate_configured: ttsAffiliate.configured, tts_affiliate_shops: this.q.listTtsShops().filter((s) => s.account_id !== null && s.affiliate_token_ok).length };
   }
 
   start(): void {

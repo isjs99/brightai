@@ -200,6 +200,7 @@ function PromotionForm({ initial, accounts, tts, onSave, onCancel }: { initial: 
 
 function ConnectionPanel({ tts, accounts, onChange }: { tts: TtsStatus; accounts: Account[]; onChange: (s: TtsStatus) => void }) {
   const [serviceId, setServiceId] = useState(tts.service_id);
+  const [affServiceId, setAffServiceId] = useState(tts.affiliate.service_id);
   const [error, setError] = useState<string | null>(null);
   const [test, setTest] = useState<{ id: string; busy: boolean; result: Awaited<ReturnType<typeof api.ttsShopAnalytics>> | null; error: string | null } | null>(null);
   const isAdmin = useIsAdmin();
@@ -207,7 +208,7 @@ function ConnectionPanel({ tts, accounts, onChange }: { tts: TtsStatus; accounts
     setTest({ id, busy: true, result: null, error: null });
     try { setTest({ id, busy: false, result: await api.ttsShopAnalytics(id, 7), error: null }); } catch (e) { setTest({ id, busy: false, result: null, error: (e as Error).message }); }
   };
-  const save = async () => { try { onChange(await api.saveTtsSettings(serviceId)); } catch (e) { setError((e as Error).message); } };
+  const save = async () => { try { onChange(await api.saveTtsSettings({ service_id: serviceId, affiliate_service_id: affServiceId })); } catch (e) { setError((e as Error).message); } };
   return (
     <div className="card" style={{ marginBottom: 18 }}>
       <h2 style={{ marginTop: 0 }}>TikTok Shop connection</h2>
@@ -223,10 +224,25 @@ function ConnectionPanel({ tts, accounts, onChange }: { tts: TtsStatus; accounts
           {tts.authorize_url && <a className="btn" href={tts.authorize_url} target="_blank" rel="noreferrer">Authorise a shop ↗</a>}
         </div>
       )}
+      <div style={{ margin: '14px 0 12px', paddingTop: 12, borderTop: '1px solid var(--border-2)' }}>
+        <h3 style={{ margin: '0 0 6px' }}>Affiliate app <span className="sub" style={{ fontWeight: 500 }}>· the Affiliate seller scope sits on a second Partner Center app with its own key and secret</span></h3>
+        {!tts.affiliate.configured ? (
+          <div className="banner warn"><b>Affiliate app not configured.</b> Set <code>TTS_AFFILIATE_APP_KEY</code> and <code>TTS_AFFILIATE_APP_SECRET</code> (Fly secrets or <code>.env</code>), set that app's redirect URL to <code>{tts.affiliate.callback_url}</code>, restart, then authorise each shop with the link below. Until then samples and creator conversations read through the main app.</div>
+        ) : (
+          <p className="hint" style={{ margin: '0 0 8px' }}>Affiliate app configured. Each shop authorises it once more; samples, creator conversations and the affiliate rules then read through it. Redirect URL must be <code>{tts.affiliate.callback_url}</code>.</p>
+        )}
+        {isAdmin && (
+          <div className="inline-form">
+            <label className="field" style={{ minWidth: 280 }}><span className="lbl">Affiliate app service ID</span><input type="text" value={affServiceId} onChange={(e) => setAffServiceId(e.target.value)} placeholder="e.g. 7xxxxxxxxxxxxxxxxxx" /></label>
+            <button onClick={save}>Save</button>
+            {tts.affiliate.authorize_url && <a className="btn" href={tts.affiliate.authorize_url} target="_blank" rel="noreferrer">Authorise a shop (affiliate app) ↗</a>}
+          </div>
+        )}
+      </div>
       {error && <p className="error">{error}</p>}
       {tts.shops.length === 0 ? <p className="sub">No shops authorised yet.</p> : (
         <table>
-          <thead><tr><th>TikTok shop</th><th>Region</th><th>Linked account</th><th>Market</th><th>Token</th><th></th></tr></thead>
+          <thead><tr><th>TikTok shop</th><th>Region</th><th>Linked account</th><th>Market</th><th>Token</th><th>Affiliate app</th><th></th></tr></thead>
           <tbody>
             {tts.shops.map((s) => (
               <tr key={s.id}>
@@ -249,6 +265,10 @@ function ConnectionPanel({ tts, accounts, onChange }: { tts: TtsStatus; accounts
                   ) : s.market}
                 </td>
                 <td>{s.token_ok ? <span className="badge good">ok</span> : <span className="badge crit">expired, re-authorise</span>}<div className="sub">since {fmtDate(s.authorized_at)}</div></td>
+                <td>
+                  {!s.affiliate_authorized_at ? <span className="badge muted" title="Authorise this shop with the affiliate app link above">{tts.affiliate.configured ? 'not authorised' : '–'}</span> : s.affiliate_token_ok ? <span className="badge good">ok</span> : <span className="badge crit">expired, re-authorise</span>}
+                  {s.affiliate_authorized_at && <div className="sub">since {fmtDate(s.affiliate_authorized_at)}{isAdmin && <> · <a href="#" onClick={async (e) => { e.preventDefault(); if (window.confirm(`Remove the affiliate app authorisation for ${s.name}?`)) onChange(await api.removeTtsAffiliate(s.id)); }}>remove</a></>}</div>}
+                </td>
                 <td><div className="actions"><button className="small" disabled={test?.busy} onClick={() => testAnalytics(s.id)} title="Call the Analytics API for the last 7 days">{test?.id === s.id && test.busy ? 'Calling…' : 'Test analytics'}</button>{isAdmin && <button className="small danger" onClick={async () => { if (window.confirm(`Remove ${s.name}?`)) onChange(await api.removeTtsShop(s.id)); }}>Remove</button>}</div></td>
               </tr>
             ))}
@@ -281,8 +301,8 @@ export default function PromotionsPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<number | null>(null);
   const [open, setOpen] = useState<number | null>(null);
-  const [showConn, setShowConn] = useState(false);
   const [params] = useSearchParams();
+  const [showConn, setShowConn] = useState(params.get('connection') === '1');
   const isAdmin = useIsAdmin();
   const scope = useAccountScope();
   const visible = promotions === null ? null : promotions.filter((p) => scope === null || p.targets.some((t) => t.account_id === scope));
@@ -337,7 +357,10 @@ export default function PromotionsPage() {
             <a href="#" onClick={(e) => { e.preventDefault(); setShowConn((s) => !s); }}>{showConn ? 'Hide connection' : `Connection (${tts?.shops.length ?? 0} shops)`}</a>
           </p>
         </div>
-        {isAdmin && <button className="primary" onClick={() => setEditing({ id: null, data: emptyForm() })}>+ New promotion</button>}
+        <div className="actions">
+          <button className="small" onClick={() => setShowConn((v) => !v)}>{showConn ? 'Hide connection' : `Connection (${tts?.shops.length ?? 0} shops)`}</button>
+          {isAdmin && <button className="primary" onClick={() => setEditing({ id: null, data: emptyForm() })}>+ New promotion</button>}
+        </div>
       </div>
       {error && <div className="banner crit">{error}</div>}
       {notice && <div className="banner info">{notice}</div>}

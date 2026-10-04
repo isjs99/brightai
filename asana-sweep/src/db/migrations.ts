@@ -1339,6 +1339,25 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 34,
+    name: 'tokens per TikTok app (affiliate app authorised separately)',
+    up(db) {
+      db.exec(`
+        CREATE TABLE tts_shop_apps (
+          shop_id TEXT NOT NULL REFERENCES tts_shops(id) ON DELETE CASCADE,
+          app TEXT NOT NULL,
+          access_token TEXT NOT NULL,
+          refresh_token TEXT NOT NULL,
+          access_expires_at INTEGER NOT NULL DEFAULT 0,
+          refresh_expires_at INTEGER NOT NULL DEFAULT 0,
+          authorized_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (shop_id, app)
+        );
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

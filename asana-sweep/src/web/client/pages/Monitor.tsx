@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import type { AccountArea, AccountCampaign, AccountKpi, AccountOverview, AccountSkuPrice, AccountTarget, AreaLight, HealthAssessment, HealthThresholds, Incident, IncidentsData, MonitorAccountRow, MonitorData, MonitorFlag, MonitorRule, TargetKey, TtsScope, TtsScopeStatus } from '../../../sweep/types';
+import type { AccountArea, AccountCampaign, AccountKpi, AccountOverview, AccountSeries, AccountSeriesPoint, AccountSkuPrice, AccountTarget, AreaLight, HealthAssessment, HealthThresholds, Incident, IncidentsData, MonitorAccountRow, MonitorData, MonitorFlag, MonitorRule, TargetKey, TtsScope, TtsScopeStatus } from '../../../sweep/types';
 import { api, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
 import { fmtValue, LineChart, PaceBar, StackedBars } from '../charts';
@@ -46,6 +46,22 @@ function Modal({ title, onClose, wide, children }: { title: string; onClose: () 
 
 type Dialog = 'targets' | 'skus' | 'campaigns' | 'all-targets' | 'coverage' | 'thresholds' | 'flags' | 'review' | 'incidents' | null;
 
+type RangePreset = '7d' | '14d' | '28d' | '90d' | 'mtd' | 'lastm' | 'custom';
+const PRESETS: { key: RangePreset; label: string }[] = [{ key: '7d', label: 'Last 7 days' }, { key: '14d', label: 'Last 14 days' }, { key: '28d', label: 'Last 28 days' }, { key: '90d', label: 'Last 90 days' }, { key: 'mtd', label: 'This month' }, { key: 'lastm', label: 'Last month' }, { key: 'custom', label: 'Custom…' }];
+const isoDay = (d: Date) => d.toISOString().slice(0, 10);
+const shortDay = (iso: string) => { const d = new Date(`${iso}T00:00:00Z`); return `${d.getUTCDate()} ${d.toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' })}`; };
+/** Analytics are complete up to yesterday, so every preset ends there. */
+function presetRange(p: RangePreset, now = new Date()): { from: string; to: string } {
+  const yesterday = new Date(now.getTime() - 86400000);
+  const to = isoDay(yesterday);
+  const back = (n: number) => isoDay(new Date(yesterday.getTime() - (n - 1) * 86400000));
+  if (p === '7d') return { from: back(7), to };
+  if (p === '14d') return { from: back(14), to };
+  if (p === '90d') return { from: back(90), to };
+  if (p === 'mtd') return { from: `${to.slice(0, 7)}-01`, to };
+  if (p === 'lastm') return { from: isoDay(new Date(Date.UTC(yesterday.getUTCFullYear(), yesterday.getUTCMonth() - 1, 1))), to: isoDay(new Date(Date.UTC(yesterday.getUTCFullYear(), yesterday.getUTCMonth(), 0))) };
+  return { from: back(28), to };
+}
 const LIGHT: Record<AreaLight, { cls: string; label: string }> = { red: { cls: 'crit', label: 'Red' }, amber: { cls: 'warn', label: 'Amber' }, green: { cls: 'good', label: 'Green' }, grey: { cls: 'muted', label: 'No data' } };
 
 /** Account management > Account monitor: one connected account at a time against the TikTok Shop API and its targets, scanned continuously. */
@@ -103,7 +119,7 @@ export default function MonitorPage() {
                 <button onClick={() => { setMenu(false); setDialog('thresholds'); }}>Thresholds</button>
                 {isAdmin && <button disabled={busy !== null || data.scanning} onClick={() => { setMenu(false); run('scan', api.monitorScan, (r) => setNotice(`Rules re-run: ${r.found} flag(s), ${r.opened} new, ${r.resolved} resolved.`)); }}>Re-run rules</button>}
                 {isAdmin && <button disabled={busy !== null || data.scanning || h.pulling} onClick={() => { setMenu(false); run('daily', api.healthDaily, (r) => setNotice(`Daily pass done: ${r.pulled} shop(s) pulled, ${r.reviewed} account(s) reviewed${r.errors.length ? `; ${r.errors.slice(0, 2).join(' · ')}` : ''}.`)); }}>Daily pass (pull, scan, AI review)</button>}
-                <Link to="/promotions" onClick={() => setMenu(false)} style={{ padding: '8px 10px', textDecoration: 'none' }}>Connect a shop ↗</Link>
+                <Link to="/promotions?connection=1" onClick={() => setMenu(false)} style={{ padding: '8px 10px', textDecoration: 'none' }}>Connect a shop ↗</Link>
               </div>
             )}
           </div>
@@ -121,7 +137,8 @@ export default function MonitorPage() {
         {connectedAccounts.length > 1 && <span className="actions">{connectedAccounts.slice(0, 8).map((a) => <button key={a.id} className={`small ${a.id === selected ? 'primary' : ''}`} onClick={() => select(a.id)}>{a.name}{a.crit ? <span className="badge crit" style={{ marginLeft: 6 }}>{a.crit}</span> : a.warn ? <span className="badge warn" style={{ marginLeft: 6 }}>{a.warn}</span> : null}</button>)}</span>}
         {unconnected.length > 0 && <span className="sub">{unconnected.length} account{unconnected.length === 1 ? ' has' : 's have'} no TikTok shop yet · <Link to="/promotions">connect</Link></span>}
       </div>
-      {selected === null ? <div className="empty">Authorise a shop under <Link to="/promotions">Promotions › Connection</Link> and link it to its account; it then shows up here.</div>
+      {selected === null ? <div className="empty">Authorise a shop under <Link to="/promotions?connection=1">Promotions › Connection</Link> and link it to its account; it then shows up here.</div>
+        : selectedParam === null && connectedAccounts.length > 1 ? <AllAccounts accounts={connectedAccounts} data={data} isAdmin={isAdmin} onError={setError} onNotice={setNotice} reload={load} onSelect={select} />
         : <AccountDetail key={selected} id={selected} data={data} isAdmin={isAdmin} onError={setError} onNotice={setNotice} reload={load} dialog={dialog} setDialog={setDialog} />}
 
       {dialog === 'flags' && <Modal title="All open flags" wide onClose={() => setDialog(null)}><Flags data={scoped} isAdmin={isAdmin} run={run} onSelect={(id) => { setDialog(null); select(id); }} /></Modal>}
@@ -157,6 +174,56 @@ function kpiValue(k: AccountKpi, currency: string): string {
 }
 
 type RunOverview = (key: string, fn: () => Promise<AccountOverview>, after?: (r: AccountOverview) => void) => Promise<void>;
+
+
+type DetailProps = { data: MonitorData; isAdmin: boolean; onError: (e: string | null) => void; onNotice: (n: string | null) => void; reload: () => void };
+
+/** Every connected brand as a collapsible block, worst first, with expand / collapse all. */
+function AllAccounts({ accounts, onSelect, ...rest }: DetailProps & { accounts: MonitorAccountRow[]; onSelect: (id: number) => void }) {
+  const [open, setOpen] = useState<Record<number, boolean>>({});
+  const lightOf = (a: MonitorAccountRow): AreaLight => a.crit ? 'red' : a.warn ? 'amber' : a.shops ? 'green' : 'grey';
+  const count = (l: AreaLight) => accounts.filter((a) => lightOf(a) === l).length;
+  const allOpen = accounts.every((a) => open[a.id]);
+  return (
+    <>
+      <div className="page-head" style={{ marginBottom: 8 }}>
+        <span className="sub">{accounts.length} connected accounts · <span className="light crit" /> {count('red')} · <span className="light warn" /> {count('amber')} · <span className="light good" /> {count('green')}</span>
+        <div className="actions">
+          <button className="small" onClick={() => setOpen(allOpen ? {} : Object.fromEntries(accounts.map((a) => [a.id, true])))}>{allOpen ? 'Collapse all' : 'Expand all'}</button>
+        </div>
+      </div>
+      <div className="areas">
+        {accounts.map((a) => <BrandBlock key={a.id} a={a} light={lightOf(a)} open={Boolean(open[a.id])} onToggle={() => setOpen({ ...open, [a.id]: !open[a.id] })} onSelect={() => onSelect(a.id)} {...rest} />)}
+      </div>
+    </>
+  );
+}
+
+function BrandBlock({ a, light, open, onToggle, onSelect, data, ...rest }: DetailProps & { a: MonitorAccountRow; light: AreaLight; open: boolean; onToggle: () => void; onSelect: () => void }) {
+  const [dialog, setDialog] = useState<Dialog>(null);
+  const order = { crit: 0, warn: 1, info: 2 } as const;
+  const worst = data.flags.filter((f) => f.account_id === a.id && !f.acknowledged_at).sort((x, y) => order[x.severity] - order[y.severity])[0];
+  const summary = worst ? `${data.rules.find((r) => r.code === worst.code)?.title ?? worst.code}: ${worst.message.replace(/^[^:]+:\s*/, '')}` : a.shops ? 'All clear' : 'No TikTok shop connected';
+  return (
+    <div className={`area brand ${light}`}>
+      <div className="head" onClick={onToggle} role="button" aria-expanded={open}>
+        <span className={`light ${LIGHT[light].cls}`} title={LIGHT[light].label} />
+        <b>{a.name}<span className="sub"> {a.markets ?? ''}{a.am_name ? ` · ${a.am_name}` : ''}</span></b>
+        <span className="summary" title={summary}>{summary}</span>
+        <span className="nums">
+          <span className="num"><span className="k">GMV 7d</span><span className="v">{a.gmv_7d !== null ? fmtValue(a.gmv_7d, 'money', a.currency) : '–'} {arrow(a.gmv_7d, a.gmv_prev_7d, 'higher')}</span></span>
+          {a.gmv_pace !== null && <span className={`num ${a.gmv_pace >= 1 ? 'good' : a.gmv_pace >= 0.85 ? 'warn' : 'crit'}`}><span className="k">GMV pace</span><span className="v">{Math.round(a.gmv_pace * 100)}%</span></span>}
+        </span>
+        <span className="actions" style={{ alignItems: 'center' }}>
+          {a.crit ? <span className="badge crit">{a.crit}</span> : null}{a.warn ? <span className="badge warn">{a.warn}</span> : null}
+          <button className="small" onClick={(e) => { e.stopPropagation(); onSelect(); }} title="Open this account on its own">Open ▸</button>
+          <span className="sub">{open ? '▾' : '▸'}</span>
+        </span>
+      </div>
+      {open && <div className="area-body"><AccountDetail id={a.id} data={data} compact dialog={dialog} setDialog={setDialog} {...rest} /></div>}
+    </div>
+  );
+}
 
 /** One traffic light: the area, its light, a one-line summary and its numbers; expands to the flags, the numbers against targets and the checks behind it. */
 function AreaRow({ area, currency, rules, open, onToggle }: { area: AccountArea; currency: string; rules: MonitorRule[]; open: boolean; onToggle: () => void }) {
@@ -198,35 +265,58 @@ function AreaRow({ area, currency, rules, open, onToggle }: { area: AccountArea;
   );
 }
 
-function AccountDetail({ id, data, isAdmin, onError, onNotice, reload, dialog, setDialog }: { id: number; data: MonitorData; isAdmin: boolean; onError: (e: string | null) => void; onNotice: (n: string | null) => void; reload: () => void; dialog: Dialog; setDialog: (d: Dialog) => void }) {
+function AccountDetail({ id, data, isAdmin, onError, onNotice, reload, dialog, setDialog, compact }: { id: number; data: MonitorData; isAdmin: boolean; onError: (e: string | null) => void; onNotice: (n: string | null) => void; reload: () => void; dialog: Dialog; setDialog: (d: Dialog) => void; compact?: boolean }) {
   const [o, setO] = useState<AccountOverview | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [open, setOpen] = useState<Record<string, boolean> | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const load = useCallback(() => api.monitorAccount(id).then(setO).catch((e) => onError((e as Error).message)), [id, onError]);
   useEffect(() => { load(); }, [load, data.last_scan_at]);
+  // Chart range: 7 and 14 days come from the stored pull; anything longer or custom is read live from the Analytics API.
+  const [preset, setPreset] = useState<RangePreset>('14d');
+  const [custom, setCustom] = useState<{ from: string; to: string }>(() => presetRange('28d'));
+  const [fetched, setFetched] = useState<AccountSeries | null>(null);
+  const [seriesBusy, setSeriesBusy] = useState(false);
+  const range = preset === 'custom' ? custom : presetRange(preset);
+  const stored = preset === '7d' || preset === '14d';
+  useEffect(() => {
+    if (stored || range.from > range.to) { setFetched(null); return; }
+    let alive = true; setSeriesBusy(true);
+    api.monitorSeries(id, range.from, range.to).then((r) => { if (alive) setFetched(r); }).catch((e) => { if (alive) onError((e as Error).message); }).finally(() => { if (alive) setSeriesBusy(false); });
+    return () => { alive = false; };
+  }, [id, stored, range.from, range.to, onError]);
   const run: RunOverview = async (key, fn, after) => {
     setBusy(key); onError(null);
     try { const r = await fn(); setO(r); after?.(r); reload(); } catch (e) { onError((e as Error).message); } finally { setBusy(null); }
   };
   if (!o) return <p className="sub">Loading {data.accounts.find((a) => a.id === id)?.name ?? 'account'}…</p>;
   const cur = o.currency;
-  const series28 = o.series.slice(-28);
-  const series14 = o.series.slice(-14);
   const k = (key: string) => o.kpis.find((x) => x.key === key) ?? null;
-  const headline = (key: string) => { const m = k(key); return m && m.value !== null ? <>{fmtValue(m.value, m.unit, cur)} {arrow(m.value, m.previous, m.direction)}</> : <span className="sub">no data</span>; };
+  const span = Math.round((Date.parse(range.to) - Date.parse(range.from)) / 86400000) + 1;
+  const prevTo = isoDay(new Date(Date.parse(range.from) - 86400000)); const prevFrom = isoDay(new Date(Date.parse(range.from) - span * 86400000));
+  const points: AccountSeriesPoint[] = stored ? o.series.filter((p) => p.date >= range.from && p.date <= range.to) : (fetched?.series ?? []);
+  const prevPoints: AccountSeriesPoint[] = stored ? o.series.filter((p) => p.date >= prevFrom && p.date <= prevTo) : (fetched?.previous ?? []);
+  const sum = (arr: AccountSeriesPoint[], key: 'gmv' | 'orders' | 'visitors') => arr.reduce((n, p) => n + p[key], 0);
+  const conv = (arr: AccountSeriesPoint[]) => { const v = sum(arr, 'visitors'); const w = arr.reduce((n, p) => n + (p.conversion ?? 0) * Math.max(1, p.visitors), 0); return v > 0 ? w / v : null; };
+  const vs = (key: 'gmv' | 'orders' | 'visitors', avg = false) => { const a = avg ? (points.length ? sum(points, key) / points.length : null) : sum(points, key); const b = prevPoints.length ? (avg ? sum(prevPoints, key) / prevPoints.length : sum(prevPoints, key)) : null; return { a, b }; };
+  const rangeLabel = preset === 'custom' ? `${shortDay(range.from)} – ${shortDay(range.to)}` : PRESETS.find((p) => p.key === preset)!.label.toLowerCase();
+  const headline = (key: 'gmv' | 'orders' | 'visitors', avg = false) => { const { a, b } = vs(key, avg); return a !== null && points.length ? <>{fmtValue(a, key === 'gmv' ? 'money' : 'count', cur)} {arrow(a, b, 'higher')}</> : <span className="sub">no data</span>; };
+  const conversion = conv(points);
   const isOpen = (a: AccountArea) => (open ? Boolean(open[a.key]) : a.light === 'red');
-  const needsReauth = o.shops.some((sh) => sh.pull_error && /no permission|scope|unauthori|403/i.test(sh.pull_error));
+  const needsAffiliate = o.shops.some((sh) => sh.pull_error && /affiliate app/i.test(sh.pull_error));
+  const needsReauth = o.shops.some((sh) => sh.pull_error && /no permission|scope|unauthori|403/i.test(sh.pull_error.replace(/affiliate_seller:[^;]*/i, '')));
   const gmvMtd = k('gmv_mtd');
   return (
     <>
       <div className="page-head" style={{ marginBottom: 10 }}>
         <div>
-          <div className="actions" style={{ alignItems: 'baseline' }}>
-            <span className={`light big ${LIGHT[o.light].cls}`} title={LIGHT[o.light].label} />
-            <h2 style={{ margin: 0 }}>{o.account.name}</h2>
-            <span className="sub">{o.account.markets ?? ''}{o.account.am_name ? ` · AM ${o.account.am_name}` : ''}{o.account.aa_name ? ` · AA ${o.account.aa_name}` : ''}</span>
-          </div>
+          {!compact && (
+            <div className="actions" style={{ alignItems: 'baseline' }}>
+              <span className={`light big ${LIGHT[o.light].cls}`} title={LIGHT[o.light].label} />
+              <h2 style={{ margin: 0 }}>{o.account.name}</h2>
+              <span className="sub">{o.account.markets ?? ''}{o.account.am_name ? ` · AM ${o.account.am_name}` : ''}{o.account.aa_name ? ` · AA ${o.account.aa_name}` : ''}</span>
+            </div>
+          )}
           <div className="actions" style={{ marginTop: 4 }}>
             {o.shops.map((sh) => <span key={sh.id} className={`badge ${!sh.token_ok ? 'crit' : sh.pull_error ? 'warn' : sh.last_pull_at ? 'good' : 'muted'}`} title={sh.pull_error ?? (sh.last_pull_at ? `Pulled ${fmtRelative(sh.last_pull_at)}` : 'Not pulled yet')}>{sh.name}{sh.market ? ` · ${sh.market}` : ''}{!sh.token_ok ? ' · re-authorise' : sh.pull_error ? ' · pull issue' : ''}</span>)}
             <span className="sub">{o.flags.filter((f) => f.severity === 'crit').length} critical · {o.flags.filter((f) => f.severity === 'warn').length} warning · {o.flags.filter((f) => f.severity === 'info').length} info</span>
@@ -239,7 +329,8 @@ function AccountDetail({ id, data, isAdmin, onError, onNotice, reload, dialog, s
           <button className="small" onClick={() => setDialog('campaigns')}>Campaigns{o.campaigns.length ? ` (${o.campaigns.length})` : ''}</button>
         </div>
       </div>
-      {needsReauth && <div className="banner warn">A scope added in Partner Center is not in this shop's token yet. Remove and re-authorise the shop under <Link to="/promotions">Promotions › Connection</Link>, then pull again.</div>}
+      {needsReauth && <div className="banner warn">A scope added in Partner Center is not in this shop's token yet. Remove and re-authorise the shop under <Link to="/promotions?connection=1">Promotions › Connection</Link>, then pull again.</div>}
+      {needsAffiliate && <div className="banner warn">This shop has not authorised the affiliate app yet, so samples and creator conversations cannot be read. Authorise it under <Link to="/promotions?connection=1">Promotions › Connection › Affiliate app</Link>, then pull again.</div>}
       {o.assessment && (
         <div className={`review ${o.assessment.risk === 'red' ? 'crit' : o.assessment.risk === 'amber' ? 'warn' : 'good'}`} onClick={() => setReviewOpen(!reviewOpen)}>
           <span className={`badge ${RISK[o.assessment.risk].cls}`}>{RISK[o.assessment.risk].label}</span>
@@ -248,14 +339,22 @@ function AccountDetail({ id, data, isAdmin, onError, onNotice, reload, dialog, s
         </div>
       )}
 
-      {series28.length ? (
+      <div className="chart-range">
+        <select value={preset} onChange={(e) => setPreset(e.target.value as RangePreset)} aria-label="Chart range">{PRESETS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}</select>
+        {preset === 'custom' && <><input type="date" value={custom.from} max={custom.to} onChange={(e) => setCustom({ ...custom, from: e.target.value })} aria-label="From" /><span className="sub">to</span><input type="date" value={custom.to} min={custom.from} max={presetRange('7d').to} onChange={(e) => setCustom({ ...custom, to: e.target.value })} aria-label="To" /></>}
+        <span className="sub">{shortDay(range.from)} – {shortDay(range.to)} · {points.length} day{points.length === 1 ? '' : 's'}{prevPoints.length ? ' · arrows vs the period before' : ''}{stored ? '' : ' · live from the Analytics API'}</span>
+        {seriesBusy && <span className="badge muted">Loading…</span>}
+        {fetched && fetched.errors.length > 0 && <span className="badge warn" title={fetched.errors.join(' · ')}>{fetched.errors.length} shop{fetched.errors.length === 1 ? '' : 's'} not read</span>}
+      </div>
+      {points.length ? (
         <div className="charts four">
-          <LineChart title="GMV per day" headline={<>{headline('gmv_7d')}<span className="sub"> last 7 days</span></>} points={series28.map((d) => ({ date: d.date, value: d.gmv }))} kind="money" currency={cur} height={120} footer={gmvMtd && gmvMtd.value !== null ? <div className="sub">Month to date {fmtValue(gmvMtd.value, 'money', cur)}{gmvMtd.target !== null ? <> · target so far {fmtValue(gmvMtd.target, 'money', cur)} · {gmvMtd.state === 'good' ? 'on track' : 'behind'}</> : ' · no monthly target set'}<PaceBar value={gmvMtd.value} target={gmvMtd.target} direction="higher" state={gmvMtd.state} /></div> : null} />
-          <StackedBars title="GMV by channel" headline={<span className="sub">last 14 days</span>} days={series14.map((d) => ({ date: d.date, values: [d.video_gmv, d.live_gmv, d.card_gmv] }))} series={[{ label: 'Video', color: 'var(--s1)' }, { label: 'LIVE', color: 'var(--s2)' }, { label: 'Product card', color: 'var(--s3)' }]} currency={cur} height={120} />
-          <LineChart title="Orders per day" headline={<>{headline('orders_7d')}<span className="sub"> last 7 days</span></>} points={series28.map((d) => ({ date: d.date, value: d.orders }))} kind="count" height={120} />
-          <LineChart title="Visitors per day" headline={<>{headline('visitors')}<span className="sub"> a day · conversion {k('conversion')?.value !== null && k('conversion') ? fmtValue(k('conversion')!.value!, 'pct') : '–'}</span></>} points={series28.map((d) => ({ date: d.date, value: d.visitors }))} kind="count" height={120} />
+          <LineChart title="GMV per day" headline={<>{headline('gmv')}<span className="sub"> {rangeLabel}</span></>} points={points.map((d) => ({ date: d.date, value: d.gmv }))} kind="money" currency={cur} height={120} footer={gmvMtd && gmvMtd.value !== null ? <div className="sub">Month to date {fmtValue(gmvMtd.value, 'money', cur)}{gmvMtd.target !== null ? <> · target so far {fmtValue(gmvMtd.target, 'money', cur)} · {gmvMtd.state === 'good' ? 'on track' : 'behind'}</> : ' · no monthly target set'}<PaceBar value={gmvMtd.value} target={gmvMtd.target} direction="higher" state={gmvMtd.state} /></div> : null} />
+          <StackedBars title="GMV by channel" headline={<span className="sub">{rangeLabel}</span>} days={points.map((d) => ({ date: d.date, values: [d.video_gmv, d.live_gmv, d.card_gmv] }))} series={[{ label: 'Video', color: 'var(--s1)' }, { label: 'LIVE', color: 'var(--s2)' }, { label: 'Product card', color: 'var(--s3)' }]} currency={cur} height={120} />
+          <LineChart title="Orders per day" headline={<>{headline('orders')}<span className="sub"> {rangeLabel}</span></>} points={points.map((d) => ({ date: d.date, value: d.orders }))} kind="count" height={120} />
+          <LineChart title="Visitors per day" headline={<>{headline('visitors', true)}<span className="sub"> a day · conversion {conversion !== null ? fmtValue(conversion, 'pct') : '–'}</span></>} points={points.map((d) => ({ date: d.date, value: d.visitors }))} kind="count" height={120} />
         </div>
-      ) : <div className="empty" style={{ marginBottom: 14 }}>No analytics pulled yet. Press "Pull this account".</div>}
+      ) : seriesBusy ? <div className="empty" style={{ marginBottom: 14 }}>Reading the Analytics API…</div>
+        : <div className="empty" style={{ marginBottom: 14 }}>{stored ? 'No analytics pulled yet. Press "Pull this account".' : `No analytics for ${shortDay(range.from)} – ${shortDay(range.to)}.${fetched?.errors.length ? ` ${fetched.errors.join(' · ')}` : ''}`}</div>}
 
       <div className="areas">
         {o.areas.map((a) => <AreaRow key={a.key} area={a} currency={cur} rules={data.rules} open={isOpen(a)} onToggle={() => setOpen({ ...(open ?? Object.fromEntries(o.areas.map((x) => [x.key, x.light === 'red']))), [a.key]: !isOpen(a) })} />)}

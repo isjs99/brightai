@@ -426,21 +426,51 @@ export class Queries {
       refresh_expires_at: Number(r.refresh_expires_at ?? 0),
       authorized_at: r.authorized_at as string,
       token_ok: Number(r.refresh_expires_at ?? 0) === 0 || Number(r.refresh_expires_at) > now,
+      affiliate_authorized_at: (r.aff_authorized_at as string | null) ?? null,
+      affiliate_token_ok: r.aff_authorized_at ? Number(r.aff_refresh_expires_at ?? 0) === 0 || Number(r.aff_refresh_expires_at) > now : false,
       access_token: r.access_token as string,
       refresh_token: r.refresh_token as string,
     };
   }
 
+  private static readonly TTS_SHOP_SELECT = `SELECT s.*, a.authorized_at AS aff_authorized_at, a.refresh_expires_at AS aff_refresh_expires_at
+    FROM tts_shops s LEFT JOIN tts_shop_apps a ON a.shop_id = s.id AND a.app = 'affiliate'`;
+
   listTtsShops(): TtsShopRow[] {
-    return this.db.prepare('SELECT * FROM tts_shops ORDER BY name').all().map((r) => {
+    return this.db.prepare(`${Queries.TTS_SHOP_SELECT} ORDER BY s.name`).all().map((r) => {
       const { access_token: _a, refresh_token: _b, ...rest } = this.rowToTtsShop(r as Row);
       return rest;
     });
   }
 
   getTtsShop(id: string): (TtsShopRow & { access_token: string; refresh_token: string }) | null {
-    const r = this.db.prepare('SELECT * FROM tts_shops WHERE id = ?').get(id) as Row | undefined;
+    const r = this.db.prepare(`${Queries.TTS_SHOP_SELECT} WHERE s.id = ?`).get(id) as Row | undefined;
     return r ? this.rowToTtsShop(r) : null;
+  }
+
+  // ---- Tokens for a second Partner Center app (the affiliate app) ----
+
+  getTtsShopApp(shopId: string, app: string): { shop_id: string; app: string; access_token: string; refresh_token: string; access_expires_at: number; refresh_expires_at: number; authorized_at: string; token_ok: boolean } | null {
+    const r = this.db.prepare('SELECT * FROM tts_shop_apps WHERE shop_id = ? AND app = ?').get(shopId, app) as Row | undefined;
+    if (!r) return null;
+    const now = Math.floor(Date.now() / 1000);
+    return { shop_id: r.shop_id as string, app: r.app as string, access_token: r.access_token as string, refresh_token: r.refresh_token as string, access_expires_at: Number(r.access_expires_at ?? 0), refresh_expires_at: Number(r.refresh_expires_at ?? 0), authorized_at: r.authorized_at as string, token_ok: Number(r.refresh_expires_at ?? 0) === 0 || Number(r.refresh_expires_at) > now };
+  }
+
+  upsertTtsShopApp(shopId: string, app: string, t: { access_token: string; refresh_token: string; access_token_expire_in: number; refresh_token_expire_in: number }): void {
+    const now = new Date().toISOString();
+    this.db.prepare(`INSERT INTO tts_shop_apps (shop_id, app, access_token, refresh_token, access_expires_at, refresh_expires_at, authorized_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(shop_id, app) DO UPDATE SET access_token = excluded.access_token, refresh_token = excluded.refresh_token, access_expires_at = excluded.access_expires_at, refresh_expires_at = excluded.refresh_expires_at, authorized_at = excluded.authorized_at, updated_at = excluded.updated_at`)
+      .run(shopId, app, t.access_token, t.refresh_token, t.access_token_expire_in, t.refresh_token_expire_in, now, now);
+  }
+
+  updateTtsShopAppTokens(shopId: string, app: string, t: { access_token: string; refresh_token: string; access_token_expire_in: number; refresh_token_expire_in: number }): void {
+    this.db.prepare('UPDATE tts_shop_apps SET access_token = ?, refresh_token = ?, access_expires_at = ?, refresh_expires_at = ?, updated_at = ? WHERE shop_id = ? AND app = ?')
+      .run(t.access_token, t.refresh_token, t.access_token_expire_in, t.refresh_token_expire_in, new Date().toISOString(), shopId, app);
+  }
+
+  deleteTtsShopApp(shopId: string, app: string): boolean {
+    return this.db.prepare('DELETE FROM tts_shop_apps WHERE shop_id = ? AND app = ?').run(shopId, app).changes > 0;
   }
 
   upsertTtsShop(shop: { id: string; name: string; region: string; seller_type: string; cipher: string; seller_name?: string | null }, tokens: { access_token: string; refresh_token: string; access_token_expire_in: number; refresh_token_expire_in: number }): void {

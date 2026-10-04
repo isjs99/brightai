@@ -14,7 +14,7 @@ import { cruva } from '../gmv/cruva.js';
 import { discoverWindsorShops, syncWindsorGmv, windsor, windsorStatus } from '../gmv/windsor.js';
 import type { WindsorStatus, InquiriesData, SiteInquiry, InquiryHistory, InquiryMail } from '../sweep/types.js';
 import { currencyForShop } from '../gmv/currency.js';
-import { authorizationUrl, tts } from '../tts/client.js';
+import { authorizationUrl, tts, ttsAffiliate } from '../tts/client.js';
 import { deactivatePromotion, pushPromotion, shopCredentials, syncPromotion } from '../tts/promotions.js';
 import { currencyForMarket, marketFromRegion, marketsOf } from '../tts/markets.js';
 import type { GmvMaxPatch, PromotionInput, TtsStatus } from '../sweep/types.js';
@@ -846,19 +846,48 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   // ---- TikTok Shop connection ----
   const ttsStatus = (): TtsStatus => {
     const serviceId = q.getSetting('tts_service_id', '');
+    const affServiceId = q.getSetting('tts_affiliate_service_id', '');
     return {
       configured: tts.configured,
       service_id: serviceId,
       authorize_url: serviceId ? authorizationUrl(serviceId, 'am-ops') : null,
       callback_url: `${config.publicUrl}/api/tts/callback`,
       shops: q.listTtsShops(),
+      affiliate: {
+        configured: ttsAffiliate.configured,
+        service_id: affServiceId,
+        authorize_url: affServiceId ? authorizationUrl(affServiceId, 'am-ops-affiliate') : null,
+        callback_url: `${config.publicUrl}/api/tts/affiliate/callback`,
+      },
     };
   };
 
   r.get('/tts/status', (_req, res) => res.json(ttsStatus()));
 
   r.put('/tts/settings', (req, res) => {
-    q.setSetting('tts_service_id', String((req.body ?? {}).service_id ?? '').trim());
+    const b = (req.body ?? {}) as { service_id?: unknown; affiliate_service_id?: unknown };
+    if (b.service_id !== undefined) q.setSetting('tts_service_id', String(b.service_id ?? '').trim());
+    if (b.affiliate_service_id !== undefined) q.setSetting('tts_affiliate_service_id', String(b.affiliate_service_id ?? '').trim());
+    res.json(ttsStatus());
+  });
+
+  /** Seller lands here after authorising the affiliate app: its token is stored next to the main one for every shop it covers. */
+  r.get('/tts/affiliate/callback', async (req, res) => {
+    const code = String(req.query.code ?? req.query.auth_code ?? '');
+    if (!code) throw new HttpError(400, 'Missing auth code in the callback.');
+    if (!ttsAffiliate.configured) throw new HttpError(400, 'TTS_AFFILIATE_APP_KEY / TTS_AFFILIATE_APP_SECRET are not set.');
+    const tokens = await ttsAffiliate.exchangeCode(code);
+    const shops = await ttsAffiliate.authorizedShops(tokens.access_token);
+    for (const s of shops) {
+      // A shop that has not authorised the main app yet gets a placeholder row (expired main token) so it shows up under Connection.
+      if (!q.getTtsShop(s.id)) q.upsertTtsShop({ id: s.id, name: s.name, region: s.region, seller_type: s.seller_type, cipher: s.cipher, seller_name: tokens.seller_name ?? null }, { access_token: '', refresh_token: '', access_token_expire_in: 1, refresh_token_expire_in: 1 });
+      q.upsertTtsShopApp(s.id, 'affiliate', tokens);
+    }
+    res.redirect('/promotions?affiliate=' + shops.length);
+  });
+
+  r.delete('/tts/shops/:id/affiliate', (req, res) => {
+    if (!q.deleteTtsShopApp(String(req.params.id), 'affiliate')) throw new HttpError(404, 'This shop has no affiliate app authorisation');
     res.json(ttsStatus());
   });
 
@@ -2236,6 +2265,18 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     return o;
   };
   r.get('/monitor/accounts/:id', (req, res) => res.json(overviewOr404(idParam(req))));
+
+  /** Daily analytics for a chosen range (inclusive dates, up to a year), live from the Analytics API with the period before it. */
+  r.get('/monitor/accounts/:id/series', async (req, res) => {
+    const from = String(req.query.from ?? ''); const to = String(req.query.to ?? '');
+    const iso = /^\d{4}-\d{2}-\d{2}$/;
+    if (!iso.test(from) || !iso.test(to) || Number.isNaN(Date.parse(from)) || Number.isNaN(Date.parse(to))) throw new HttpError(400, 'from and to must be YYYY-MM-DD');
+    if (from > to) throw new HttpError(400, 'from must be on or before to');
+    if ((Date.parse(to) - Date.parse(from)) / 86400000 > 366) throw new HttpError(400, 'A range can cover a year at most');
+    const out = await scheduler.health.accountSeries(idParam(req), from, to);
+    if (!out) throw new HttpError(404, 'Account not found');
+    res.json(out);
+  });
 
   /** Mark a scope as not offered on the app (or offered again), so the UI reads it as manual rather than missing. */
   r.put('/monitor/scopes/:scope', (req, res) => {

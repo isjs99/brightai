@@ -61,6 +61,7 @@ import type {
   Person,
   PersonInput,
   ReminderSettings,
+  AccountSeries,
 } from '../../sweep/types';
 
 /**
@@ -260,7 +261,8 @@ export const api = {
   windsorTest: () => call<{ ok: true; shops: number; linked: number; sample: string[]; debug?: { shops_call: { url: string; status: number | null; body: string } | null; orders_30d_rows: number | null; orders_call: { url: string; status: number | null; body: string } | null } }>('POST', '/windsor/test'),
   // TikTok Shop, promotions, GMV Max
   ttsStatus: () => call<TtsStatus>('GET', '/tts/status'),
-  saveTtsSettings: (service_id: string) => call<TtsStatus>('PUT', '/tts/settings', { service_id }),
+  saveTtsSettings: (settings: { service_id?: string; affiliate_service_id?: string }) => call<TtsStatus>('PUT', '/tts/settings', settings),
+  removeTtsAffiliate: (id: string) => call<TtsStatus>('DELETE', `/tts/shops/${id}/affiliate`),
   linkTtsShop: (id: string, account_id: number | null, market: string | null) => call<TtsStatus>('PUT', `/tts/shops/${id}/link`, { account_id, market }),
   removeTtsShop: (id: string) => call<TtsStatus>('DELETE', `/tts/shops/${id}`),
   ttsShopAnalytics: (id: string, days = 7) => call<{ shop: { id: string; name: string; region: string }; start: string; end: string; latest_available_date: string | null; days: number; gmv: number; currency: string; orders: number; units: number; last_interval: Record<string, string>; raw: unknown }>('GET', `/tts/shops/${id}/analytics?days=${days}`),
@@ -353,6 +355,7 @@ export const api = {
   monitorSettings: (s: { interval_minutes?: number; enabled?: boolean }) => call<MonitorData>('PUT', '/monitor/settings', s),
   ackFlag: (id: number) => call<MonitorData>('POST', `/monitor/flags/${id}/ack`),
   monitorAccount: (id: number) => call<AccountOverview>('GET', `/monitor/accounts/${id}`),
+  monitorSeries: (id: number, from: string, to: string) => call<AccountSeries>('GET', `/monitor/accounts/${id}/series?from=${from}&to=${to}`),
   setScopeUnavailable: (scope: string, unavailable: boolean) => call<MonitorData>('PUT', `/monitor/scopes/${scope}`, { unavailable }),
   monitorPull: (shopIds?: string[]) => call<MonitorData & { shops: number; errors: string[] }>('POST', '/monitor/pull', { shop_ids: shopIds }),
   saveAccountTargets: (accountId: number, targets: { market: string; key: TargetKey; value: number | null }[]) => call<AccountOverview>('PUT', `/monitor/accounts/${accountId}/targets`, { targets }),
