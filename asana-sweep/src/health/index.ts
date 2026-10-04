@@ -159,7 +159,8 @@ export class HealthEngine {
         try {
           const creds = await shopCredentials(this.q, sh.id, this.ttsClient);
           const prev = previous.get(sh.id);
-          const rows = await pullShop(this.ttsClient, creds, { now, previous: prev ? (prev.rows as unknown as TtsRows) : null, refreshDailyAfterMinutes: opts.force ? 0 : 55 });
+          const unavailable = this.unavailableScopes();
+          const rows = await pullShop(this.ttsClient, creds, { now, previous: prev ? (prev.rows as unknown as TtsRows) : null, refreshDailyAfterMinutes: opts.force ? 0 : 55, blocks: BLOCK_SCOPES.filter((b) => !unavailable.has(b)) });
           const ref = { shop_id: sh.id, shop_name: sh.name, account_id: sh.account_id, currency: currencyForMarket(sh.market ?? ''), market: sh.market };
           const { metrics } = evaluateTts(ref, rows, this.thresholds(), { now, targets: this.sampleTargets(sh.account_id!, sh.market) });
           const failed = Object.entries(rows.scopes).filter(([, r]) => r && r.state === 'error').map(([k, r]) => `${k}: ${r!.message}`);
@@ -188,9 +189,24 @@ export class HealthEngine {
   }
 
   /** Per scope: live on every pulled shop, denied (approval missing), erroring, or not tried yet. */
+  /** Scopes TikTok does not offer on this app at all (marked by hand on the Rules tab), so they read as manual rather than missing. */
+  unavailableScopes(): Set<TtsScope> {
+    return new Set(this.q.getSetting('tts_scopes_unavailable', '').split(',').filter(Boolean) as TtsScope[]);
+  }
+
+  setScopeUnavailable(scope: TtsScope, unavailable: boolean): void {
+    const set = this.unavailableScopes();
+    if (unavailable) set.add(scope); else set.delete(scope);
+    this.q.setSetting('tts_scopes_unavailable', [...set].join(','));
+    this.q.setSetting('tts_scopes_json', JSON.stringify(this.computeScopeStatus()));
+    liveEvents.emitUpdate({ kind: 'monitor' });
+  }
+
   computeScopeStatus(): TtsScopeStatus[] {
     const pulls = this.q.latestHealthPulls('tts');
+    const unavailable = this.unavailableScopes();
     return BLOCK_SCOPES.map((scope) => {
+      if (unavailable.has(scope)) return { scope, state: 'unavailable' as const, message: 'Not offered on this app in Partner Center', checked_at: null, shops_ok: 0, shops_total: 0 };
       const results = pulls.map((p) => (p.rows as unknown as TtsRows).scopes?.[scope]).filter((r): r is NonNullable<typeof r> => Boolean(r));
       const ok = results.filter((r) => r.ok).length;
       const denied = results.find((r) => r.state === 'denied');
@@ -201,8 +217,9 @@ export class HealthEngine {
   }
 
   scopeStatus(): TtsScopeStatus[] {
-    try { const v = JSON.parse(this.q.getSetting('tts_scopes_json', '[]')) as TtsScopeStatus[]; if (Array.isArray(v) && v.length) return v; } catch { /* fall through */ }
-    return BLOCK_SCOPES.map((scope) => ({ scope, state: 'unknown' as const, message: null, checked_at: null, shops_ok: 0, shops_total: 0 }));
+    const unavailable = this.unavailableScopes();
+    try { const v = JSON.parse(this.q.getSetting('tts_scopes_json', '[]')) as TtsScopeStatus[]; if (Array.isArray(v) && v.length) return v.map((x) => (unavailable.has(x.scope) ? { ...x, state: 'unavailable' as const, message: 'Not offered on this app in Partner Center' } : x)); } catch { /* fall through */ }
+    return BLOCK_SCOPES.map((scope) => ({ scope, state: unavailable.has(scope) ? 'unavailable' as const : 'unknown' as const, message: unavailable.has(scope) ? 'Not offered on this app in Partner Center' : null, checked_at: null, shops_ok: 0, shops_total: 0 }));
   }
 
   scopeLive(scope: TtsScope): boolean {
@@ -331,7 +348,7 @@ export class HealthEngine {
     const series = [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
     const sumM = (k: string) => { let any = false; let n = 0; for (const p of pulls) { const v = p.metrics[k]; if (typeof v === 'number') { any = true; n += v; } } return any ? n : null; };
     const avgM = (k: string) => { const vals = pulls.map((p) => p.metrics[k]).filter((v): v is number => typeof v === 'number'); return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null; };
-    const missing = (scope: TtsScope) => { const st = scopes.find((s) => s.scope === scope); return st?.state === 'denied' ? `Needs the ${SCOPE_LABELS[scope]} scope on the app` : st?.state === 'error' ? `${SCOPE_LABELS[scope]} pull failed (see Rules & API coverage)` : shops.length ? `Not pulled yet (${SCOPE_LABELS[scope]})` : 'No TikTok shop authorised for this account'; };
+    const missing = (scope: TtsScope) => { const st = scopes.find((s) => s.scope === scope); return st?.state === 'unavailable' ? `${SCOPE_LABELS[scope]} is not offered on this app: manual check in Seller Center` : st?.state === 'denied' ? `Needs the ${SCOPE_LABELS[scope]} scope on the app` : st?.state === 'error' ? `${SCOPE_LABELS[scope]} pull failed (see Rules & API coverage)` : shops.length ? `Not pulled yet (${SCOPE_LABELS[scope]})` : 'No TikTok shop authorised for this account'; };
     const state = (value: number | null, target: number | null, direction: 'higher' | 'lower'): AccountKpi['state'] => {
       if (value === null || target === null) return null;
       const behind = direction === 'higher' ? (target > 0 ? 1 - value / target : 0) : (target > 0 ? value / target - 1 : value > target ? 1 : 0);

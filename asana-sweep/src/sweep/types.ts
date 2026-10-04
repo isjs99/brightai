@@ -900,7 +900,7 @@ export type MonitorSource = 'tts' | 'dashboard' | 'cruva' | 'checklist' | 'winds
 
 /** TikTok Shop OpenAPI scopes the app can hold; each rule names the one it needs so the UI can say what is missing. */
 export type TtsScope = 'analytics' | 'order' | 'product' | 'return_refund' | 'affiliate_seller' | 'customer_service' | 'finance' | 'promotion' | 'seller' | 'none';
-export type TtsScopeState = 'ok' | 'denied' | 'error' | 'unknown';
+export type TtsScopeState = 'ok' | 'denied' | 'error' | 'unknown' | 'unavailable';
 export interface TtsScopeStatus { scope: TtsScope; state: TtsScopeState; message: string | null; checked_at: string | null; shops_ok: number; shops_total: number }
 
 export interface MonitorRule {

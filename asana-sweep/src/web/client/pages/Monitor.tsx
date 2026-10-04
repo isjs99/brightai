@@ -21,7 +21,7 @@ const TARGET_FIELDS: { key: TargetKey; label: string; unit: string; help: string
 ];
 const sev = (s: MonitorFlag['severity']) => <span className={`badge ${s === 'crit' ? 'crit' : s === 'warn' ? 'warn' : 'muted'}`}>{s === 'crit' ? 'Critical' : s === 'warn' ? 'Warning' : 'Info'}</span>;
 const targetOf = (targets: AccountTarget[], accountId: number, key: TargetKey, market = '') => targets.find((t) => t.account_id === accountId && t.key === key && t.market === market)?.value ?? null;
-const scopeBadge = (s: TtsScopeStatus | undefined, label: string) => <span className={`badge ${s?.state === 'ok' ? 'good' : s?.state === 'denied' ? 'crit' : s?.state === 'error' ? 'warn' : 'muted'}`} title={s?.message ?? (s?.state === 'ok' ? `Live on ${s.shops_ok} of ${s.shops_total} shop(s)` : 'Not pulled yet')}>{label}: {s?.state === 'ok' ? 'live' : s?.state === 'denied' ? 'needs approval' : s?.state === 'error' ? 'error' : 'not pulled'}</span>;
+const scopeBadge = (s: TtsScopeStatus | undefined, label: string) => <span className={`badge ${s?.state === 'ok' ? 'good' : s?.state === 'denied' ? 'crit' : s?.state === 'error' ? 'warn' : 'muted'}`} title={s?.message ?? (s?.state === 'ok' ? `Live on ${s.shops_ok} of ${s.shops_total} shop(s)` : 'Not pulled yet')}>{label}: {s?.state === 'ok' ? 'live' : s?.state === 'denied' ? 'needs approval' : s?.state === 'error' ? 'error' : s?.state === 'unavailable' ? 'not on this app' : 'not pulled'}</span>;
 
 /** Account management > Account monitor: every account against the TikTok Shop API and its targets, scanned continuously; the first thing an AM opens. */
 export default function MonitorPage() {
@@ -427,9 +427,17 @@ function Rules({ data, isAdmin, run }: { data: MonitorData; isAdmin: boolean; ru
   return (
     <>
       <ScopeStrip scopes={data.scopes} />
-      {needed.length > 0 && (
+      {needed.filter((s) => s.state !== 'unavailable').length > 0 && (
         <div className="banner warn">
-          <b>Scopes still to approve on the TikTok Shop app:</b> {needed.map((s) => `${SCOPE_LABEL[s.scope]} (${data.rules.filter((r) => r.scope === s.scope).length} check${data.rules.filter((r) => r.scope === s.scope).length === 1 ? '' : 's'})`).join(', ')}. Each one unlocks the rules marked "needs approval" below; the dashboard retries on every scan, so nothing needs re-wiring once TikTok grants it. Shop score, violations, missions and campaign enrolment have no API at all.
+          <b>Scopes still to approve on the TikTok Shop app:</b> {needed.filter((s) => s.state !== 'unavailable').map((s) => `${SCOPE_LABEL[s.scope]} (${data.rules.filter((r) => r.scope === s.scope).length} check${data.rules.filter((r) => r.scope === s.scope).length === 1 ? '' : 's'})`).join(', ')}. Each one unlocks the rules marked "needs approval" below; the dashboard retries on every scan, so nothing needs re-wiring once TikTok grants it. After adding a scope, re-authorise the shops under Promotions › Connection so the new scope is in their tokens. Shop score, violations, missions and campaign enrolment have no API at all.
+        </div>
+      )}
+      {isAdmin && (
+        <div className="card" style={{ marginBottom: 14, padding: '10px 14px' }}>
+          <b>Scopes Partner Center does not offer this app</b> <span className="sub">Tick a scope that is not in the app's Manage scope list at all; its checks then read as manual instead of "needs approval", and the pull skips it.</span>
+          <div className="actions" style={{ marginTop: 6 }}>
+            {data.scopes.map((s) => <label key={s.scope} className="field check"><input type="checkbox" checked={s.state === 'unavailable'} onChange={(e) => run(`sc${s.scope}`, () => api.setScopeUnavailable(s.scope, e.target.checked))} /> {SCOPE_LABEL[s.scope]}</label>)}
+          </div>
         </div>
       )}
       <div className="card" style={{ marginBottom: 14 }}>
@@ -442,7 +450,7 @@ function Rules({ data, isAdmin, run }: { data: MonitorData; isAdmin: boolean; ru
             <tr key={r.code} className={r.enabled ? '' : 'dim'}>
               <td>{isAdmin ? <input type="checkbox" checked={r.enabled} onChange={(e) => run(`r${r.code}`, () => api.monitorRule(r.code, e.target.checked))} /> : r.enabled ? 'on' : 'off'}</td>
               <td><b>{r.title}</b><div className="sub mono">{r.code} · {SOURCE_LABEL[r.source]}</div></td>
-              <td>{!r.scope || r.scope === 'none' ? <span className="badge muted">dashboard data</span> : <span className={`badge ${liveScope(r.scope) ? 'good' : scopeOf(r.scope)?.state === 'denied' ? 'crit' : 'warn'}`} title={scopeOf(r.scope)?.message ?? ''}>{SCOPE_LABEL[r.scope]}{liveScope(r.scope) ? '' : scopeOf(r.scope)?.state === 'denied' ? ' · needs approval' : ' · not live'}</span>}</td>
+              <td>{!r.scope || r.scope === 'none' ? <span className="badge muted">dashboard data</span> : <span className={`badge ${liveScope(r.scope) ? 'good' : scopeOf(r.scope)?.state === 'denied' ? 'crit' : scopeOf(r.scope)?.state === 'unavailable' ? 'muted' : 'warn'}`} title={scopeOf(r.scope)?.message ?? ''}>{SCOPE_LABEL[r.scope]}{liveScope(r.scope) ? '' : scopeOf(r.scope)?.state === 'denied' ? ' · needs approval' : scopeOf(r.scope)?.state === 'unavailable' ? ' · not on this app' : ' · not live'}</span>}</td>
               <td className="sub">{r.section ?? ''}</td>
               <td>{sev(r.severity)}</td>
               <td className="sub">{r.description}</td>

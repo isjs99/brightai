@@ -340,6 +340,7 @@ export const api = {
   monitorSettings: (s: { interval_minutes?: number; enabled?: boolean }) => call<MonitorData>('PUT', '/monitor/settings', s),
   ackFlag: (id: number) => call<MonitorData>('POST', `/monitor/flags/${id}/ack`),
   monitorAccount: (id: number) => call<AccountOverview>('GET', `/monitor/accounts/${id}`),
+  setScopeUnavailable: (scope: string, unavailable: boolean) => call<MonitorData>('PUT', `/monitor/scopes/${scope}`, { unavailable }),
   monitorPull: (shopIds?: string[]) => call<MonitorData & { shops: number; errors: string[] }>('POST', '/monitor/pull', { shop_ids: shopIds }),
   saveAccountTargets: (accountId: number, targets: { market: string; key: TargetKey; value: number | null }[]) => call<AccountOverview>('PUT', `/monitor/accounts/${accountId}/targets`, { targets }),
   saveSkuPrices: (accountId: number, rows: Partial<AccountSkuPrice>[]) => call<AccountOverview>('PUT', `/monitor/accounts/${accountId}/sku-prices`, { rows }),

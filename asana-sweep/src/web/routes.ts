@@ -43,7 +43,8 @@ import { bodyToHtml, LANGUAGES as OUTREACH_LANGUAGES, outreachInputs } from '../
 import { generateDraft as generateOutreachDraft } from '../bd/draft.js';
 import { bulkCandidates, pickBestLinkedin } from '../bd/bulk.js';
 import { generateLarkMessage, pickLarkRecipient, spreadDates } from '../bd/lark.js';
-import type { LarkMessage } from '../sweep/types.js';
+import type { LarkMessage, TtsScope } from '../sweep/types.js';
+import { BLOCK_SCOPES } from '../health/tts-pull.js';
 import { projectionCsv } from '../stock/index.js';
 import { periodBounds } from '../reports/client.js';
 import type { IngestPayload } from '../health/index.js';
@@ -2235,6 +2236,15 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     return o;
   };
   r.get('/monitor/accounts/:id', (req, res) => res.json(overviewOr404(idParam(req))));
+
+  /** Mark a scope as not offered on the app (or offered again), so the UI reads it as manual rather than missing. */
+  r.put('/monitor/scopes/:scope', (req, res) => {
+    const scope = String(req.params.scope) as TtsScope;
+    if (!BLOCK_SCOPES.includes(scope)) throw new HttpError(400, 'Unknown scope');
+    const b = (req.body ?? {}) as { unavailable?: unknown };
+    scheduler.health.setScopeUnavailable(scope, Boolean(b.unavailable));
+    res.json(monitor.data());
+  });
 
   /** Pull every authorised shop now (all blocks, ignoring the hourly cache for the daily ones) and re-run the rules. */
   r.post('/monitor/pull', async (req, res) => {
