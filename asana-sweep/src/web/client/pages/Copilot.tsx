@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import type { CopilotData, CopilotQuestion } from '../../../sweep/types';
 import { api, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
+import { useAccountScope } from '../hubs';
 
 const KIND: Record<string, string> = { call: 'Call', email: 'Email', slack: 'Slack', sop: 'SOP', report: 'Report', incident: 'Incident', data: 'Account data', inbox: 'Inbox' };
 
@@ -18,6 +19,8 @@ export default function CopilotPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const isAdmin = useIsAdmin();
+  const scope = useAccountScope();
+  useEffect(() => { if (scope !== null) setAsk((a) => ({ ...a, account_id: String(scope) })); }, [scope]);
   const load = useCallback(() => api.copilot().then(setData).catch((e) => setError((e as Error).message)), []);
   useEffect(() => { load(); }, [load]);
   const connected = useLiveUpdates((e) => { if (e.kind === 'copilot') load(); });

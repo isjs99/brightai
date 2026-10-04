@@ -23,6 +23,8 @@ import PlaybookPage from './pages/Playbook';
 import CopilotPage from './pages/Copilot';
 import ChecklistTemplatePage from './pages/ChecklistTemplate';
 import ConnectionsPage from './pages/Connections';
+import TodayPage from './pages/Today';
+import { AccountHub, GROWTH_TABS, Hub, INBOX_TABS, PERFORMANCE_TABS, SETTINGS_TABS } from './hubs';
 
 type Theme = 'system' | 'light' | 'dark';
 
@@ -101,52 +103,14 @@ function Login({ onDone }: { onDone: (role: Role) => void }) {
   );
 }
 
-const NAV: { section: string; items: { to: string; label: string; end?: boolean }[] }[] = [
-  {
-    section: 'Operations',
-    items: [
-      { to: '/checklists', label: 'Checklists' },
-      { to: '/calendar', label: 'Calendar' },
-    ],
-  },
-  {
-    section: 'Performance',
-    items: [
-      { to: '/gmv', label: 'GMV & bonus' },
-      { to: '/analytics', label: 'Analytics' },
-    ],
-  },
-  {
-    section: 'Growth',
-    items: [
-      { to: '/leads', label: 'Leads' },
-      { to: '/bd', label: 'BD pipeline' },
-      { to: '/outreach', label: 'Outreach emails' },
-      { to: '/inquiries', label: 'Website enquiries' },
-    ],
-  },
-  {
-    section: 'Account management',
-    items: [
-      { to: '/monitor', label: 'Account monitor' },
-      { to: '/promotions', label: 'Promotions' },
-      { to: '/gmv-max', label: 'GMV Max' },
-      { to: '/inbox', label: 'CS & affiliate inbox' },
-      { to: '/stock', label: 'Stock' },
-      { to: '/reports', label: 'Client reports' },
-      { to: '/playbook', label: 'Cruva playbook' },
-      { to: '/copilot', label: 'Client copilot' },
-    ],
-  },
-  {
-    section: 'Setup',
-    items: [
-      { to: '/accounts', label: 'Accounts' },
-      { to: '/checklist-template', label: 'Checklist items' },
-      { to: '/connections', label: 'Connections' },
-      { to: '/people', label: 'Team' },
-    ],
-  },
+/** Six entries. Each hub owns several paths (its tabs), so the link is active on any of them. */
+const NAV: { to: string; label: string; paths: string[] }[] = [
+  { to: '/today', label: 'Today', paths: ['/today'] },
+  { to: '/monitor', label: 'Accounts', paths: ['/monitor', '/checklists', '/calendar', '/promotions', '/gmv-max', '/stock', '/reports', '/copilot'] },
+  { to: '/inbox', label: 'Inbox', paths: ['/inbox', '/inquiries'] },
+  { to: '/bd', label: 'Growth', paths: ['/bd', '/outreach', '/leads'] },
+  { to: '/gmv', label: 'Performance', paths: ['/gmv', '/analytics'] },
+  { to: '/accounts', label: 'Settings', paths: ['/accounts', '/people', '/checklist-template', '/connections', '/playbook'] },
 ];
 
 export default function App() {
@@ -204,40 +168,38 @@ export default function App() {
         </header>
         <div className="body">
           <aside className={`sidebar ${menuOpen ? 'open' : ''}`}>
-            {NAV.map((group) => (
-              <div className="nav-group" key={group.section}>
-                <div className="nav-section">{group.section}</div>
-                {group.items.map((item) => (
-                  <NavLink key={item.to} to={item.to} end={item.end} className={({ isActive }) => (isActive ? 'active' : '')}>
-                    {item.label}
-                  </NavLink>
-                ))}
-              </div>
-            ))}
+            <div className="nav-group">
+              {NAV.map((item) => (
+                <NavLink key={item.to} to={item.to} className={() => (item.paths.includes(location.pathname) ? 'active' : '')}>
+                  {item.label}
+                </NavLink>
+              ))}
+            </div>
           </aside>
           <main className="page">
             <Routes>
-              <Route path="/accounts" element={<Accounts />} />
-              <Route path="/checklist-template" element={<ChecklistTemplatePage />} />
-              <Route path="/connections" element={<ConnectionsPage />} />
-              <Route path="/checklists" element={<Checklists />} />
-              <Route path="/analytics" element={<AnalyticsPage />} />
-              <Route path="/calendar" element={<CalendarPage />} />
-              <Route path="/gmv" element={<GmvPage />} />
-              <Route path="/people" element={<PeoplePage />} />
-              <Route path="/promotions" element={<PromotionsPage />} />
-              <Route path="/gmv-max" element={<GmvMaxPage />} />
-              <Route path="/leads" element={<LeadsPage />} />
-              <Route path="/bd" element={<BdPage />} />
-              <Route path="/outreach" element={<OutreachPage />} />
-              <Route path="/inquiries" element={<InquiriesPage />} />
-              <Route path="/monitor" element={<MonitorPage />} />
-              <Route path="/stock" element={<StockPage />} />
-              <Route path="/reports" element={<ReportsPage />} />
-              <Route path="/playbook" element={<PlaybookPage />} />
-              <Route path="/copilot" element={<CopilotPage />} />
-              <Route path="/inbox" element={<InboxPage />} />
-              <Route path="*" element={<Navigate to="/checklists" replace />} />
+              <Route path="/today" element={<TodayPage />} />
+              <Route path="/monitor" element={<AccountHub><MonitorPage /></AccountHub>} />
+              <Route path="/checklists" element={<AccountHub><Checklists /></AccountHub>} />
+              <Route path="/calendar" element={<AccountHub><CalendarPage /></AccountHub>} />
+              <Route path="/promotions" element={<AccountHub><PromotionsPage /></AccountHub>} />
+              <Route path="/gmv-max" element={<AccountHub><GmvMaxPage /></AccountHub>} />
+              <Route path="/stock" element={<AccountHub><StockPage /></AccountHub>} />
+              <Route path="/reports" element={<AccountHub><ReportsPage /></AccountHub>} />
+              <Route path="/copilot" element={<AccountHub><CopilotPage /></AccountHub>} />
+              <Route path="/inbox" element={<Hub title="Inbox" tabs={INBOX_TABS}><InboxPage /></Hub>} />
+              <Route path="/inquiries" element={<Hub title="Inbox" tabs={INBOX_TABS}><InquiriesPage /></Hub>} />
+              <Route path="/bd" element={<Hub title="Growth" tabs={GROWTH_TABS}><BdPage /></Hub>} />
+              <Route path="/outreach" element={<Hub title="Growth" tabs={GROWTH_TABS}><OutreachPage /></Hub>} />
+              <Route path="/leads" element={<Hub title="Growth" tabs={GROWTH_TABS}><LeadsPage /></Hub>} />
+              <Route path="/gmv" element={<Hub title="Performance" tabs={PERFORMANCE_TABS}><GmvPage /></Hub>} />
+              <Route path="/analytics" element={<Hub title="Performance" tabs={PERFORMANCE_TABS}><AnalyticsPage /></Hub>} />
+              <Route path="/accounts" element={<Hub title="Settings" tabs={SETTINGS_TABS}><Accounts /></Hub>} />
+              <Route path="/people" element={<Hub title="Settings" tabs={SETTINGS_TABS}><PeoplePage /></Hub>} />
+              <Route path="/checklist-template" element={<Hub title="Settings" tabs={SETTINGS_TABS}><ChecklistTemplatePage /></Hub>} />
+              <Route path="/connections" element={<Hub title="Settings" tabs={SETTINGS_TABS}><ConnectionsPage /></Hub>} />
+              <Route path="/playbook" element={<Hub title="Settings" tabs={SETTINGS_TABS}><PlaybookPage /></Hub>} />
+              <Route path="*" element={<Navigate to="/today" replace />} />
             </Routes>
           </main>
         </div>

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { StockData, StockProjection, StockProjectionRow } from '../../../sweep/types';
 import { api, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
+import { useAccountScope } from '../hubs';
 
 const LEVEL: Record<StockProjectionRow['level'], { label: string; cls: string }> = { out: { label: 'Out', cls: 'crit' }, crit: { label: 'Critical', cls: 'crit' }, warn: { label: 'Low', cls: 'warn' }, ok: { label: 'OK', cls: 'good' }, idle: { label: 'No sales', cls: 'muted' } };
 
@@ -45,6 +46,9 @@ export default function StockPage() {
     } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   };
   if (!data) return <p>{error ?? 'Loading…'}</p>;
+  const scope = useAccountScope();
+  const shops = data.shops.filter((sh) => scope === null || sh.account_id === scope);
+  const alerts = data.alerts.filter((a) => scope === null || shops.some((sh) => sh.shop_id === a.shop_id));
   const rows = proj ? proj.rows.filter((r) => !onlyNeeded || r.send_in > 0) : [];
   const badge = (l: StockProjectionRow['level']) => <span className={`badge ${LEVEL[l].cls}`}>{LEVEL[l].label}</span>;
 
@@ -77,7 +81,7 @@ export default function StockPage() {
         <div className="card" style={{ marginBottom: 14 }}>
           <h3 style={{ marginTop: 0 }}>Stock alerts</h3>
           <div className="grid-wrap"><table><thead><tr><th>Level</th><th>Shop</th><th>Product</th><th className="num">On hand</th><th className="num">Per day</th><th>Countdown</th></tr></thead><tbody>
-            {data.alerts.slice(0, 40).map((r) => (
+            {alerts.slice(0, 40).map((r) => (
               <tr key={`${r.shop_id}-${r.sku_id}`} className="clickable" onClick={() => setShop(r.shop_id)}>
                 <td>{badge(r.level)}</td>
                 <td><b>{r.shop_name}</b>{r.account_name ? <div className="sub">{r.account_name}</div> : null}</td>

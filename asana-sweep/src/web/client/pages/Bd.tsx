@@ -44,6 +44,7 @@ export default function BdPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [liBulk, setLiBulk] = useState<{ items: { prospect_id: number; shop_name: string; brand: string | null; contact_id: number; contact_name: string; contact_title: string | null; linkedin_url: string; status: string }[]; skipped: { prospect_id: number; shop_name: string; reason: string }[]; logged: number } | null>(null);
   const [bulk, setBulk] = useState({ style: 'short' as 'short' | 'intro', language: 'en', limit: 25, to_gmail: true, auto_send: false, include_drafted: false, instructions: '' });
@@ -522,24 +523,40 @@ export default function BdPage() {
       </table>
 
       <h2>Prospects</h2>
-      <div className="toolbar">
+      {(() => {
+        const active: { k: keyof typeof f; label: string }[] = [
+          f.market ? { k: 'market', label: MARKET_NAMES[f.market] ?? f.market } : null, f.status ? { k: 'status', label: STATUSES.find((s) => s.v === f.status)?.label ?? f.status } : null, f.rise ? { k: 'rise', label: f.rise } : null, f.launch ? { k: 'launch', label: f.launch.replace(/_/g, ' ') } : null, f.contact ? { k: 'contact', label: `${f.contact} contact` } : null, f.type ? { k: 'type', label: f.type.replace('_', ' ') } : null, f.category ? { k: 'category', label: f.category } : null, f.owner ? { k: 'owner', label: data.people.find((p) => String(p.id) === f.owner)?.name ?? 'owner' } : null, f.found ? { k: 'found', label: `found ${f.found}` } : null,
+        ].filter((x): x is { k: keyof typeof f; label: string } => x !== null);
+        const clear = (k: keyof typeof f) => setF({ ...f, [k]: '' });
+        return (
+      <div className="toolbar filters">
         <input type="text" placeholder="Search" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} />
-        <select value={f.market} onChange={(e) => setF({ ...f, market: e.target.value })}><option value="">All countries</option>{data.markets.map((m) => <option key={m} value={m}>{MARKET_NAMES[m] ?? m}</option>)}</select>
-        <select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}><option value="">All statuses</option>{STATUSES.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}</select>
-        <select value={f.rise} onChange={(e) => setF({ ...f, rise: e.target.value })}><option value="">All momentum</option><option value="surging">Surging</option><option value="rising">Rising</option><option value="steady">Steady</option></select>
-        <select value={f.launch} onChange={(e) => setF({ ...f, launch: e.target.value })}><option value="">Any age</option><option value="new_shop">Launched in last 30 days</option><option value="gmv_started">GMV started in last 30 days</option><option value="either">Either</option></select>
-        <select value={f.contact} onChange={(e) => setF({ ...f, contact: e.target.value })}><option value="">Any contacts</option><option value="email">With email contact</option><option value="linkedin">With LinkedIn contact</option><option value="any">With any contact</option><option value="none">No contacts yet</option></select>
-        <select value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}><option value="">Local + cross-border</option><option value="local">Local shops</option><option value="cross_border">Cross-border</option></select>
-        <select value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}><option value="">All categories</option>{data.categories.map((c) => <option key={c}>{c}</option>)}</select>
-        <select value={f.owner} onChange={(e) => setF({ ...f, owner: e.target.value })}><option value="">Any owner</option>{data.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-        <select value={f.sort} onChange={(e) => setF({ ...f, sort: e.target.value as typeof f.sort })}><option value="rise">Fastest rising</option><option value="gmv">Biggest 7d GMV</option><option value="updated">Recently updated</option><option value="launched">Newest shops</option><option value="found">Newest found</option><option value="name">Name</option></select>
-        <select value={f.found} onChange={(e) => setF({ ...f, found: e.target.value })} title="When the lead was first found by a pull or added by hand"><option value="">Found any time</option><option value="today">Found in last 24h</option><option value="week">Found in last 7 days</option><option value="month">Found in last 30 days</option></select>
-        <label className="field check"><input type="checkbox" checked={f.hideDone} onChange={(e) => setF({ ...f, hideDone: e.target.checked })} /> Hide complete / closed</label>
-        <label className="field check"><input type="checkbox" checked={f.hideClients} onChange={(e) => setF({ ...f, hideClients: e.target.checked })} /> Hide existing clients</label>
+        <button className={`small ${showFilters ? 'primary' : ''}`} onClick={() => setShowFilters(!showFilters)}>Filters{active.length ? ` · ${active.length}` : ''} ▾</button>
+        {active.map((a) => <span key={a.k} className="chip">{a.label}<button aria-label={`Clear ${a.label}`} onClick={() => clear(a.k)}>×</button></span>)}
+        {active.length > 0 && <a href="#" className="sub" onClick={(e) => { e.preventDefault(); setF({ ...f, market: '', status: '', category: '', owner: '', rise: '', type: '', launch: '', contact: '', found: '' }); }}>clear</a>}
+        <span className="sub">sorted {f.sort === 'rise' ? 'fastest rising' : f.sort}</span>
         {isAdmin && <button className="small" onClick={() => setSelected(selected.size === rows.length && rows.length ? new Set() : new Set(rows.map((p) => p.id)))}>{selected.size === rows.length && rows.length ? 'Untick all' : `Tick all ${rows.length} shown`}</button>}
         {isAdmin && <button className="small" onClick={() => setSelected(new Set(rows.filter((p) => p.contacts.some((c) => c.email) && !data.draft_state[p.id]).map((p) => p.id)))} title="Select the shown prospects that have an email contact and no draft or email yet">Tick ready to email</button>}
         <span className="sub">{rows.length} of {data.prospects.length}</span>
+        {showFilters && (
+          <div className="filters-pop" onMouseLeave={() => setShowFilters(false)}>
+            <select value={f.market} onChange={(e) => setF({ ...f, market: e.target.value })}><option value="">All countries</option>{data.markets.map((m) => <option key={m} value={m}>{MARKET_NAMES[m] ?? m}</option>)}</select>
+            <select value={f.status} onChange={(e) => setF({ ...f, status: e.target.value })}><option value="">All statuses</option>{STATUSES.map((s) => <option key={s.v} value={s.v}>{s.label}</option>)}</select>
+            <select value={f.rise} onChange={(e) => setF({ ...f, rise: e.target.value })}><option value="">All momentum</option><option value="surging">Surging</option><option value="rising">Rising</option><option value="steady">Steady</option></select>
+            <select value={f.launch} onChange={(e) => setF({ ...f, launch: e.target.value })}><option value="">Any age</option><option value="new_shop">Launched in last 30 days</option><option value="gmv_started">GMV started in last 30 days</option><option value="either">Either</option></select>
+            <select value={f.contact} onChange={(e) => setF({ ...f, contact: e.target.value })}><option value="">Any contacts</option><option value="email">With email contact</option><option value="linkedin">With LinkedIn contact</option><option value="any">With any contact</option><option value="none">No contacts yet</option></select>
+            <select value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}><option value="">Local + cross-border</option><option value="local">Local shops</option><option value="cross_border">Cross-border</option></select>
+            <select value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}><option value="">All categories</option>{data.categories.map((c) => <option key={c}>{c}</option>)}</select>
+            <select value={f.owner} onChange={(e) => setF({ ...f, owner: e.target.value })}><option value="">Any owner</option>{data.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
+            <select value={f.sort} onChange={(e) => setF({ ...f, sort: e.target.value as typeof f.sort })}><option value="rise">Fastest rising</option><option value="gmv">Biggest 7d GMV</option><option value="updated">Recently updated</option><option value="launched">Newest shops</option><option value="found">Newest found</option><option value="name">Name</option></select>
+            <select value={f.found} onChange={(e) => setF({ ...f, found: e.target.value })} title="When the lead was first found by a pull or added by hand"><option value="">Found any time</option><option value="today">Found in last 24h</option><option value="week">Found in last 7 days</option><option value="month">Found in last 30 days</option></select>
+            <label className="field check"><input type="checkbox" checked={f.hideDone} onChange={(e) => setF({ ...f, hideDone: e.target.checked })} /> Hide complete / closed</label>
+            <label className="field check"><input type="checkbox" checked={f.hideClients} onChange={(e) => setF({ ...f, hideClients: e.target.checked })} /> Hide existing clients</label>
+          </div>
+        )}
       </div>
+        );
+      })()}
 
       {rows.length === 0 ? <div className="empty">No prospects match.</div> : (
         <table>

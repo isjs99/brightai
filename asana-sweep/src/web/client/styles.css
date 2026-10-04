@@ -343,3 +343,23 @@ tr.dim td, .card.dim { opacity: .55; }
 .account-pick { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .account-pick select { min-width: 260px; font-weight: 600; }
 .badge-button { border: 0; background: transparent; padding: 0; cursor: pointer; }
+
+/* Hubs: the six pages. The embedded page keeps its actions; its own title and hint are hidden because the hub carries them. */
+.hub-head { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 10px; }
+.hub-head h1 { margin: 0; }
+.hub-tabs { margin-bottom: 14px; }
+.hub-tabs a.tab { text-decoration: none; }
+.hub-tabs a.tab.active { background: var(--primary); color: var(--primary-ink); border-color: var(--primary); }
+.account-scope { display: flex; align-items: center; gap: 10px; }
+.account-scope select { min-width: 260px; font-weight: 700; }
+.embedded > .page-head:first-child > div:first-child > h1, .embedded > .page-head:first-child > div:first-child > p.hint { display: none; }
+.embedded > .page-head:first-child > h1 { display: none; }
+.embedded > .page-head:first-child:has(> div:first-child > h1):not(:has(.actions)) { display: none; }
+.embedded .account-pick { display: none; }
+.embedded > .page-head:first-child { margin-bottom: 10px; }
+/* Filters popover (Growth › Pipeline): the full set behind one button, the active ones as chips. */
+.filters { position: relative; }
+.filters-pop { position: absolute; top: calc(100% + 6px); left: 0; z-index: 20; background: var(--surface); border: 1px solid var(--border-strong); border-radius: 12px; box-shadow: var(--shadow-card); padding: 12px; width: min(720px, 90vw); display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px 10px; }
+.filters-pop label.field { min-width: 0; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface-2); color: var(--ink); }
+.chip button { border: 0; background: transparent; color: var(--muted); cursor: pointer; padding: 0; font-size: 13px; line-height: 1; }

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import type { ClientReport, ReportsData } from '../../../sweep/types';
 import { api, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
+import { useAccountScope } from '../hubs';
 
 /** Tiny markdown renderer for the preview: headings, bullets, bold, tables, paragraphs. */
 export function renderMarkdown(md: string): ReactElement {
@@ -41,6 +42,8 @@ export default function ReportsPage() {
   const [preview, setPreview] = useState(true);
   const [gen, setGen] = useState({ account_id: '', period: 'weekly' as 'weekly' | 'monthly', end: '', instructions: '', notes: '' });
   const [bounds, setBounds] = useState<{ start: string; end: string } | null>(null);
+  const scope = useAccountScope();
+  useEffect(() => { if (scope !== null) setGen((g) => ({ ...g, account_id: String(scope) })); }, [scope]);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);

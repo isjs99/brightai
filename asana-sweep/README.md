@@ -202,6 +202,17 @@ One Google OAuth client serves everyone (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SEC
 
 "Send via Gmail" on a draft (or "Send all … via Gmail" above the list) queues it; the scheduler sends queued drafts one at a time through the Gmail API from the account of whoever queued them (their own when connected, else the shared one), inside the sending hours, on allowed days, under the daily cap, with a gap between sends. Defaults: 30 a day, 120 seconds apart, 08:30–18:00 account time zone, Monday to Friday; change them under Outreach emails › Settings › Auto-send pace, and Pause/Resume on the queue card. Queuing refuses a draft that still has a `[placeholder]`, has no valid address, or whose prospect was already emailed (Gmail ticked) or whose address was emailed or queued in the last 30 days; "Queue it anyway" overrides the last two. Every send is logged on the prospect exactly as "Mark as sent" (Gmail channel ticked, new prospects move to contacted, history line with the sending address and a link to the sent message). A failed send drops the draft back to Draft with the error shown and does not block the rest of the queue. Keep the pace human: a cold-outreach mailbox that jumps to hundreds a day burns the domain's reputation for everyone at brightform.agency. The drafts list has a **Segment** bar (country, momentum band, category, state, search): "Queue the N shown" adds that segment to the queue, "Reset queue to this segment" takes everything else out and queues only the drafts shown (for example only Surging shops, or only DE), "Take the N shown out of queue" and "Take all out of queue" drop drafts back to Draft without deleting them. From the BD pipeline, "Draft & send via Gmail" (ticked prospects) or "Send automatically from Gmail" in the bulk panel writes the emails and queues each one in a single step, so the whole run goes out on the drip without opening Gmail.
 
+## Navigation: six hubs
+
+The sidebar has six entries. Each hub is a title, a row of tabs and the page for that tab; every tab is still its own path, so old links and bookmarks keep working.
+
+- **Today** (`/today`): per person, what needs someone today: critical flags on their accounts, checklist lines left, inbox waiting (and over 24h), Lark messages and follow-ups due. "My accounts" matches the name picked top right against the account's AM and AA.
+- **Accounts** (`/monitor`, `/checklists`, `/calendar`, `/promotions`, `/gmv-max`, `/stock`, `/reports`, `/copilot`): pick the account once (`?account=`), and the Overview, Checklist, Calendar, Promotions, GMV Max, Stock, Reports and Ask tabs scope to it.
+- **Inbox** (`/inbox`, `/inquiries`): conversations and website enquiries.
+- **Growth** (`/bd`, `/outreach`, `/leads`): the pipeline (filters behind one button, active ones as chips), outreach emails with Lark and follow-ups, leads.
+- **Performance** (`/gmv`, `/analytics`).
+- **Settings** (`/accounts`, `/people`, `/checklist-template`, `/connections`, `/playbook`).
+
 ## Account monitor
 
 Account management › Account monitor is the first thing an AM opens. Every managed account is checked continuously (every 15 minutes by default, settable under Rules) against the TikTok Shop OpenAPI, against the targets set per account, and against what the dashboard already knows. Flags clear themselves when the condition goes away, critical ones go to Slack as incidents, and the Checklists page shows each open flag under the checklist section it belongs to.

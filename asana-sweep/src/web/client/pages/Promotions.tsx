@@ -3,6 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import type { Account, Promotion, PromotionInput, TargetStatus, TtsStatus } from '../../../sweep/types';
 import { api, fmtDate, fmtRelative } from '../api';
 import { useIsAdmin } from '../session';
+import { useAccountScope } from '../hubs';
 
 const EU = ['DE', 'FR', 'IT', 'ES', 'NL', 'BE', 'IE', 'AT', 'PL', 'UK'];
 
@@ -283,6 +284,8 @@ export default function PromotionsPage() {
   const [showConn, setShowConn] = useState(false);
   const [params] = useSearchParams();
   const isAdmin = useIsAdmin();
+  const scope = useAccountScope();
+  const visible = promotions === null ? null : promotions.filter((p) => scope === null || p.targets.some((t) => t.account_id === scope));
 
   const load = useCallback(() => {
     api.listPromotions().then((r) => { setPromotions(r.promotions); setTts(r.tts); }).catch((e) => setError((e as Error).message));
@@ -342,11 +345,11 @@ export default function PromotionsPage() {
       {showConn && tts && <ConnectionPanel tts={tts} accounts={accounts} onChange={setTts} />}
       {editing && tts && <PromotionForm initial={editing.data} accounts={accounts} tts={tts} onSave={save} onCancel={() => setEditing(null)} />}
 
-      {promotions === null ? <p>Loading…</p> : promotions.length === 0 ? <div className="empty">No promotions yet.</div> : (
+      {visible === null ? <p>Loading…</p> : visible.length === 0 ? <div className="empty">{scope === null ? 'No promotions yet.' : 'No promotions for this account yet.'}</div> : (
         <table>
           <thead><tr><th>Promotion</th><th>Type</th><th className="hide-sm">Runs</th><th>Shops</th><th>Status</th><th></th></tr></thead>
           <tbody>
-            {promotions.map((p) => (
+            {visible.map((p) => (
               <>
                 <tr key={p.id} className="clickable" onClick={() => setOpen(open === p.id ? null : p.id)}>
                   <td><b>{p.name}</b>{p.notes && <div className="sub">{p.notes}</div>}</td>

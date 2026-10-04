@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { AccountStatusRow, Check, CheckItem, CheckSettings, CheckWithItems, MonitorData, MonitorFlag } from '../../../sweep/types';
 import { api, currentActor, fmtDate, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
+import { useAccountScope } from '../hubs';
 
 function Frac({ done, total, complete }: { done: number; total: number; complete: boolean }) {
   if (total === 0) return <span className="frac sub">0/0</span>;
@@ -202,13 +203,14 @@ export default function Checklists() {
     try { await api.runChecks(); setDate(undefined); load(); } catch (e) { setError((e as Error).message); } finally { setRunning(false); }
   };
 
+  const scope = useAccountScope();
   const isToday = Boolean(data && data.date === data.today);
   const ams = useMemo(() => [...new Set((data?.rows ?? []).map((r) => r.account.am_name ?? 'Unassigned'))].sort(), [data]);
   const amFilter = ams.includes(filterAm) ? filterAm : ams.find((a) => filterAm && a.toLowerCase().startsWith(filterAm.toLowerCase().split(' ')[0])) ?? '';
   // Today shows the live picture (falls back to the recorded check); past days show the record.
   const rows = (data?.rows ?? [])
     .map((r) => ({ ...r, snapshot: r.check, check: isToday ? (r.live ?? r.check) : r.check }))
-    .filter((r) => r.account.enabled && (!amFilter || (r.account.am_name ?? 'Unassigned') === amFilter))
+    .filter((r) => r.account.enabled && (scope === null || r.account.id === scope) && (!amFilter || (r.account.am_name ?? 'Unassigned') === amFilter))
     // Stable order (AM, then account) so rows do not jump around while someone is ticking.
     .sort((a, b) => (a.account.am_name ?? 'zz').localeCompare(b.account.am_name ?? 'zz') || a.account.name.localeCompare(b.account.name));
   const counted = rows.filter((r) => r.check && r.check.status !== 'unlinked' && r.check.status !== 'empty');
