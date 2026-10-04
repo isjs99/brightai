@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { AccountCampaign, AccountKpi, AccountOverview, AccountSection, AccountSkuPrice, AccountTarget, HealthAssessment, HealthThresholds, Incident, IncidentsData, MonitorAccountRow, MonitorData, MonitorFlag, MonitorRule, TargetKey, TtsScope, TtsScopeStatus } from '../../../sweep/types';
 import { api, fmtRelative, useLiveUpdates } from '../api';
@@ -8,35 +8,59 @@ import { fmtValue, LineChart, PaceBar, StackedBars } from '../charts';
 const SOURCE_LABEL: Record<MonitorRule['source'], string> = { tts: 'TikTok API', targets: 'Targets', cruva: 'Cruva', checklist: 'Checklist', dashboard: 'Dashboard', windsor: 'Windsor', ai: 'AI review' };
 const SCOPE_LABEL: Record<TtsScope, string> = { analytics: 'Analytics and reporting', order: 'Order management', product: 'Product management', return_refund: 'Return and refund', affiliate_seller: 'Affiliate (seller)', customer_service: 'Customer service', finance: 'Finance', promotion: 'Promotion', seller: 'Seller information', none: 'Dashboard data' };
 const RISK: Record<HealthAssessment['risk'], { label: string; cls: string }> = { red: { label: 'Red', cls: 'crit' }, amber: { label: 'Amber', cls: 'warn' }, green: { label: 'Green', cls: 'good' } };
-const TARGET_FIELDS: { key: TargetKey; label: string; unit: string; help: string; bool?: boolean }[] = [
-  { key: 'samples_per_week', label: 'Samples a week', unit: 'samples', help: 'Target samples approved per week; flagged when behind pro rata' },
-  { key: 'gmv_target_month', label: 'GMV target', unit: 'per month', help: 'Monthly GMV target in the shop currency; month to date is checked pro rata' },
-  { key: 'gmv_max_weekly_spend', label: 'GMV Max spend ceiling', unit: 'per week', help: 'Flagged when this week\'s spend is over it' },
-  { key: 'gmv_max_min_roi', label: 'GMV Max minimum ROI', unit: 'x', help: 'GMV divided by spend for the week must stay above this' },
-  { key: 'gmv_max_spend_actual_week', label: 'GMV Max spend this week', unit: 'actual', help: 'Typed in weekly until the TikTok Ads API is connected' },
-  { key: 'gmv_max_gmv_actual_week', label: 'GMV Max GMV this week', unit: 'actual', help: 'Typed in weekly until the TikTok Ads API is connected' },
-  { key: 'promo_max_discount_pct', label: 'Promo max discount', unit: '%', help: 'A promotion over this is flagged' },
-  { key: 'campaign_full_participation', label: 'Full campaign participation', unit: 'yes/no', help: 'Yes: a campaign must be on file for the current period', bool: true },
-  { key: 'campaign_max_discount_pct', label: 'Campaign max discount', unit: '%', help: 'A platform campaign over this is flagged' },
+type TargetField = { key: TargetKey; label: string; unit: string; help: string; bool?: boolean };
+const TARGET_GROUPS: { title: string; fields: TargetField[] }[] = [
+  { title: 'Samples', fields: [
+    { key: 'samples_per_week', label: 'Samples a week', unit: 'samples', help: 'Target samples approved per week; flagged when behind pro rata (needs the Affiliate seller scope to measure)' },
+  ] },
+  { title: 'GMV and GMV Max', fields: [
+    { key: 'gmv_target_month', label: 'GMV target', unit: 'per month', help: 'Monthly GMV target in the shop currency; month to date is checked pro rata' },
+    { key: 'gmv_max_weekly_spend', label: 'Spend ceiling', unit: 'per week', help: 'Flagged when this week\'s GMV Max spend is over it' },
+    { key: 'gmv_max_min_roi', label: 'Minimum ROI', unit: 'x', help: 'GMV divided by spend for the week must stay above this' },
+    { key: 'gmv_max_spend_actual_week', label: 'Spend this week', unit: 'actual', help: 'Typed in weekly until the TikTok Ads API is connected' },
+    { key: 'gmv_max_gmv_actual_week', label: 'GMV this week', unit: 'actual', help: 'Typed in weekly until the TikTok Ads API is connected' },
+  ] },
+  { title: 'Promotions and campaigns', fields: [
+    { key: 'promo_max_discount_pct', label: 'Promo max discount', unit: '%', help: 'A promotion over this is flagged' },
+    { key: 'campaign_max_discount_pct', label: 'Campaign max discount', unit: '%', help: 'A platform campaign over this is flagged' },
+    { key: 'campaign_full_participation', label: 'Full campaign participation', unit: '', help: 'Yes: a campaign must be on file for the current period', bool: true },
+  ] },
 ];
+const TARGET_FIELDS: TargetField[] = TARGET_GROUPS.flatMap((g) => g.fields);
 const sev = (s: MonitorFlag['severity']) => <span className={`badge ${s === 'crit' ? 'crit' : s === 'warn' ? 'warn' : 'muted'}`}>{s === 'crit' ? 'Critical' : s === 'warn' ? 'Warning' : 'Info'}</span>;
 const targetOf = (targets: AccountTarget[], accountId: number, key: TargetKey, market = '') => targets.find((t) => t.account_id === accountId && t.key === key && t.market === market)?.value ?? null;
 const scopeBadge = (s: TtsScopeStatus | undefined, label: string) => <span className={`badge ${s?.state === 'ok' ? 'good' : s?.state === 'denied' ? 'crit' : s?.state === 'error' ? 'warn' : 'muted'}`} title={s?.message ?? (s?.state === 'ok' ? `Live on ${s.shops_ok} of ${s.shops_total} shop(s)` : 'Not pulled yet')}>{label}: {s?.state === 'ok' ? 'live' : s?.state === 'denied' ? 'needs approval' : s?.state === 'error' ? 'error' : s?.state === 'unavailable' ? 'not on this app' : 'not pulled'}</span>;
 
-/** Account management > Account monitor: every account against the TikTok Shop API and its targets, scanned continuously; the first thing an AM opens. */
+/** A dialog over the page for anything secondary, so the main view stays one account and its numbers. */
+function Modal({ title, onClose, wide, children }: { title: string; onClose: () => void; wide?: boolean; children: ReactNode }) {
+  useEffect(() => { const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); }; window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey); }, [onClose]);
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className={`modal ${wide ? 'wide' : ''}`} role="dialog" aria-label={title}>
+        <div className="modal-head"><h3>{title}</h3><button className="small" onClick={onClose}>Close</button></div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+type Dialog = 'targets' | 'skus' | 'campaigns' | 'all-targets' | 'coverage' | 'thresholds' | null;
+
+/** Account management > Account monitor: one connected account at a time against the TikTok Shop API and its targets, scanned continuously. */
 export default function MonitorPage() {
   const [params, setParams] = useSearchParams();
-  const tabs = ['accounts', 'flags', 'targets', 'rules', 'review', 'incidents'] as const;
+  const tabs = ['account', 'flags', 'review', 'incidents'] as const;
   type Tab = (typeof tabs)[number];
-  const tab: Tab = tabs.find((t) => t === params.get('tab')) ?? 'accounts';
-  const selected = params.get('account') ? Number(params.get('account')) : null;
-  const setTab = (t: Tab) => { const n = new URLSearchParams(params); if (t === 'accounts') n.delete('tab'); else n.set('tab', t); setParams(n); };
+  const tab: Tab = tabs.find((t) => t === params.get('tab')) ?? 'account';
+  const selectedParam = params.get('account') ? Number(params.get('account')) : null;
+  const setTab = (t: Tab) => { const n = new URLSearchParams(params); if (t === 'account') n.delete('tab'); else n.set('tab', t); setParams(n); };
   const select = (id: number | null) => { const n = new URLSearchParams(params); if (id === null) n.delete('account'); else n.set('account', String(id)); n.delete('tab'); setParams(n); };
   const [data, setData] = useState<MonitorData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [showThresholds, setShowThresholds] = useState(false);
+  const [dialog, setDialog] = useState<Dialog>(null);
+  const [menu, setMenu] = useState(false);
   const isAdmin = useIsAdmin();
   const load = useCallback(() => api.monitor().then(setData).catch((e) => setError((e as Error).message)), []);
   useEffect(() => { load(); }, [load]);
@@ -49,46 +73,72 @@ export default function MonitorPage() {
   if (!data) return <p>{error ?? 'Loading…'}</p>;
   const h = data.health;
   const live = data.scopes.filter((s) => s.state === 'ok').length;
+  const offered = data.scopes.filter((s) => s.state !== 'unavailable').length;
+  const rank = (a: MonitorAccountRow) => a.crit * 100 + a.warn * 10 + a.info + (a.risk === 'red' ? 50 : a.risk === 'amber' ? 20 : 0);
+  const connectedAccounts = data.accounts.filter((a) => a.shops > 0).sort((a, b) => rank(b) - rank(a) || a.name.localeCompare(b.name));
+  const unconnected = data.accounts.filter((a) => a.shops === 0);
+  const selected = selectedParam !== null && data.accounts.some((a) => a.id === selectedParam) ? selectedParam : connectedAccounts[0]?.id ?? null;
+  const pullLabel = h.pulling_tts ? 'Pulling TikTok…' : h.tts_last_pull_at ? `Pulled ${fmtRelative(h.tts_last_pull_at)}` : data.tts_configured ? (data.tts_shops ? 'No pull yet' : 'No shop authorised') : 'TikTok app not configured';
 
   return (
     <>
       <div className="page-head">
         <div>
           <h1>Account monitor</h1>
-          <p className="hint" style={{ margin: 0 }}>Every managed account checked continuously against the TikTok Shop API (GMV by channel, traffic, orders and ship-by deadlines, stock, returns, samples, CS, payouts), against the targets set per account (samples a week, GMV, GMV Max, pricing, campaigns) and against what the dashboard knows. Flags clear themselves when the condition goes away. The scan runs every {data.interval_minutes} minutes; operational data is pulled on every scan, analytics and finance hourly.</p>
+          <p className="hint" style={{ margin: 0 }}>Connected accounts checked every {data.interval_minutes} minutes against the TikTok Shop API and their targets. Pick an account; everything else opens in a dialog.</p>
         </div>
         <div className="actions">
           {connected && <span className="badge muted">Live</span>}
-          <span className={`badge ${h.tts_last_pull_error ? 'warn' : h.tts_last_pull_at ? 'good' : 'muted'}`} title={h.tts_last_pull_error ?? ''}>{h.pulling_tts ? 'Pulling TikTok…' : h.tts_last_pull_at ? `TikTok pull ${fmtRelative(h.tts_last_pull_at)}` : data.tts_configured ? (data.tts_shops ? 'No TikTok pull yet' : 'No shop authorised') : 'TikTok app not configured'}</span>
-          <span className={`badge ${live === data.scopes.length ? 'good' : live ? 'warn' : 'muted'}`} title="API scopes live on the app">{live}/{data.scopes.length} scopes live</span>
-          <span className={`badge ${data.last_scan_error ? 'crit' : data.last_scan_at ? 'good' : 'muted'}`} title={data.last_scan_error ?? ''}>{data.scanning ? 'Scanning…' : data.last_scan_at ? `Scanned ${fmtRelative(data.last_scan_at)}` : 'Not scanned yet'}</span>
-          {isAdmin && <button className="primary" disabled={busy !== null || data.scanning || h.pulling_tts} onClick={() => run('pull', () => api.monitorPull(), (r) => setNotice(`Pulled ${r.shops} shop(s) from TikTok and re-ran the rules${r.errors.length ? `; ${r.errors.slice(0, 2).join(' · ')}` : ''}.`))}>{busy === 'pull' ? 'Pulling…' : 'Pull TikTok now'}</button>}
-          {isAdmin && <button disabled={busy !== null || data.scanning} onClick={() => run('scan', api.monitorScan, (r) => setNotice(`Rules re-run: ${r.found} flag(s) found, ${r.opened} new, ${r.resolved} resolved.`))}>{busy === 'scan' ? 'Scanning…' : 'Re-run rules'}</button>}
-          {isAdmin && <button disabled={busy !== null || data.scanning || h.pulling} onClick={() => run('daily', api.healthDaily, (r) => setNotice(`Daily pass done: ${r.pulled} shop(s) pulled, ${r.reviewed} account(s) reviewed${r.errors.length ? `; ${r.errors.slice(0, 2).join(' · ')}` : ''}.`))} title="Full pull, scan and AI review">{busy === 'daily' ? 'Running…' : 'Daily pass'}</button>}
-          <button onClick={() => setShowThresholds(!showThresholds)}>{showThresholds ? 'Hide thresholds' : 'Thresholds'}</button>
+          <span className={`badge ${h.tts_last_pull_error ? 'warn' : h.tts_last_pull_at ? 'good' : 'muted'}`} title={h.tts_last_pull_error ?? ''}>{pullLabel}</span>
+          <button className="badge-button" onClick={() => setDialog('coverage')} title="Which TikTok API scopes are live"><span className={`badge ${live === offered ? 'good' : live ? 'warn' : 'muted'}`}>{live}/{offered} scopes live</span></button>
+          {isAdmin && <button className="primary" disabled={busy !== null || data.scanning || h.pulling_tts} onClick={() => run('pull', () => api.monitorPull(), (r) => setNotice(`Pulled ${r.shops} shop(s) and re-ran the rules${r.errors.length ? `; ${r.errors.slice(0, 2).join(' · ')}` : ''}.`))}>{busy === 'pull' ? 'Pulling…' : 'Pull now'}</button>}
+          <div className="menu">
+            <button onClick={() => setMenu(!menu)}>More ▾</button>
+            {menu && (
+              <div className="menu-list" onMouseLeave={() => setMenu(false)}>
+                {isAdmin && <button disabled={busy !== null || data.scanning} onClick={() => { setMenu(false); run('scan', api.monitorScan, (r) => setNotice(`Rules re-run: ${r.found} flag(s), ${r.opened} new, ${r.resolved} resolved.`)); }}>Re-run rules</button>}
+                {isAdmin && <button disabled={busy !== null || data.scanning || h.pulling} onClick={() => { setMenu(false); run('daily', api.healthDaily, (r) => setNotice(`Daily pass done: ${r.pulled} shop(s) pulled, ${r.reviewed} account(s) reviewed${r.errors.length ? `; ${r.errors.slice(0, 2).join(' · ')}` : ''}.`)); }}>Daily pass (pull, scan, AI review)</button>}
+                <button onClick={() => { setMenu(false); setDialog('all-targets'); }}>All targets</button>
+                <button onClick={() => { setMenu(false); setDialog('coverage'); }}>Rules &amp; API coverage</button>
+                <button onClick={() => { setMenu(false); setDialog('thresholds'); }}>Thresholds</button>
+                <Link to="/promotions" onClick={() => setMenu(false)} style={{ padding: '8px 10px', textDecoration: 'none' }}>Connect a shop ↗</Link>
+              </div>
+            )}
+          </div>
         </div>
       </div>
       {error && <div className="banner crit">{error}</div>}
       {notice && <div className="banner info">{notice}</div>}
       {data.last_scan_error && <div className="banner crit">Last scan failed: {data.last_scan_error}</div>}
-      {h.tts_last_pull_error && <div className="banner warn">Last TikTok pull: {h.tts_last_pull_error}</div>}
-      {showThresholds && <Thresholds isAdmin={isAdmin} initial={h.thresholds} onSaved={() => { load(); setNotice('Thresholds saved. The rules re-run on the next scan (or press Re-run rules).'); }} onError={setError} />}
 
       <div className="tabs">
-        <button className={`tab ${tab === 'accounts' ? 'active' : ''}`} onClick={() => setTab('accounts')}>Accounts <span className="sub">{data.accounts.filter((a) => a.crit).length} red</span></button>
-        <button className={`tab ${tab === 'flags' ? 'active' : ''}`} onClick={() => setTab('flags')}>All flags <span className="sub">{data.flags.length}</span></button>
-        <button className={`tab ${tab === 'targets' ? 'active' : ''}`} onClick={() => setTab('targets')}>Targets</button>
-        <button className={`tab ${tab === 'rules' ? 'active' : ''}`} onClick={() => setTab('rules')}>Rules & API coverage</button>
-        <button className={`tab ${tab === 'review' ? 'active' : ''}`} onClick={() => setTab('review')}>Daily review <span className="sub">{h.assessments.filter((a) => a.risk !== 'green').length}</span></button>
-        <button className={`tab ${tab === 'incidents' ? 'active' : ''}`} onClick={() => setTab('incidents')}>Instant alerts to Slack</button>
+        <button className={`tab ${tab === 'account' ? 'active' : ''}`} onClick={() => setTab('account')}>Account</button>
+        <button className={`tab ${tab === 'flags' ? 'active' : ''}`} onClick={() => setTab('flags')}>All flags <span className="sub">{data.flags.filter((f) => connectedAccounts.some((a) => a.id === f.account_id)).length}</span></button>
+        <button className={`tab ${tab === 'review' ? 'active' : ''}`} onClick={() => setTab('review')}>Daily review</button>
+        <button className={`tab ${tab === 'incidents' ? 'active' : ''}`} onClick={() => setTab('incidents')}>Slack alerts</button>
       </div>
 
-      {tab === 'accounts' && <Accounts data={data} selected={selected} onSelect={select} isAdmin={isAdmin} onError={setError} onNotice={setNotice} reload={load} />}
-      {tab === 'flags' && <Flags data={data} isAdmin={isAdmin} run={run} onSelect={select} />}
-      {tab === 'targets' && <Targets data={data} isAdmin={isAdmin} onError={setError} onNotice={setNotice} reload={load} onSelect={select} />}
-      {tab === 'rules' && <Rules data={data} isAdmin={isAdmin} run={run} />}
+      {tab === 'account' && (
+        <>
+          <div className="account-pick" style={{ marginBottom: 14 }}>
+            <select value={selected ?? ''} onChange={(e) => select(e.target.value ? Number(e.target.value) : null)}>
+              {connectedAccounts.length === 0 && <option value="">No account has a TikTok shop connected yet</option>}
+              {connectedAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}{a.markets ? ` · ${a.markets}` : ''}{a.crit ? ` · ${a.crit} critical` : a.warn ? ` · ${a.warn} warning${a.warn === 1 ? '' : 's'}` : ' · clean'}</option>)}
+            </select>
+            {connectedAccounts.length > 1 && <span className="actions">{connectedAccounts.slice(0, 8).map((a) => <button key={a.id} className={`small ${a.id === selected ? 'primary' : ''}`} onClick={() => select(a.id)} title={`${a.crit} critical · ${a.warn} warning · ${a.info} info`}>{a.name}{a.crit ? <span className="badge crit" style={{ marginLeft: 6 }}>{a.crit}</span> : a.warn ? <span className="badge warn" style={{ marginLeft: 6 }}>{a.warn}</span> : null}</button>)}</span>}
+            {unconnected.length > 0 && <span className="sub">{unconnected.length} account{unconnected.length === 1 ? ' has' : 's have'} no TikTok shop yet · <Link to="/promotions">connect</Link></span>}
+          </div>
+          {selected === null ? <div className="empty">Authorise a shop under <Link to="/promotions">Promotions › Connection</Link> and link it to its account; it then shows up here.</div>
+            : <AccountDetail key={selected} id={selected} data={data} isAdmin={isAdmin} onError={setError} onNotice={setNotice} reload={load} dialog={dialog} setDialog={setDialog} />}
+        </>
+      )}
+      {tab === 'flags' && <Flags data={{ ...data, accounts: connectedAccounts }} isAdmin={isAdmin} run={run} onSelect={select} />}
       {tab === 'incidents' && <Incidents isAdmin={isAdmin} onError={setError} onNotice={setNotice} />}
-      {tab === 'review' && <DailyReview data={data} isAdmin={isAdmin} busy={busy} onRun={(id) => run(`rev${id ?? 'all'}`, () => api.healthReview(id), (r) => setNotice(`${r.reviewed} account(s) reviewed${r.errors.length ? `; ${r.errors.slice(0, 2).join(' · ')}` : ''}.`))} />}
+      {tab === 'review' && <DailyReview data={{ ...data, accounts: connectedAccounts, health: { ...h, assessments: h.assessments.filter((a) => connectedAccounts.some((c) => c.id === a.account_id)) } }} isAdmin={isAdmin} busy={busy} onRun={(id) => run(`rev${id ?? 'all'}`, () => api.healthReview(id), (r) => setNotice(`${r.reviewed} account(s) reviewed${r.errors.length ? `; ${r.errors.slice(0, 2).join(' · ')}` : ''}.`))} />}
+
+      {dialog === 'all-targets' && <Modal title="Targets for every connected account" wide onClose={() => setDialog(null)}><Targets data={{ ...data, accounts: connectedAccounts }} isAdmin={isAdmin} onError={setError} onNotice={setNotice} reload={load} onSelect={(id) => { setDialog(null); select(id); }} /></Modal>}
+      {dialog === 'coverage' && <Modal title="Rules and API coverage" wide onClose={() => setDialog(null)}><Rules data={data} isAdmin={isAdmin} run={run} /></Modal>}
+      {dialog === 'thresholds' && <Modal title="Thresholds" wide onClose={() => setDialog(null)}><Thresholds isAdmin={isAdmin} initial={h.thresholds} onSaved={() => { load(); setNotice('Thresholds saved. The rules re-run on the next scan.'); }} onError={setError} /></Modal>}
     </>
   );
 }
@@ -107,86 +157,53 @@ const arrow = (value: number | null, previous: number | null, direction: 'higher
   if (value === null || previous === null || previous === 0) return null;
   const ch = ((value - previous) / previous) * 100;
   const good = direction === 'higher' ? ch >= 0 : ch <= 0;
-  return <span className={`sub ${Math.abs(ch) < 1 ? '' : good ? 'good-ink' : 'crit-ink'}`} style={{ color: Math.abs(ch) < 1 ? undefined : good ? 'var(--good-ink)' : 'var(--crit-ink)' }}>{ch > 0 ? '▲' : ch < 0 ? '▼' : '•'} {Math.abs(ch).toFixed(0)}%</span>;
+  return <span className="sub" style={{ color: Math.abs(ch) < 1 ? undefined : good ? 'var(--good-ink)' : 'var(--crit-ink)' }}>{ch > 0 ? '▲' : ch < 0 ? '▼' : '•'} {Math.abs(ch).toFixed(0)}%</span>;
 };
-
-function Accounts({ data, selected, onSelect, isAdmin, onError, onNotice, reload }: { data: MonitorData; selected: number | null; onSelect: (id: number | null) => void; isAdmin: boolean; onError: (e: string | null) => void; onNotice: (n: string | null) => void; reload: () => void }) {
-  const [sort, setSort] = useState<'risk' | 'name' | 'gmv'>('risk');
-  const rank = (a: MonitorAccountRow) => a.crit * 100 + a.warn * 10 + a.info + (a.risk === 'red' ? 50 : a.risk === 'amber' ? 20 : 0);
-  const rows = [...data.accounts].sort((a, b) => (sort === 'risk' ? rank(b) - rank(a) : sort === 'gmv' ? (b.gmv_7d ?? -1) - (a.gmv_7d ?? -1) : a.name.localeCompare(b.name)) || a.name.localeCompare(b.name));
-  const pace = (p: number | null) => (p === null ? <span className="sub">–</span> : <span className={`badge ${p >= 1 ? 'good' : p >= 1 - data.health.thresholds.target_behind_pct / 100 ? 'warn' : 'crit'}`}>{Math.round(p * 100)}%</span>);
-  return (
-    <>
-      <ScopeStrip scopes={data.scopes} />
-      <div className="stats" style={{ marginBottom: 14 }}>
-        <div className="stat"><span className="v">{data.accounts.filter((a) => a.crit).length}</span><span className="k">accounts with a critical flag</span></div>
-        <div className="stat"><span className="v">{data.accounts.filter((a) => !a.open).length}/{data.accounts.length}</span><span className="k">accounts clean</span></div>
-        <div className="stat"><span className="v">{data.accounts.filter((a) => a.shops).length}</span><span className="k">accounts with a TikTok shop connected</span></div>
-        <div className="stat"><span className="v">{data.accounts.filter((a) => a.gmv_pace !== null && a.gmv_pace < 1).length}</span><span className="k">behind GMV target</span></div>
-        <div className="stat"><span className="v">{data.accounts.filter((a) => a.samples_pace !== null && a.samples_pace < 1).length}</span><span className="k">behind samples target</span></div>
-      </div>
-      <div className="toolbar">
-        <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}><option value="risk">Most at risk first</option><option value="gmv">Highest GMV first</option><option value="name">By name</option></select>
-        <span className="sub">Click an account for its numbers against targets, charts and the checklist walk-through.</span>
-      </div>
-      <div className="grid-wrap"><table><thead><tr><th>Account</th><th>Risk</th><th>Flags</th><th>GMV 7d</th><th>vs target</th><th>Samples</th><th>GMV Max ROI</th><th>Shops</th><th>Last pull</th></tr></thead><tbody>
-        {rows.map((a) => (
-          <tr key={a.id} className={`clickable ${selected === a.id ? 'active' : ''}`} onClick={() => onSelect(selected === a.id ? null : a.id)} style={selected === a.id ? { outline: '2px solid var(--accent)' } : undefined}>
-            <td><b>{a.name}</b><div className="sub">{a.markets ?? ''}{a.am_name ? ` · ${a.am_name}` : ''}</div></td>
-            <td>{a.risk ? <span className={`badge ${RISK[a.risk].cls}`}>{RISK[a.risk].label}</span> : <span className="sub">–</span>}</td>
-            <td><span className="actions">{a.crit > 0 && <span className="badge crit">{a.crit}</span>}{a.warn > 0 && <span className="badge warn">{a.warn}</span>}{a.info > 0 && <span className="badge muted">{a.info}</span>}{!a.open && <span className="badge good">clean</span>}</span></td>
-            <td>{a.gmv_7d === null ? <span className="sub" title="Needs a TikTok shop authorised and the Analytics scope">no data</span> : <><b>{fmtValue(a.gmv_7d, 'money', a.currency)}</b> {arrow(a.gmv_7d, a.gmv_prev_7d, 'higher')}</>}</td>
-            <td>{pace(a.gmv_pace)}</td>
-            <td>{pace(a.samples_pace)}</td>
-            <td>{pace(a.roi_pace)}</td>
-            <td>{a.shops ? <span className="badge good">{a.shops}</span> : <span className="badge muted" title="Authorise the shop under Promotions › Connection and link it to this account">none</span>}</td>
-            <td className="sub">{a.last_pull_at ? fmtRelative(a.last_pull_at) : '–'}</td>
-          </tr>
-        ))}
-      </tbody></table></div>
-      {selected !== null && <AccountDetail key={selected} id={selected} data={data} isAdmin={isAdmin} onError={onError} onNotice={onNotice} reload={reload} onClose={() => onSelect(null)} />}
-    </>
-  );
-}
 
 function kpiValue(k: AccountKpi, currency: string): string {
   if (k.value === null) return '–';
   return fmtValue(k.value, k.unit, currency);
 }
 
-function AccountDetail({ id, data, isAdmin, onError, onNotice, reload, onClose }: { id: number; data: MonitorData; isAdmin: boolean; onError: (e: string | null) => void; onNotice: (n: string | null) => void; reload: () => void; onClose: () => void }) {
+type RunOverview = (key: string, fn: () => Promise<AccountOverview>, after?: (r: AccountOverview) => void) => Promise<void>;
+
+function AccountDetail({ id, data, isAdmin, onError, onNotice, reload, dialog, setDialog }: { id: number; data: MonitorData; isAdmin: boolean; onError: (e: string | null) => void; onNotice: (n: string | null) => void; reload: () => void; dialog: Dialog; setDialog: (d: Dialog) => void }) {
   const [o, setO] = useState<AccountOverview | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  const [showResolved, setShowResolved] = useState(false);
   const load = useCallback(() => api.monitorAccount(id).then(setO).catch((e) => onError((e as Error).message)), [id, onError]);
   useEffect(() => { load(); }, [load, data.last_scan_at]);
-  const run = async (key: string, fn: () => Promise<AccountOverview>, after?: (r: AccountOverview) => void) => {
+  const run: RunOverview = async (key, fn, after) => {
     setBusy(key); onError(null);
     try { const r = await fn(); setO(r); after?.(r); reload(); } catch (e) { onError((e as Error).message); } finally { setBusy(null); }
   };
-  if (!o) return <div className="card" style={{ marginTop: 14 }}><p className="sub">Loading {data.accounts.find((a) => a.id === id)?.name ?? 'account'}…</p></div>;
+  if (!o) return <p className="sub">Loading {data.accounts.find((a) => a.id === id)?.name ?? 'account'}…</p>;
   const cur = o.currency;
   const series28 = o.series.slice(-28);
   const series14 = o.series.slice(-14);
   const stateCls = (s: AccountSection['state']) => (s === 'crit' ? 'crit' : s === 'warn' ? 'warn' : s === 'good' ? 'good' : 'muted');
   const stateLabel = (s: AccountSection['state']) => (s === 'crit' ? 'Critical' : s === 'warn' ? 'Warning' : s === 'good' ? 'Clear' : s === 'nodata' ? 'No data' : 'Manual');
+  const needsReauth = o.shops.some((sh) => sh.pull_error && /no permission|scope|unauthori|403/i.test(sh.pull_error));
   return (
-    <div className="card" style={{ marginTop: 14 }}>
+    <>
       <div className="page-head" style={{ marginBottom: 10 }}>
         <div>
           <h2 style={{ margin: 0 }}>{o.account.name} <span className="sub" style={{ fontWeight: 400 }}>{o.account.markets ?? ''}{o.account.am_name ? ` · AM ${o.account.am_name}` : ''}{o.account.aa_name ? ` · AA ${o.account.aa_name}` : ''}</span></h2>
           <div className="actions" style={{ marginTop: 4 }}>
             {o.assessment && <span className={`badge ${RISK[o.assessment.risk].cls}`} title={o.assessment.summary}>{RISK[o.assessment.risk].label} · {o.assessment.assess_date}</span>}
-            {o.shops.length ? o.shops.map((sh) => <span key={sh.id} className={`badge ${!sh.token_ok ? 'crit' : sh.pull_error ? 'warn' : sh.last_pull_at ? 'good' : 'muted'}`} title={sh.pull_error ?? (sh.last_pull_at ? `Pulled ${fmtRelative(sh.last_pull_at)}` : 'Not pulled yet')}>{sh.name}{sh.market ? ` · ${sh.market}` : ''}{!sh.token_ok ? ' · re-authorise' : ''}</span>) : <span className="badge muted">No TikTok shop linked: authorise it under <Link to="/promotions">Promotions › Connection</Link></span>}
+            {o.shops.map((sh) => <span key={sh.id} className={`badge ${!sh.token_ok ? 'crit' : sh.pull_error ? 'warn' : sh.last_pull_at ? 'good' : 'muted'}`} title={sh.pull_error ?? (sh.last_pull_at ? `Pulled ${fmtRelative(sh.last_pull_at)}` : 'Not pulled yet')}>{sh.name}{sh.market ? ` · ${sh.market}` : ''}{!sh.token_ok ? ' · re-authorise' : sh.pull_error ? ' · pull issue' : ''}</span>)}
+            <span className="badge muted">{o.flags.filter((f) => f.severity === 'crit').length} critical · {o.flags.filter((f) => f.severity === 'warn').length} warning · {o.flags.filter((f) => f.severity === 'info').length} info</span>
           </div>
         </div>
         <div className="actions">
-          {isAdmin && o.shops.length > 0 && <button className="small" disabled={busy !== null} onClick={async () => { setBusy('pull'); try { const r = await api.monitorPull(o.shops.map((s) => s.id)); onNotice(`Pulled ${r.shops} shop(s)${r.errors.length ? `; ${r.errors.join(' · ')}` : ''}.`); reload(); await load(); } catch (e) { onError((e as Error).message); } finally { setBusy(null); } }}>{busy === 'pull' ? 'Pulling…' : 'Pull this account now'}</button>}
-          <Link className="button small" to={`/checklists`}>Checklist</Link>
-          <button className="small" onClick={onClose}>Close</button>
+          {isAdmin && <button className="small" disabled={busy !== null} onClick={async () => { setBusy('pull'); try { const r = await api.monitorPull(o.shops.map((s) => s.id)); onNotice(`Pulled ${r.shops} shop(s)${r.errors.length ? `; ${r.errors.join(' · ')}` : ''}.`); reload(); await load(); } catch (e) { onError((e as Error).message); } finally { setBusy(null); } }}>{busy === 'pull' ? 'Pulling…' : 'Pull this account'}</button>}
+          <button className="small" onClick={() => setDialog('targets')}>Targets{o.targets.length ? '' : ' (none set)'}</button>
+          <button className="small" onClick={() => setDialog('skus')}>SKU prices{o.sku_prices.length ? ` (${o.sku_prices.length})` : ''}</button>
+          <button className="small" onClick={() => setDialog('campaigns')}>Campaigns{o.campaigns.length ? ` (${o.campaigns.length})` : ''}</button>
+          <Link className="button small" to="/checklists">Checklist</Link>
         </div>
       </div>
+      {needsReauth && <div className="banner warn">A scope added in Partner Center is not in this shop's token yet. Remove and re-authorise the shop under <Link to="/promotions">Promotions › Connection</Link>, then pull again.</div>}
       {o.assessment && <div className={`banner ${o.assessment.risk === 'red' ? 'crit' : o.assessment.risk === 'amber' ? 'warn' : 'good'}`}><b>Daily review:</b> {o.assessment.summary} <b>Today:</b> {o.assessment.action}</div>}
 
       <div className="kpis">
@@ -209,10 +226,12 @@ function AccountDetail({ id, data, isAdmin, onError, onNotice, reload, onClose }
           <LineChart title="Orders per day" points={series28.map((d) => ({ date: d.date, value: d.orders }))} kind="count" />
           <LineChart title="Visitors per day" points={series28.map((d) => ({ date: d.date, value: d.visitors }))} kind="count" />
         </div>
-      ) : <div className="empty" style={{ marginBottom: 14 }}>{o.shops.length ? 'No analytics pulled yet for this account. Press "Pull this account now"; the charts need the Analytics and reporting scope, which is live.' : 'Charts appear once a TikTok shop is authorised and linked to this account.'}</div>}
+      ) : <div className="empty" style={{ marginBottom: 14 }}>No analytics pulled yet. Press "Pull this account".</div>}
 
-      <h3 style={{ margin: '0 0 8px' }}>Daily checklist, scanned</h3>
-      <p className="sub" style={{ marginTop: 0 }}>Every section of the AM daily checklist, what the scan checks for it, and what it found. "No data" names the API scope still to approve; "Manual" is what only Seller Center shows.</p>
+      <div className="page-head" style={{ marginBottom: 6 }}>
+        <h3 style={{ margin: 0 }}>Daily checklist, scanned</h3>
+        <span className="sub">"No data" names the scope still missing; "Manual" is what only Seller Center shows.</span>
+      </div>
       <div className="sections">
         {o.sections.map((s) => (
           <div key={s.section} className="section-row">
@@ -234,61 +253,60 @@ function AccountDetail({ id, data, isAdmin, onError, onNotice, reload, onClose }
         ))}
       </div>
 
-      <TargetsForm overview={o} isAdmin={isAdmin} busy={busy} run={run} />
-      <SkuPrices overview={o} isAdmin={isAdmin} busy={busy} run={run} onNotice={onNotice} />
-      <Campaigns overview={o} isAdmin={isAdmin} busy={busy} run={run} />
-
       {o.resolved_14d.length > 0 && (
-        <details style={{ marginTop: 14 }} open={showResolved} onToggle={(e) => setShowResolved((e.target as HTMLDetailsElement).open)}>
+        <details style={{ marginTop: 14 }}>
           <summary className="sub" style={{ cursor: 'pointer' }}>Resolved in the last 14 days ({o.resolved_14d.length})</summary>
           <ul className="flaglist" style={{ marginTop: 6 }}>{o.resolved_14d.map((f) => <li key={f.id}><span className="badge good">Resolved</span> <span>{f.message} <span className="sub">· {f.first_seen_at.slice(0, 10)} to {f.resolved_at?.slice(0, 10)}</span></span></li>)}</ul>
         </details>
       )}
-    </div>
+
+      {dialog === 'targets' && <Modal title={`Targets · ${o.account.name}`} onClose={() => setDialog(null)}><TargetsForm overview={o} isAdmin={isAdmin} busy={busy} run={run} /></Modal>}
+      {dialog === 'skus' && <Modal title={`SKU price list · ${o.account.name}`} wide onClose={() => setDialog(null)}><SkuPrices overview={o} isAdmin={isAdmin} busy={busy} run={run} onNotice={onNotice} /></Modal>}
+      {dialog === 'campaigns' && <Modal title={`Platform campaigns · ${o.account.name}`} wide onClose={() => setDialog(null)}><Campaigns overview={o} isAdmin={isAdmin} busy={busy} run={run} /></Modal>}
+    </>
   );
 }
 
-/** The per-account targets, per market where the account trades in several. */
-function TargetsForm({ overview: o, isAdmin, busy, run }: { overview: AccountOverview; isAdmin: boolean; busy: string | null; run: (key: string, fn: () => Promise<AccountOverview>, after?: (r: AccountOverview) => void) => Promise<void> }) {
+/** The per-account targets, grouped, per market where the account trades in several. */
+function TargetsForm({ overview: o, isAdmin, busy, run }: { overview: AccountOverview; isAdmin: boolean; busy: string | null; run: RunOverview }) {
   const markets = (o.account.markets ?? '').toUpperCase().split(/[\/,\s]+/).filter((m) => /^[A-Z]{2}$/.test(m));
   const [market, setMarket] = useState('');
   const [form, setForm] = useState<Record<string, string>>({});
   useEffect(() => { setForm(Object.fromEntries(TARGET_FIELDS.map((f) => [f.key, String(o.targets.find((t) => t.market === market && t.key === f.key)?.value ?? '')]))); }, [o.targets, market]);
   const save = () => run('targets', () => api.saveAccountTargets(o.account.id, TARGET_FIELDS.map((f) => ({ market, key: f.key, value: form[f.key] === '' || form[f.key] === undefined ? null : Number(form[f.key]) }))));
+  const field = (f: TargetField) => (
+    <label key={f.key} className="field" style={{ minWidth: 150 }} title={f.help}><span className="lbl">{f.label}</span>
+      {f.bool ? <select value={form[f.key] ?? ''} disabled={!isAdmin} onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}><option value="">–</option><option value="1">Yes</option><option value="0">No</option></select>
+        : <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="number" step="any" min={0} style={{ width: 110 }} value={form[f.key] ?? ''} disabled={!isAdmin} onChange={(e) => setForm({ ...form, [f.key]: e.target.value })} /><span className="sub">{f.unit}</span></span>}
+      <span className="help">{f.help}</span>
+    </label>
+  );
   return (
-    <div style={{ marginTop: 16 }}>
-      <div className="page-head" style={{ marginBottom: 6 }}>
-        <div><h3 style={{ margin: 0 }}>Targets</h3><p className="sub" style={{ margin: 0 }}>What the rules measure this account against. "All markets" applies everywhere; a market row overrides it for that country. Spend and GMV for GMV Max are typed in each week until the TikTok Ads API is connected.</p></div>
-        {markets.length > 1 && <select value={market} onChange={(e) => setMarket(e.target.value)}><option value="">All markets</option>{markets.map((m) => <option key={m} value={m}>{m}</option>)}</select>}
-      </div>
-      <div className="inline-form">
-        {TARGET_FIELDS.map((f) => (
-          <label key={f.key} className="field" style={{ minWidth: 150 }} title={f.help}><span className="lbl">{f.label}</span>
-            {f.bool ? <select value={form[f.key] ?? ''} disabled={!isAdmin} onChange={(e) => setForm({ ...form, [f.key]: e.target.value })}><option value="">–</option><option value="1">Yes</option><option value="0">No</option></select>
-              : <span style={{ display: 'flex', gap: 6, alignItems: 'center' }}><input type="number" step="any" min={0} style={{ width: 110 }} value={form[f.key] ?? ''} disabled={!isAdmin} onChange={(e) => setForm({ ...form, [f.key]: e.target.value })} /><span className="sub">{f.unit}</span></span>}
-          </label>
-        ))}
-        {isAdmin && <button className="primary" disabled={busy !== null} onClick={save}>{busy === 'targets' ? 'Saving…' : 'Save targets'}</button>}
-      </div>
-    </div>
+    <>
+      <p className="sub" style={{ marginTop: 0 }}>What the rules measure {o.account.name} against. A blank means no target and the rule stays quiet. Currency: {o.currency}.</p>
+      {markets.length > 1 && <label className="field" style={{ marginBottom: 10 }}><span className="lbl">Applies to</span><select value={market} onChange={(e) => setMarket(e.target.value)}><option value="">All markets</option>{markets.map((m) => <option key={m} value={m}>{m} only (overrides the all-markets value)</option>)}</select></label>}
+      {TARGET_GROUPS.map((g) => <div key={g.title} className="fieldset"><span className="lbl">{g.title}</span><div className="inline-form">{g.fields.map(field)}</div></div>)}
+      {isAdmin && <div className="actions"><button className="primary" disabled={busy !== null} onClick={save}>{busy === 'targets' ? 'Saving…' : 'Save targets'}</button><span className="sub">The rules re-run as soon as it saves.</span></div>}
+    </>
   );
 }
 
 /** The agreed price per SKU: list, floor and promo price, with what the shop currently charges from the product pull. */
-function SkuPrices({ overview: o, isAdmin, busy, run, onNotice }: { overview: AccountOverview; isAdmin: boolean; busy: string | null; run: (key: string, fn: () => Promise<AccountOverview>, after?: (r: AccountOverview) => void) => Promise<void>; onNotice: (n: string | null) => void }) {
+function SkuPrices({ overview: o, isAdmin, busy, run, onNotice }: { overview: AccountOverview; isAdmin: boolean; busy: string | null; run: RunOverview; onNotice: (n: string | null) => void }) {
   const [rows, setRows] = useState<Partial<AccountSkuPrice>[]>(o.sku_prices);
   const [showAll, setShowAll] = useState(false);
   useEffect(() => { setRows(o.sku_prices); }, [o.sku_prices]);
   const set = (i: number, k: keyof AccountSkuPrice, v: string) => setRows(rows.map((r, j) => (j === i ? { ...r, [k]: k === 'name' || k === 'market' || k === 'seller_sku' ? v : v === '' ? null : Number(v) } : r)));
   const list = showAll ? rows : rows.slice(0, 25);
+  const drift = (r: Partial<AccountSkuPrice>) => r.current_price !== null && r.current_price !== undefined && Boolean(r.list_price) && Math.abs(r.current_price - (r.list_price as number)) / (r.list_price as number) > 0.02;
   return (
-    <div style={{ marginTop: 16 }}>
+    <>
       <div className="page-head" style={{ marginBottom: 6 }}>
-        <div><h3 style={{ margin: 0 }}>SKU price list</h3><p className="sub" style={{ margin: 0 }}>Agreed list price, the floor no promotion may go under, and the promo price. "Shop now" is what TikTok currently shows (from the product pull, needs the Product management scope); a difference over 2% is flagged.</p></div>
+        <p className="sub" style={{ margin: 0 }}>List price, the floor no promotion may go under, the promo price, and what the shop charges now (from the product pull). A difference over 2% is flagged.</p>
         {isAdmin && <div className="actions">
           <button className="small" disabled={busy !== null} onClick={() => run('import', () => api.importSkuPrices(o.account.id), (r) => onNotice(`${(r as AccountOverview & { imported?: number }).imported ?? 0} SKU row(s) imported from the product pull.`))} title="Add every SKU from the last product pull with its current price as the list price">{busy === 'import' ? 'Importing…' : 'Import from shop'}</button>
           <button className="small" onClick={() => setRows([...rows, { account_id: o.account.id, market: '', name: '', currency: o.currency }])}>+ SKU</button>
-          <button className="primary small" disabled={busy !== null} onClick={() => run('sku', () => api.saveSkuPrices(o.account.id, rows))}>{busy === 'sku' ? 'Saving…' : 'Save prices'}</button>
+          <button className="primary small" disabled={busy !== null} onClick={() => run('sku', () => api.saveSkuPrices(o.account.id, rows))}>{busy === 'sku' ? 'Saving…' : 'Save'}</button>
         </div>}
       </div>
       {rows.length === 0 ? <div className="empty">No SKUs on file. Import from the shop, or add them by hand.</div> : (
@@ -300,39 +318,41 @@ function SkuPrices({ overview: o, isAdmin, busy, run, onNotice }: { overview: Ac
               <td><input type="number" step="0.01" value={r.list_price ?? ''} disabled={!isAdmin} style={{ width: 90 }} onChange={(e) => set(i, 'list_price', e.target.value)} /></td>
               <td><input type="number" step="0.01" value={r.floor_price ?? ''} disabled={!isAdmin} style={{ width: 90 }} onChange={(e) => set(i, 'floor_price', e.target.value)} /></td>
               <td><input type="number" step="0.01" value={r.promo_price ?? ''} disabled={!isAdmin} style={{ width: 90 }} onChange={(e) => set(i, 'promo_price', e.target.value)} /></td>
-              <td className={r.current_price !== null && r.current_price !== undefined && r.list_price ? (Math.abs(r.current_price - r.list_price) / r.list_price > 0.02 ? 'crit-ink' : '') : ''}>{r.current_price === null || r.current_price === undefined ? <span className="sub">–</span> : <span style={r.list_price && Math.abs(r.current_price - r.list_price) / r.list_price > 0.02 ? { color: 'var(--crit-ink)', fontWeight: 700 } : undefined}>{r.current_price.toFixed(2)} {r.currency}</span>}</td>
+              <td>{r.current_price === null || r.current_price === undefined ? <span className="sub">–</span> : <span style={drift(r) ? { color: 'var(--crit-ink)', fontWeight: 700 } : undefined}>{r.current_price.toFixed(2)} {r.currency}</span>}</td>
               <td>{isAdmin && r.id && <button className="small danger" disabled={busy !== null} onClick={() => run('skudel', () => api.deleteSkuPrice(r.id!))}>×</button>}</td>
             </tr>
           ))}
         </tbody></table></div>
       )}
       {rows.length > 25 && <button className="small" style={{ marginTop: 6 }} onClick={() => setShowAll(!showAll)}>{showAll ? 'Show fewer' : `Show all ${rows.length}`}</button>}
-    </div>
+    </>
   );
 }
 
 /** Platform campaigns the account takes part in (typed in; no API for enrolment). */
-function Campaigns({ overview: o, isAdmin, busy, run }: { overview: AccountOverview; isAdmin: boolean; busy: string | null; run: (key: string, fn: () => Promise<AccountOverview>, after?: (r: AccountOverview) => void) => Promise<void> }) {
+function Campaigns({ overview: o, isAdmin, busy, run }: { overview: AccountOverview; isAdmin: boolean; busy: string | null; run: RunOverview }) {
   const blank = (): Partial<AccountCampaign> => ({ market: '', name: '', begin_at: new Date().toISOString().slice(0, 10), end_at: new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10), participation: 'full', discount_pct: null, sku_scope: '', notes: '' });
   const [edit, setEdit] = useState<Partial<AccountCampaign> | null>(null);
   const today = new Date().toISOString().slice(0, 10);
   return (
-    <div style={{ marginTop: 16 }}>
+    <>
       <div className="page-head" style={{ marginBottom: 6 }}>
-        <div><h3 style={{ margin: 0 }}>Platform campaigns</h3><p className="sub" style={{ margin: 0 }}>Campaign registrations per market with the discount and whether participation is full. Checked against the maximum discount and against our own promotions for clashes. TikTok has no API for this, so it is typed in.</p></div>
+        <p className="sub" style={{ margin: 0 }}>Campaign registrations per market with the discount and whether participation is full. Checked against the maximum discount and against our own promotions for clashes.</p>
         {isAdmin && !edit && <button className="small" onClick={() => setEdit(blank())}>+ Campaign</button>}
       </div>
       {edit && (
-        <div className="inline-form" style={{ marginBottom: 8 }}>
-          <label className="field" style={{ minWidth: 200 }}><span className="lbl">Name</span><input type="text" value={edit.name ?? ''} onChange={(e) => setEdit({ ...edit, name: e.target.value })} placeholder="e.g. Black Friday DE" /></label>
-          <label className="field" style={{ minWidth: 80 }}><span className="lbl">Market</span><input type="text" value={edit.market ?? ''} placeholder="all" style={{ width: 70 }} onChange={(e) => setEdit({ ...edit, market: e.target.value.toUpperCase() })} /></label>
-          <label className="field"><span className="lbl">From</span><input type="date" value={edit.begin_at ?? ''} onChange={(e) => setEdit({ ...edit, begin_at: e.target.value })} /></label>
-          <label className="field"><span className="lbl">To</span><input type="date" value={edit.end_at ?? ''} onChange={(e) => setEdit({ ...edit, end_at: e.target.value })} /></label>
-          <label className="field"><span className="lbl">Participation</span><select value={edit.participation ?? 'full'} onChange={(e) => setEdit({ ...edit, participation: e.target.value as AccountCampaign['participation'] })}><option value="full">Full</option><option value="partial">Partial</option><option value="none">None</option></select></label>
-          <label className="field"><span className="lbl">Discount %</span><input type="number" step="any" min={0} style={{ width: 80 }} value={edit.discount_pct ?? ''} onChange={(e) => setEdit({ ...edit, discount_pct: e.target.value === '' ? null : Number(e.target.value) })} /></label>
-          <label className="field" style={{ minWidth: 180 }}><span className="lbl">SKUs / notes</span><input type="text" value={edit.sku_scope ?? ''} onChange={(e) => setEdit({ ...edit, sku_scope: e.target.value })} placeholder="all, or which SKUs" /></label>
-          <button className="primary" disabled={busy !== null || !edit.name} onClick={() => run('camp', () => api.saveCampaign(o.account.id, edit), () => setEdit(null))}>{busy === 'camp' ? 'Saving…' : 'Save'}</button>
-          <button onClick={() => setEdit(null)}>Cancel</button>
+        <div className="fieldset">
+          <div className="inline-form">
+            <label className="field" style={{ minWidth: 200 }}><span className="lbl">Name</span><input type="text" value={edit.name ?? ''} onChange={(e) => setEdit({ ...edit, name: e.target.value })} placeholder="e.g. Black Friday DE" /></label>
+            <label className="field" style={{ minWidth: 80 }}><span className="lbl">Market</span><input type="text" value={edit.market ?? ''} placeholder="all" style={{ width: 70 }} onChange={(e) => setEdit({ ...edit, market: e.target.value.toUpperCase() })} /></label>
+            <label className="field"><span className="lbl">From</span><input type="date" value={edit.begin_at ?? ''} onChange={(e) => setEdit({ ...edit, begin_at: e.target.value })} /></label>
+            <label className="field"><span className="lbl">To</span><input type="date" value={edit.end_at ?? ''} onChange={(e) => setEdit({ ...edit, end_at: e.target.value })} /></label>
+            <label className="field"><span className="lbl">Participation</span><select value={edit.participation ?? 'full'} onChange={(e) => setEdit({ ...edit, participation: e.target.value as AccountCampaign['participation'] })}><option value="full">Full</option><option value="partial">Partial</option><option value="none">None</option></select></label>
+            <label className="field"><span className="lbl">Discount %</span><input type="number" step="any" min={0} style={{ width: 80 }} value={edit.discount_pct ?? ''} onChange={(e) => setEdit({ ...edit, discount_pct: e.target.value === '' ? null : Number(e.target.value) })} /></label>
+            <label className="field" style={{ minWidth: 180 }}><span className="lbl">SKUs / notes</span><input type="text" value={edit.sku_scope ?? ''} onChange={(e) => setEdit({ ...edit, sku_scope: e.target.value })} placeholder="all, or which SKUs" /></label>
+            <button className="primary" disabled={busy !== null || !edit.name} onClick={() => run('camp', () => api.saveCampaign(o.account.id, edit), () => setEdit(null))}>{busy === 'camp' ? 'Saving…' : 'Save'}</button>
+            <button onClick={() => setEdit(null)}>Cancel</button>
+          </div>
         </div>
       )}
       {o.campaigns.length === 0 ? <div className="empty">No campaigns on file.</div> : (
@@ -345,11 +365,11 @@ function Campaigns({ overview: o, isAdmin, busy, run }: { overview: AccountOverv
           ))}
         </tbody></table></div>
       )}
-    </div>
+    </>
   );
 }
 
-/** Every account's targets in one grid, so the whole book can be set up in a sitting. */
+/** Every connected account's targets in one grid, so the whole book can be set up in a sitting. */
 function Targets({ data, isAdmin, onError, onNotice, reload, onSelect }: { data: MonitorData; isAdmin: boolean; onError: (e: string | null) => void; onNotice: (n: string | null) => void; reload: () => void; onSelect: (id: number) => void }) {
   const [busy, setBusy] = useState<number | null>(null);
   const save = async (accountId: number, key: TargetKey, raw: string) => {
@@ -360,9 +380,10 @@ function Targets({ data, isAdmin, onError, onNotice, reload, onSelect }: { data:
     try { await api.saveAccountTargets(accountId, [{ market: '', key, value }]); reload(); onNotice('Target saved; the rules re-ran.'); } catch (e) { onError((e as Error).message); } finally { setBusy(null); }
   };
   const fields = TARGET_FIELDS.filter((f) => !['gmv_max_spend_actual_week', 'gmv_max_gmv_actual_week'].includes(f.key));
+  if (!data.accounts.length) return <div className="empty">No connected accounts yet.</div>;
   return (
     <>
-      <p className="hint">The settings every account is measured against, for all its markets. Open an account on the Accounts tab to set a market-specific target, type in this week's GMV Max spend and GMV, keep its SKU price list or log platform campaigns. A blank cell means no target, and the rule stays quiet.</p>
+      <p className="sub" style={{ marginTop: 0 }}>All-markets values. Open an account for market-specific targets, this week's GMV Max actuals, its SKU price list and campaigns. Blank means no target.</p>
       <div className="grid-wrap"><table><thead><tr><th>Account</th>{fields.map((f) => <th key={f.key} title={f.help}>{f.label}<div className="sub" style={{ fontWeight: 400 }}>{f.unit}</div></th>)}<th>Pace</th></tr></thead><tbody>
         {data.accounts.map((a) => (
           <tr key={a.id} className={busy === a.id ? 'dim' : ''}>
