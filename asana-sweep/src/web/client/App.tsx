@@ -175,6 +175,7 @@ export default function App() {
                 </NavLink>
               ))}
             </div>
+            {status && <div className="build-stamp" title={`Server started ${status.started_at}`}>build {status.build}</div>}
           </aside>
           <main className="page">
             <Routes>

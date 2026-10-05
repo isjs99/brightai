@@ -511,3 +511,5 @@ table.cruva td.shop { min-width: 170px; }
 .know.warn { border-left-color: var(--warn-ink, #c58a00); }
 .know.missing { border-left-color: var(--crit-ink, #c0392b); }
 .policy-foot { margin-top: 12px; border-top: 1px solid var(--border-2); padding-top: 8px; }
+
+.build-stamp { margin-top: 18px; padding: 8px 10px; border-top: 1px solid rgba(255,255,255,.08); font-size: 11px; color: #8b8f9b; font-variant-numeric: tabular-nums; }

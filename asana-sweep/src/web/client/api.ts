@@ -204,6 +204,8 @@ export interface ConnectionRow { key: string; name: string; role: string; config
 export interface Status {
   public_url: string;
   retention_days: number;
+  build: string;
+  started_at: string;
 }
 
 export const api = {

@@ -10,8 +10,10 @@ RUN npm run build && npm prune --omit=dev
 
 # ---- runtime stage ----
 FROM node:22-bookworm-slim
+# Stamped by `fly deploy --build-arg GIT_SHA=$(git rev-parse --short HEAD)` so the UI can show what is live.
+ARG GIT_SHA=unknown
 WORKDIR /app
-ENV NODE_ENV=production
+ENV NODE_ENV=production GIT_SHA=$GIT_SHA
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./

@@ -67,7 +67,7 @@ The app is one Node process plus a SQLite file, so any host that runs a Docker c
    ```
 4. Deploy, then confirm it answers:
    ```bash
-   fly deploy
+   fly deploy --build-arg GIT_SHA=$(git rev-parse --short HEAD)
    fly status
    ```
 5. Copy the database from the laptop. Stop the local app first (Ctrl+C in its tab) so the file is consistent, then:
@@ -84,7 +84,7 @@ The app is one Node process plus a SQLite file, so any host that runs a Docker c
    ```
    A minute later https://ops.brightform.agency serves from Fly. The Cloudflare tunnel on the laptop can then be removed with `sudo ~/Downloads/cloudflared service uninstall`.
 
-Day to day: `fly logs` shows the server log, `fly ssh console` opens a shell, and a new version is `git pull && fly deploy` from any machine with the CLI (the database stays on the volume across deploys). Railway works too with the included `railway.json` (Root Directory `asana-sweep`, a volume at `/data`, variables from `.env`), but it has no simple way to upload the existing database. A plain VPS works with `docker compose up -d` behind Caddy for https.
+Day to day: `fly logs` shows the server log, `fly ssh console` opens a shell, and a new version is `git pull && fly deploy --build-arg GIT_SHA=$(git rev-parse --short HEAD)` from any machine with the CLI (the database stays on the volume across deploys). Railway works too with the included `railway.json` (Root Directory `asana-sweep`, a volume at `/data`, variables from `.env`), but it has no simple way to upload the existing database. A plain VPS works with `docker compose up -d` behind Caddy for https.
 
 Use a long password. `PUBLIC_URL` must be the https address so the login cookie is marked secure. Failed logins are rate limited (10 tries, then 15 minutes). If you later want per-person logins, the auth layer in `src/web/auth.ts` is designed to be swapped.
 

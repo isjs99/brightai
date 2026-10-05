@@ -77,6 +77,8 @@ const optText = (v: unknown): string | null => {
   return t || null;
 };
 
+const STARTED_AT = new Date().toISOString();
+
 export function parseAccountInput(body: Record<string, unknown>): AccountInput {
   const name = String(body.name ?? '').trim();
   if (!name) throw new HttpError(400, 'Account name is required.');
@@ -277,7 +279,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   if (auth instanceof SharedPasswordAuth) r.use(requireAdminForWrites(auth));
 
   r.get('/status', (_req, res) => {
-    res.json({ public_url: config.publicUrl, retention_days: config.runRetentionDays });
+    res.json({ public_url: config.publicUrl, retention_days: config.runRetentionDays, build: process.env.GIT_SHA?.trim() || 'dev', started_at: STARTED_AT });
   });
 
   r.get('/meta', (_req, res) => {
