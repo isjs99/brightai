@@ -41,11 +41,12 @@ export const ACCOUNT_TABS: HubTab[] = [
   { to: '/gmv-max', label: 'GMV Max' },
   { to: '/stock', label: 'Stock' },
   { to: '/cruva', label: 'Cruva', aliases: ['/playbook'] },
+  { to: '/creators', label: 'Creators' },
+  { to: '/customer-service', label: 'Customer service' },
   { to: '/reports', label: 'Reports' },
   { to: '/copilot', label: 'Ask' },
 ];
 export const INBOX_TABS: HubTab[] = [
-  { to: '/inbox', label: 'Conversations' },
   { to: '/inquiries', label: 'Website enquiries' },
 ];
 export const GROWTH_TABS: HubTab[] = [

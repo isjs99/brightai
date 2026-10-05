@@ -208,9 +208,9 @@ One Google OAuth client serves everyone (`GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SEC
 
 The sidebar has six entries. Each hub is a title, a row of tabs and the page for that tab; every tab is still its own path, so old links and bookmarks keep working.
 
-- **Today** (`/today`): per person, what needs someone today: critical flags on their accounts, checklist lines left, inbox waiting (and over 24h), Lark messages and follow-ups due. "My accounts" matches the name picked top right against the account's AM and AA.
-- **Accounts** (`/monitor`, `/checklists`, `/calendar`, `/promotions`, `/gmv-max`, `/stock`, `/cruva`, `/reports`, `/copilot`): pick the account once (`?account=`), and the Overview, Checklist, Calendar, Promotions, GMV Max, Stock, Cruva, Reports and Ask tabs scope to it.
-- **Inbox** (`/inbox`, `/inquiries`): conversations and website enquiries.
+- **Today** (`/today`): per person, what needs someone today: critical flags on their accounts, checklist lines left, creators and buyers waiting on a person (and over 24h), Lark messages and follow-ups due. "My accounts" matches the name picked top right against the account's AM and AA.
+- **Accounts** (`/monitor`, `/checklists`, `/calendar`, `/promotions`, `/gmv-max`, `/stock`, `/cruva`, `/creators`, `/customer-service`, `/reports`, `/copilot`): pick the account once (`?account=`), and the Overview, Checklist, Calendar, Promotions, GMV Max, Stock, Cruva, Creators, Customer service, Reports and Ask tabs scope to it.
+- **Enquiries** (`/inquiries`): website enquiries only. `/inbox` redirects to Accounts › Creators.
 - **Growth** (`/bd`, `/outreach`, `/leads`): the pipeline (filters behind one button, active ones as chips), outreach emails with Lark and follow-ups, leads.
 - **Performance** (`/gmv`, `/analytics`).
 - **Settings** (`/accounts`, `/people`, `/checklist-template`, `/connections`, `/playbook`).
@@ -296,14 +296,17 @@ The portal is an MCP client of Cruva (mcp.cruva.com) with the account's API key 
 
 Account management > Client copilot answers client questions from evidence instead of memory. Sources are indexed into one store per account: tl;dv call notes and transcripts (last 180 days, matched by client domain), emails with the client domain (Gmail read scope), the client Slack channel (last 30 days), the SOP / context library, reports, incidents, the CS and affiliate inbox, and the account numbers (GMV by week, stock countdown, promotions). Type a question or let it arrive: the client Slack channels are polled every 5 minutes and any message that reads as a question becomes an item, as do emails from client domains; the AM gets a Slack DM with the draft. The draft cites its sources with [n] marks and lists the passages underneath; edit it, then "Reply in Slack thread" or "Create Gmail draft" sends it (marks stripped). Accounts need a client Slack channel and client domain (Accounts page).
 
-## CS & affiliate inbox
+## Replies per account (Accounts › Creators and Customer service)
 
-Account management > CS & affiliate inbox reads buyer chats (customer service) and creator DMs (affiliates) from every authorised TikTok shop and lets the team reply from one place.
+Creator DMs and buyer chats are answered per account, not from a shared inbox. Both tabs work the same way; pick the account and you get its policy, the threads that need a person, the log of what went out, and what the replies know.
 
-- **Reading**: polled every couple of minutes through the Shop OpenAPI (customer_service 202309, affiliate_seller 202412/202505); changes show up live.
-- **Context**: each reply is drafted from the context library (editable per language, per channel, per account), live promotions for that shop and market, the products in them, earlier threads with the same buyer or creator, and Cruva outreach notes for creators (`POST /api/inbox/cruva-outreach/import` with `{ rows: [{ creator_handle, summary, occurred_at }] }`).
-- **Drafting and sending** use the Anthropic API (`ANTHROPIC_API_KEY`, model `REPLY_MODEL`, default claude-sonnet-5). Draft with Claude, edit, Send. TikTok only lets a shop message buyers with a recent order or conversation; those threads are read-only.
-- **Auto-reply** has one master switch at the top of the page and, per account, a switch for customer service and one for affiliate DMs. A reply only goes out automatically when the master switch and the account switch are on, the last message is from the other side and is text, it is newer than the age limit (48h by default), nothing was auto-sent for that message already, and at least 10 minutes passed since the last auto reply in that thread. Every auto reply is recorded with the message it answered.
+- **Reading**: every authorised shop is polled every couple of minutes (creator DMs through the affiliate app, buyer chats through the customer_service scope once TikTok approves it). Changes show live.
+- **One pass per message**: a cheap prefilter drops what never needs an answer in any market language (thanks, "ok", greetings, emoji-only, product and order cards), then one model call classifies the message (intent, whether a human must take over, confidence) and writes the reply in the sender's language (English, German, French, Italian, Spanish, Dutch, Polish, Portuguese, Swedish; the shop's market decides when the text is too short to tell).
+- **Context**: the context library (per language, channel and account; open it from "What the replies know"), live promotions for the shop and market, products with price and stock from the TikTok pull, earlier threads with the same person. Creators also get the account's commission, the creator brief link learned from Cruva, and through the Cruva REST API (`CRUVA_API_KEY`, one key for every shop, `x-shop-id` per request) the creator's CRM profile, their sample requests, the automations that already messaged them and the live community campaigns. Buyers get their orders matched by TikTok user id, by an order number they typed or by the recipient name, plus returns on those orders. Gaps (no Cruva shop linked, no pull yet) are listed in the prompt so the model asks instead of guessing.
+- **Policy** per account and channel: Off, Draft (every message gets a draft for the team) or Automatic. Automatic has a daily cap (slider, or Unlimited) counted per shop day in the shop's time zone, quiet hours, an age limit, "only reply automatically when" filters (creators with a sample request, who posted or sold for us, skip do-not-contact tags; buyers with a matched order, no open return) and "always a human for" intents. Money, retainers, damaged goods, health claims and legal threats are always escalated; low confidence and "TikTok does not allow messaging this buyer" too. Customer service can additionally restrict automatic sends to a list of intents. The master switch under Settings › Connections still gates every automatic send; with it off, Automatic behaves like Draft.
+- **Review**: "Needs a human" lists escalated, capped, quiet-hour and filtered threads with the drafted reply, Send draft, Edit & send (thread view with context, Draft for me, Pause automatic) and No reply needed. "Everything the replies did" is the full log with the facts each reply leant on as chips; Looks right / Mark wrong · teach marks the event and, with a note, adds a library entry for that account and language so the next reply knows. "Try a message" drafts from the account's real context on a sample thread that is never sent (how customer service is tried before the scope is live).
+- **Bookkeeping**: every decision (auto_sent, drafted, escalated, skipped, capped, quiet, error) is stored once per message, so a re-sync never answers twice. Today shows who is waiting across accounts; a Monday 08:50 Slack digest (incidents default channel) sums up the week per account.
+- **Model**: Anthropic API (`ANTHROPIC_API_KEY`, `REPLY_MODEL`, default claude-sonnet-5). Cruva outreach notes can still be imported with `POST /api/inbox/cruva-outreach/import`.
 
 ## Slack notifications
 
@@ -348,7 +351,7 @@ Auth is a single shared password behind a signed cookie, in `src/web/auth.ts` be
 | `SESSION_SECRET` | Optional cookie signing secret, derived from the password if blank |
 | `SLACK_BOT_TOKEN` | Optional Slack bot token: DM reminders, instant incident alerts, client reports and copilot replies (chat:write, channels:history, conversations.list) |
 | `WINDSOR_API_KEY` | Optional Windsor.ai API key: TikTok Shop shops, orders and payouts through Windsor's connector |
-| `CRUVA_API_KEY` | Cruva API key (Dashboard › API): the best-practice rollout talks to mcp.cruva.com with it; the optional REST GMV sync uses the same key |
+| `CRUVA_API_KEY` | Cruva API key (Dashboard › API): the best-practice rollout talks to mcp.cruva.com with it, replies read creator context from api.cruva.com with it (`CRUVA_BASE_URL` to override), and the optional REST GMV sync uses the same key |
 | `CRUVA_MCP_URL` | Optional override of the Cruva MCP base URL (default `https://mcp.cruva.com`) |
 | `CRUVA_BASE_URL`, `CRUVA_STATS_PATH` | Optional overrides for the Cruva stats endpoint |
 | `CRUVA_ENDPOINTS` | Optional JSON of Cruva CRM paths for the playbook (`{"automation": "/v1/automations", ...}`) |
@@ -362,4 +365,4 @@ Auth is a single shared password behind a signed cookie, in `src/web/auth.ts` be
 | `BD_PULLS_DIR` | Optional folder watched for daily FastMoss pull files (default `data/bd-pulls`) |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Optional Google OAuth client so BD email drafts land in Gmail's Drafts folder and sent outreach can be pulled as voice samples |
 | `TLDV_API_KEY` | Optional tl;dv key so every recorded call gets a follow-up email drafted |
-| `ANTHROPIC_API_KEY`, `REPLY_MODEL` | Anthropic API key and model for drafting and auto-replies |
+| `ANTHROPIC_API_KEY`, `REPLY_MODEL` | Anthropic API key and model for classifying, drafting and sending replies |

@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { AccountStatusRow, InboxData, MonitorData, OutreachData, PlaybookData } from '../../../sweep/types';
+import type { AccountStatusRow, InboxConversation, MonitorData, OutreachData, PlaybookData } from '../../../sweep/types';
 import { api, fmtRelative, useActor, useLiveUpdates } from '../api';
 
 /** The landing page: what needs a person today across the accounts you look after. Built from the monitor, the checklist, the inbox and outreach, nothing new to maintain. */
 export default function TodayPage() {
   const [monitor, setMonitor] = useState<MonitorData | null>(null);
   const [rows, setRows] = useState<AccountStatusRow[] | null>(null);
-  const [inbox, setInbox] = useState<InboxData | null>(null);
+  const [inbox, setInbox] = useState<{ waiting: (InboxConversation & { reason: string | null })[] } | null>(null);
   const [outreach, setOutreach] = useState<OutreachData | null>(null);
   const [cruva, setCruva] = useState<PlaybookData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -17,7 +17,7 @@ export default function TodayPage() {
   const load = useCallback(() => {
     api.monitor().then(setMonitor).catch((e) => setError((e as Error).message));
     api.listAccounts().then((r) => setRows(r.accounts)).catch(() => setRows([]));
-    api.inbox().then(setInbox).catch(() => setInbox(null));
+    api.repliesSummary().then((r) => setInbox({ waiting: r.waiting })).catch(() => setInbox(null));
     api.outreach().then(setOutreach).catch(() => setOutreach(null));
     api.playbook().then(setCruva).catch(() => setCruva(null));
   }, []);
@@ -35,7 +35,7 @@ export default function TodayPage() {
   const checks = accounts.map((r) => ({ r, c: r.live ?? r.check })).filter((x) => x.c && x.c.status !== 'unlinked' && x.c.status !== 'empty');
   const open = checks.filter((x) => !x.c!.combined_complete);
   const linesLeft = open.reduce((n, x) => n + (x.c!.am_total - x.c!.am_done) + (x.c!.aa_total - x.c!.aa_done), 0);
-  const waiting = (inbox?.conversations ?? []).filter((c) => c.needs_reply && (c.account_id === null || ids.has(c.account_id)));
+  const waiting = (inbox?.waiting ?? []).filter((c) => c.account_id === null || ids.has(c.account_id));
   const over24 = waiting.filter((c) => c.last_message_at && now - Date.parse(c.last_message_at) > 24 * 3600000);
   const followups = (outreach?.followups ?? []).filter((f) => !f.done_at && Date.parse(f.due_at) <= now + 12 * 3600000 && (!mine || !actor || (f.created_by ?? '').toLowerCase().startsWith(actor.toLowerCase())));
   const lark = (outreach?.lark_messages ?? []).filter((m) => m.status === 'scheduled' && m.scheduled_for !== null && m.scheduled_for <= today && (!mine || !actor || (m.created_by ?? '').toLowerCase().startsWith(actor.toLowerCase())));
@@ -61,7 +61,7 @@ export default function TodayPage() {
       <div className="kpis" style={{ gridTemplateColumns: 'repeat(4, minmax(0, 1fr))' }}>
         <Link to="/monitor" className="kpi" style={{ textDecoration: 'none' }}><span className="k">Critical flags</span><span className="v">{crit.length}</span><span className="t">{[...new Set(crit.map((f) => f.account_name))].slice(0, 3).join(' · ') || 'nothing critical'}</span></Link>
         <Link to="/checklists" className="kpi" style={{ textDecoration: 'none' }}><span className="k">Checklist lines left</span><span className="v">{linesLeft}</span><span className="t">{open.length} account{open.length === 1 ? '' : 's'} open · {checks.length - open.length} done</span></Link>
-        <Link to="/inbox" className="kpi" style={{ textDecoration: 'none' }}><span className="k">Inbox waiting</span><span className="v">{waiting.length}</span><span className="t">{over24.length} over 24h</span></Link>
+        <Link to="/creators" className="kpi" style={{ textDecoration: 'none' }}><span className="k">Replies waiting for a human</span><span className="v">{waiting.length}</span><span className="t">{over24.length} over 24h</span></Link>
         <Link to="/outreach?tab=followups" className="kpi" style={{ textDecoration: 'none' }}><span className="k">Outreach due</span><span className="v">{followups.length + lark.length}</span><span className="t">{lark.length} Lark · {followups.length} follow-up{followups.length === 1 ? '' : 's'}</span></Link>
       </div>
 
@@ -84,16 +84,17 @@ export default function TodayPage() {
           </ul>
         </div>
         <div className="card" style={{ gridColumn: 'span 2' }}>
-          <div className="page-head" style={{ marginBottom: 6 }}><h3 style={{ margin: 0 }}><span className="badge muted">Inbox</span> Waiting on a reply</h3><Link to="/inbox" className="sub">Open inbox ▸</Link></div>
+          <div className="page-head" style={{ marginBottom: 6 }}><h3 style={{ margin: 0 }}><span className="badge muted">Replies</span> Creators and buyers waiting on a person</h3><Link to="/creators" className="sub">Open creators ▸</Link></div>
           {waiting.length === 0 ? <p className="sub">Nobody is waiting.</p> : (
-            <div className="grid-wrap"><table><thead><tr><th>Waiting</th><th>Channel</th><th>Account</th><th>Who</th><th></th></tr></thead><tbody>
+            <div className="grid-wrap"><table><thead><tr><th>Waiting</th><th>Channel</th><th>Account</th><th>Who</th><th>Why</th><th></th></tr></thead><tbody>
               {waiting.sort((a, b) => (a.last_message_at ?? '').localeCompare(b.last_message_at ?? '')).slice(0, 8).map((c) => (
                 <tr key={c.id}>
                   <td>{c.last_message_at ? <span className={`badge ${now - Date.parse(c.last_message_at) > 24 * 3600000 ? 'crit' : 'muted'}`}>{fmtRelative(c.last_message_at)}</span> : <span className="sub">–</span>}</td>
-                  <td className="sub">{c.channel === 'cs' ? 'CS' : 'Affiliate'}</td>
+                  <td className="sub">{c.channel === 'cs' ? 'Buyer' : 'Creator'}</td>
                   <td><b>{c.account_name ?? nameOf(c.account_id) ?? '–'}</b></td>
                   <td className="sub">{c.counterpart_name ?? c.counterpart_id ?? ''}</td>
-                  <td><Link to="/inbox">Reply ▸</Link></td>
+                  <td className="sub">{c.reason ?? 'new message'}</td>
+                  <td><Link to={`${c.channel === 'cs' ? '/customer-service' : '/creators'}${c.account_id ? `?account=${c.account_id}` : ''}`}>Reply ▸</Link></td>
                 </tr>
               ))}
             </tbody></table></div>

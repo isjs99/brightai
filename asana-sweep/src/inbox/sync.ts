@@ -5,9 +5,8 @@ import { tts, TtsClient, ttsAffiliate } from '../tts/client.js';
 import { appCredentials, shopCredentials } from '../tts/promotions.js';
 import { config } from '../config.js';
 import type { InboxConversation, InboxMessage, InboxSettings } from '../sweep/types.js';
-import { buildContext, renderPrompt } from './context.js';
-import { draftWithClaude } from './llm.js';
 import { guessLanguage } from './language.js';
+import { processConversations } from './replies.js';
 
 let syncing = false;
 
@@ -151,7 +150,8 @@ export async function syncInbox(q: Queries, client: TtsClient = tts): Promise<{ 
       const c = q.getConversation(id);
       if (c && !c.language) q.setConversationLanguage(id, guessLanguage(c.last_message_text, c.market));
     }
-    result.auto_replies = await autoReplyPass(q, client, [...new Set(changedIds)]);
+    const decisions = await processConversations(q, [...new Set(changedIds)], { client });
+    result.auto_replies = decisions.auto_sent;
     q.setSetting('inbox_last_sync_at', new Date().toISOString());
     q.setSetting('inbox_last_sync_error', errors.length ? errors.slice(0, 3).join(' | ') : '');
     if (errors.length && result.conversations === 0) {
@@ -169,46 +169,6 @@ export async function syncInbox(q: Queries, client: TtsClient = tts): Promise<{ 
   } finally {
     syncing = false;
   }
-}
-
-/** Why a conversation would not be auto-replied to right now, or null when it is eligible. */
-export function autoReplyBlocker(c: InboxConversation, settings: { auto_reply_master: boolean; max_age_hours: number; llm_configured: boolean }, alreadyReplied: boolean, lastAutoAt: string | null, now = Date.now()): string | null {
-  if (!settings.auto_reply_master) return 'master switch off';
-  if (!settings.llm_configured) return 'ANTHROPIC_API_KEY not set';
-  if (!c.auto_reply_on) return `auto-reply off for ${c.account_name ?? c.shop_name} (${c.channel})`;
-  if (c.status === 'closed') return 'conversation closed';
-  if (c.last_sender !== 'them') return 'last message is ours';
-  if (!c.can_send) return 'TikTok does not allow the shop to message this buyer right now';
-  if (!c.last_message_text) return 'last message has no text';
-  if (!c.last_message_at || now - Date.parse(c.last_message_at) > settings.max_age_hours * 3600000) return `older than ${settings.max_age_hours}h`;
-  if (alreadyReplied) return 'already auto-replied to this message';
-  if (lastAutoAt && now - Date.parse(lastAutoAt) < 10 * 60000) return 'auto-replied less than 10 minutes ago';
-  return null;
-}
-
-async function autoReplyPass(q: Queries, client: TtsClient, ids: number[]): Promise<number> {
-  const settings = inboxSettings(q);
-  if (!settings.auto_reply_master || !ids.length) return 0;
-  let sent = 0;
-  for (const id of ids) {
-    const c = q.getConversation(id);
-    if (!c) continue;
-    const blocker = autoReplyBlocker(c, settings, c.last_message_id ? q.autoRepliedTo(id, c.last_message_id) : false, q.lastAutoReplyAt(id));
-    if (blocker) continue;
-    try {
-      const messages = q.listMessages(id);
-      const ctx = buildContext(q, c, messages);
-      const { system, user } = renderPrompt(c, messages, ctx);
-      const text = await draftWithClaude(system, user);
-      const reply = q.addReply({ conversation_ref: id, text, mode: 'auto', created_by: 'auto-reply', in_reply_to: c.last_message_id });
-      await sendReply(q, c, reply.id, text, client);
-      sent += 1;
-    } catch (err) {
-      log.error(`Auto-reply failed for ${c.shop_name} ${c.channel} ${c.conversation_id}: ${(err as Error).message}`);
-    }
-  }
-  if (sent) log.info(`Auto-reply sent ${sent} message(s)`);
-  return sent;
 }
 
 /** Send a stored reply through TikTok and record the outcome. */

@@ -45,6 +45,10 @@ import type {
   PlaybookRollout,
   PlaybookDraft,
   PlaybookDraftStatus,
+  ReplyPolicy,
+  ReplyEvent,
+  ReplyDecision,
+  InboxChannel,
   CopilotQuestion,
   CopilotSource,
   InboxConversation,
@@ -2239,6 +2243,77 @@ export class Queries {
     if (patch.name !== undefined) { sets.push('name = @name'); params.name = patch.name; }
     if (sets.length) this.db.prepare(`UPDATE cruva_drafts SET ${sets.join(', ')}, updated_at = @updated_at WHERE id = @id`).run(params);
     return this.getRolloutDraft(id);
+  }
+
+  // ---- Reply policies and events ----
+
+  getReplyPolicy(accountId: number, channel: InboxChannel): ReplyPolicy | null {
+    const r = this.db.prepare('SELECT * FROM reply_policies WHERE account_id = ? AND channel = ?').get(accountId, channel) as Row | undefined;
+    if (!r) return null;
+    return { account_id: accountId, channel, mode: r.mode as ReplyPolicy['mode'], daily_cap: r.daily_cap === null || r.daily_cap === undefined ? null : Number(r.daily_cap), only: parseJson<string[]>(r.only_json, []), never: parseJson<string[]>(r.never_json, []), auto_intents: parseJson<string[]>(r.auto_intents_json, []), quiet_from: (r.quiet_from as string | null) ?? null, quiet_to: (r.quiet_to as string | null) ?? null, max_age_hours: Number(r.max_age_hours ?? 48), updated_at: (r.updated_at as string | null) ?? null };
+  }
+
+  listReplyPolicies(): ReplyPolicy[] {
+    return (this.db.prepare('SELECT account_id, channel FROM reply_policies').all() as { account_id: number; channel: InboxChannel }[]).map((r) => this.getReplyPolicy(r.account_id, r.channel)!).filter(Boolean);
+  }
+
+  saveReplyPolicy(p: ReplyPolicy): ReplyPolicy {
+    this.db.prepare(`INSERT INTO reply_policies (account_id, channel, mode, daily_cap, only_json, never_json, auto_intents_json, quiet_from, quiet_to, max_age_hours, updated_at) VALUES (@account_id, @channel, @mode, @daily_cap, @only_json, @never_json, @auto_intents_json, @quiet_from, @quiet_to, @max_age_hours, @updated_at)
+      ON CONFLICT(account_id, channel) DO UPDATE SET mode = excluded.mode, daily_cap = excluded.daily_cap, only_json = excluded.only_json, never_json = excluded.never_json, auto_intents_json = excluded.auto_intents_json, quiet_from = excluded.quiet_from, quiet_to = excluded.quiet_to, max_age_hours = excluded.max_age_hours, updated_at = excluded.updated_at`)
+      .run({ account_id: p.account_id, channel: p.channel, mode: p.mode, daily_cap: p.daily_cap, only_json: JSON.stringify(p.only), never_json: JSON.stringify(p.never), auto_intents_json: JSON.stringify(p.auto_intents), quiet_from: p.quiet_from, quiet_to: p.quiet_to, max_age_hours: p.max_age_hours, updated_at: new Date().toISOString() });
+    return this.getReplyPolicy(p.account_id, p.channel)!;
+  }
+
+  private rowToReplyEvent(r: Row): ReplyEvent {
+    return { id: r.id as number, conversation_ref: r.conversation_ref as number, account_id: (r.account_id as number | null) ?? null, channel: r.channel as InboxChannel, message_id: (r.message_id as string | null) ?? null, needs_reply: Boolean(r.needs_reply), intent: (r.intent as string | null) ?? null, escalation: (r.escalation as string | null) ?? null, confidence: r.confidence === null || r.confidence === undefined ? null : Number(r.confidence), language: (r.language as string | null) ?? null, context: parseJson<ReplyEvent['context']>(r.context_json, { chips: [], their_text: null, reply_text: null, counterpart: null }), decision: r.decision as ReplyDecision, reply_id: (r.reply_id as number | null) ?? null, model: (r.model as string | null) ?? null, feedback: (r.feedback as ReplyEvent['feedback']) ?? null, feedback_note: (r.feedback_note as string | null) ?? null, created_at: r.created_at as string };
+  }
+
+  addReplyEvent(e: Omit<ReplyEvent, 'id' | 'created_at' | 'feedback' | 'feedback_note'>): ReplyEvent {
+    const id = Number(this.db.prepare(`INSERT INTO reply_events (conversation_ref, account_id, channel, message_id, needs_reply, intent, escalation, confidence, language, context_json, decision, reply_id, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(e.conversation_ref, e.account_id, e.channel, e.message_id, e.needs_reply ? 1 : 0, e.intent, e.escalation, e.confidence, e.language, JSON.stringify(e.context), e.decision, e.reply_id, e.model, new Date().toISOString()).lastInsertRowid);
+    return this.getReplyEvent(id)!;
+  }
+
+  getReplyEvent(id: number): ReplyEvent | null {
+    const r = this.db.prepare('SELECT * FROM reply_events WHERE id = ?').get(id) as Row | undefined;
+    return r ? this.rowToReplyEvent(r) : null;
+  }
+
+  listReplyEvents(opts: { accountId?: number; channel?: InboxChannel; conversationRef?: number; since?: string; limit?: number } = {}): ReplyEvent[] {
+    const where: string[] = []; const params: unknown[] = [];
+    if (opts.accountId !== undefined) { where.push('account_id = ?'); params.push(opts.accountId); }
+    if (opts.channel) { where.push('channel = ?'); params.push(opts.channel); }
+    if (opts.conversationRef !== undefined) { where.push('conversation_ref = ?'); params.push(opts.conversationRef); }
+    if (opts.since) { where.push('created_at >= ?'); params.push(opts.since); }
+    params.push(opts.limit ?? 300);
+    return (this.db.prepare(`SELECT * FROM reply_events ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC, id DESC LIMIT ?`).all(...params) as Row[]).map((r) => this.rowToReplyEvent(r));
+  }
+
+  /** Has this exact message already been decided on (so a re-sync never answers twice)? */
+  replyEventFor(conversationRef: number, messageId: string): ReplyEvent | null {
+    const r = this.db.prepare('SELECT * FROM reply_events WHERE conversation_ref = ? AND message_id = ? ORDER BY id DESC LIMIT 1').get(conversationRef, messageId) as Row | undefined;
+    return r ? this.rowToReplyEvent(r) : null;
+  }
+
+  countReplyEvents(accountId: number, channel: InboxChannel, decision: ReplyDecision, since: string): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM reply_events WHERE account_id = ? AND channel = ? AND decision = ? AND created_at >= ?').get(accountId, channel, decision, since) as { n: number }).n;
+  }
+
+  setReplyFeedback(id: number, feedback: 'right' | 'wrong' | null, note: string | null): ReplyEvent | null {
+    this.db.prepare('UPDATE reply_events SET feedback = ?, feedback_note = ? WHERE id = ?').run(feedback, note, id);
+    return this.getReplyEvent(id);
+  }
+
+  /** Replies sent from the dashboard today (manual + auto), per account and channel. */
+  countRepliesSentSince(accountId: number, channel: InboxChannel, since: string): { auto: number; manual: number } {
+    const rows = this.db.prepare(`SELECT r.mode AS mode, COUNT(*) AS n FROM inbox_replies r JOIN inbox_conversations c ON c.id = r.conversation_ref JOIN tts_shops s ON s.id = c.tts_shop_id WHERE s.account_id = ? AND c.channel = ? AND r.sent_at >= ? GROUP BY r.mode`).all(accountId, channel, since) as { mode: string; n: number }[];
+    return { auto: rows.find((r) => r.mode === 'auto')?.n ?? 0, manual: rows.filter((r) => r.mode !== 'auto').reduce((n, r) => n + r.n, 0) };
+  }
+
+  /** The newest unsent draft on a conversation, if any. */
+  pendingDraft(conversationRef: number): InboxReply | null {
+    const r = this.db.prepare(`SELECT * FROM inbox_replies WHERE conversation_ref = ? AND sent_at IS NULL AND error_message IS NULL AND mode = 'draft' ORDER BY id DESC LIMIT 1`).get(conversationRef) as Row | undefined;
+    return r ? this.rowToReply(r) : null;
   }
 
   // ---- Client question copilot ----

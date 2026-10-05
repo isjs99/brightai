@@ -128,7 +128,7 @@ export function parseDay(iv: Record<string, unknown>): TtsDay | null {
 export function parseOrder(o: Record<string, unknown>): TtsOrderLite {
   const pay = (o.payment ?? {}) as Record<string, unknown>;
   return {
-    id: String(o.id ?? ''), status: String(o.status ?? '').toUpperCase(), create_time: sec(o.create_time) ?? 0, paid_time: sec(o.paid_time),
+    id: String(o.id ?? ''), user_id: str(o.user_id), recipient_name: str((o.recipient_address as { name?: unknown } | undefined)?.name), status: String(o.status ?? '').toUpperCase(), create_time: sec(o.create_time) ?? 0, paid_time: sec(o.paid_time),
     rts_sla_time: sec(o.rts_sla_time), rts_time: sec(o.rts_time), tts_sla_time: sec(o.tts_sla_time), collection_time: sec(o.collection_time),
     delivery_sla_time: sec(o.delivery_sla_time), delivery_due_time: sec(o.delivery_due_time), delivery_time: sec(o.delivery_time),
     cancel_order_sla_time: sec(o.cancel_order_sla_time), cancel_time: sec(o.cancel_time), cancellation_initiator: str(o.cancellation_initiator),

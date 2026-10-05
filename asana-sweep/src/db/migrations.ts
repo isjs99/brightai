@@ -1401,6 +1401,49 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 36,
+    name: 'reply policies and reply events (creator and customer service replies per account)',
+    up(db) {
+      db.exec(`
+        CREATE TABLE reply_policies (
+          account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          channel TEXT NOT NULL,
+          mode TEXT NOT NULL DEFAULT 'off',
+          daily_cap INTEGER,
+          only_json TEXT NOT NULL DEFAULT '[]',
+          never_json TEXT NOT NULL DEFAULT '[]',
+          auto_intents_json TEXT NOT NULL DEFAULT '[]',
+          quiet_from TEXT,
+          quiet_to TEXT,
+          max_age_hours INTEGER NOT NULL DEFAULT 48,
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (account_id, channel)
+        );
+        CREATE TABLE reply_events (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          conversation_ref INTEGER NOT NULL REFERENCES inbox_conversations(id) ON DELETE CASCADE,
+          account_id INTEGER,
+          channel TEXT NOT NULL,
+          message_id TEXT,
+          needs_reply INTEGER NOT NULL DEFAULT 1,
+          intent TEXT,
+          escalation TEXT,
+          confidence REAL,
+          language TEXT,
+          context_json TEXT NOT NULL DEFAULT '{}',
+          decision TEXT NOT NULL,
+          reply_id INTEGER,
+          model TEXT,
+          feedback TEXT,
+          feedback_note TEXT,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX reply_events_conv ON reply_events(conversation_ref);
+        CREATE INDEX reply_events_account ON reply_events(account_id, channel, created_at);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

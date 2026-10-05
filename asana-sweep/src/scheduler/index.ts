@@ -9,6 +9,8 @@ import { refreshLive, runAllChecks } from '../checklist/checker.js';
 import { syncGmv } from '../gmv/sync.js';
 import { LeadsWatcher } from '../leads/sync.js';
 import { InboxWatcher } from '../inbox/sync.js';
+import { weeklyDigest } from '../inbox/replies.js';
+import { incidentSettings } from '../incidents/index.js';
 import { importPullFiles } from '../bd/import.js';
 import { apolloStatus, EnrichJob, refreshApolloCredits } from '../bd/enrich.js';
 import { fastmoss, pullFastMoss } from '../bd/fastmoss.js';
@@ -59,6 +61,7 @@ export class Scheduler {
   readonly reports: ClientReports;
   readonly playbook: PlaybookEngine;
   private cruvaTask: ScheduledTask | null = null;
+  private repliesDigestTask: ScheduledTask | null = null;
   readonly copilot: Copilot;
   private tldvTask: ScheduledTask | null = null;
   private apolloTask: ScheduledTask | null = null;
@@ -115,6 +118,8 @@ export class Scheduler {
     this.pullsLateTask = cron.schedule('0 11 * * *', () => void this.dailyPull(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Cruva best practice: re-read every linked shop's setup overnight so the matrix and the monitor rule are current.
     this.cruvaTask = cron.schedule('20 5 * * *', () => { if (this.playbook.data().mcp_configured) void this.playbook.check(undefined, true).catch((err) => log.warn(`Cruva nightly check: ${(err as Error).message}`)); }, { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
+    // Replies: Monday morning digest of what went out automatically last week, to the default Slack channel.
+    this.repliesDigestTask = cron.schedule('50 8 * * 1', () => void this.repliesDigest(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Account monitor: rolling scan of every account for the flags the team otherwise catches by hand.
     this.monitor.start();
     // Account health: the daily Windsor pull, the rules and the AI review, before the AMs start (06:30 Madrid).
@@ -195,6 +200,16 @@ export class Scheduler {
   }
 
   /** tl;dv call follow-ups, when the key is set, Claude is configured and the switch is on. */
+
+  /** Post the weekly replies digest to the default incident channel (or the first account channel). */
+  async repliesDigest(): Promise<void> {
+    const text = weeklyDigest(this.q);
+    if (!text || !slackBot.configured) return;
+    const channel = incidentSettings(this.q).default_channel;
+    if (!channel) return;
+    try { await slackBot.post(await slackBot.channelId(channel), text); } catch (err) { log.warn(`Replies digest: ${(err as Error).message}`); }
+  }
+
   checkCalls(): void {
     if (!tldv.configured || !config.anthropicApiKey || this.q.getSetting('tldv_auto_draft', '1') !== '1') return;
     void draftCallFollowups(this.q, { gmail: this.gmail }).catch((err) => log.error(`tl;dv check failed: ${(err as Error).message}`));

@@ -13,7 +13,7 @@ import PromotionsPage from './pages/Promotions';
 import GmvMaxPage from './pages/GmvMax';
 import LeadsPage from './pages/Leads';
 import BdPage from './pages/Bd';
-import InboxPage from './pages/Inbox';
+import RepliesPage from './pages/Replies';
 import OutreachPage from './pages/Outreach';
 import InquiriesPage from './pages/Inquiries';
 import MonitorPage from './pages/Monitor';
@@ -106,8 +106,8 @@ function Login({ onDone }: { onDone: (role: Role) => void }) {
 /** Six entries. Each hub owns several paths (its tabs), so the link is active on any of them. */
 const NAV: { to: string; label: string; paths: string[] }[] = [
   { to: '/today', label: 'Today', paths: ['/today'] },
-  { to: '/monitor', label: 'Accounts', paths: ['/monitor', '/checklists', '/calendar', '/promotions', '/gmv-max', '/stock', '/cruva', '/playbook', '/reports', '/copilot'] },
-  { to: '/inbox', label: 'Inbox', paths: ['/inbox', '/inquiries'] },
+  { to: '/monitor', label: 'Accounts', paths: ['/monitor', '/checklists', '/calendar', '/promotions', '/gmv-max', '/stock', '/cruva', '/playbook', '/creators', '/customer-service', '/reports', '/copilot'] },
+  { to: '/inquiries', label: 'Enquiries', paths: ['/inquiries', '/inbox'] },
   { to: '/bd', label: 'Growth', paths: ['/bd', '/outreach', '/leads'] },
   { to: '/gmv', label: 'Performance', paths: ['/gmv', '/analytics'] },
   { to: '/accounts', label: 'Settings', paths: ['/accounts', '/people', '/checklist-template', '/connections'] },
@@ -187,8 +187,10 @@ export default function App() {
               <Route path="/stock" element={<AccountHub><StockPage /></AccountHub>} />
               <Route path="/reports" element={<AccountHub><ReportsPage /></AccountHub>} />
               <Route path="/copilot" element={<AccountHub><CopilotPage /></AccountHub>} />
-              <Route path="/inbox" element={<Hub title="Inbox" tabs={INBOX_TABS}><InboxPage /></Hub>} />
-              <Route path="/inquiries" element={<Hub title="Inbox" tabs={INBOX_TABS}><InquiriesPage /></Hub>} />
+              <Route path="/creators" element={<AccountHub><RepliesPage channel="affiliate" /></AccountHub>} />
+              <Route path="/customer-service" element={<AccountHub><RepliesPage channel="cs" /></AccountHub>} />
+              <Route path="/inbox" element={<Navigate to="/creators" replace />} />
+              <Route path="/inquiries" element={<Hub title="Enquiries" tabs={INBOX_TABS}><InquiriesPage /></Hub>} />
               <Route path="/bd" element={<Hub title="Growth" tabs={GROWTH_TABS}><BdPage /></Hub>} />
               <Route path="/outreach" element={<Hub title="Growth" tabs={GROWTH_TABS}><OutreachPage /></Hub>} />
               <Route path="/leads" element={<Hub title="Growth" tabs={GROWTH_TABS}><LeadsPage /></Hub>} />

@@ -1453,11 +1453,89 @@ export interface ReplyContext {
   account: string | null;
   market: string | null;
   promotions: { name: string; discount: string; period: string; status: string }[];
-  products: { id: string; title: string }[];
+  products: { id: string; title: string; price?: number | null; currency?: string | null; stock?: number | null; status?: string | null }[];
   history: { when: string; who: string; text: string }[];
   cruva_outreach: { when: string | null; summary: string }[];
   library: { title: string; body: string; language: string; scope: string }[];
+  /** Commission terms as the creator would hear them. */
+  commission: { pct: number | null; ads_pct: number | null; note: string | null };
+  brief_link: string | null;
+  /** The creator as Cruva knows them (affiliate channel). */
+  creator: { handle: string; followers: number | null; gmv_for_us: number | null; videos: number | null; showcasing: boolean | null; tags: string[]; last_post: string | null } | null;
+  samples: { product: string; status: string; requested: string | null; approved: string | null; received: string | null; source: string | null }[];
+  outreach_logs: { when: string; campaign: string; channel: string; status: string }[];
+  campaigns: { title: string; type: string; status: string; link: string | null; ends: string | null }[];
+  /** The buyer's orders and returns (customer service channel). */
+  orders: { id: string; status: string; created: string; shipped: string | null; delivered: string | null; ship_by: string | null; carrier: string | null; total: number | null; currency: string | null; items: string[] }[];
+  returns: { id: string; order_id: string | null; status: string; type: string | null; refund: number | null; next_action: string | null }[];
+  /** Why the context is thinner than it could be (Cruva not linked, no key, pull failed). */
+  notes: string[];
 }
+
+// ---- Replies per account: policy, events ----
+
+export type ReplyMode = 'off' | 'draft' | 'auto';
+export type ReplyDecision = 'auto_sent' | 'drafted' | 'skipped' | 'escalated' | 'capped' | 'quiet' | 'error';
+
+export interface ReplyPolicy {
+  account_id: number;
+  channel: InboxChannel;
+  mode: ReplyMode;
+  /** Automatic replies a day in the shop's timezone; null = unlimited. */
+  daily_cap: number | null;
+  /** Only reply automatically when every listed condition holds (keys from ONLY_FILTERS). */
+  only: string[];
+  /** Intents that always wait for a human. */
+  never: string[];
+  /** Intents allowed to go out automatically (customer service); empty = all non-escalated intents. */
+  auto_intents: string[];
+  quiet_from: string | null;
+  quiet_to: string | null;
+  max_age_hours: number;
+  updated_at: string | null;
+}
+
+export interface ReplyEvent {
+  id: number;
+  conversation_ref: number;
+  account_id: number | null;
+  channel: InboxChannel;
+  message_id: string | null;
+  needs_reply: boolean;
+  intent: string | null;
+  escalation: string | null;
+  confidence: number | null;
+  language: string | null;
+  /** The facts the model leant on, as short chips. */
+  context: { chips: string[]; their_text: string | null; reply_text: string | null; counterpart: string | null; their_at?: string | null };
+  decision: ReplyDecision;
+  reply_id: number | null;
+  model: string | null;
+  feedback: 'right' | 'wrong' | null;
+  feedback_note: string | null;
+  created_at: string;
+}
+
+export interface RepliesData {
+  account: Account;
+  channel: InboxChannel;
+  policy: ReplyPolicy;
+  master_on: boolean;
+  llm_configured: boolean;
+  /** Channel readiness: the TikTok scope and shops behind it. */
+  channel_ready: boolean;
+  channel_note: string | null;
+  shops: { id: string; name: string; market: string | null; token_ok: boolean }[];
+  counts: { replied_today: number; auto_today: number; manual_today: number; cap: number | null; waiting: number; escalated: number; drafts: number; skipped_today: number; median_minutes: number | null; wrong_7d: number };
+  waiting: (InboxConversation & { event: ReplyEvent | null; draft: InboxReply | null })[];
+  log: ReplyEvent[];
+  knowledge: { label: string; state: 'ok' | 'warn' | 'missing'; detail: string }[];
+  intents: { key: string; label: string; escalates: boolean }[];
+  only_filters: { key: string; label: string }[];
+  languages: Record<string, string>;
+}
+
+export interface RepliesSummaryRow { account_id: number; account_name: string; am_name: string | null; channel: InboxChannel; mode: ReplyMode; waiting: number; auto_today: number; cap: number | null; ready: boolean }
 
 // ---- Stock ----
 

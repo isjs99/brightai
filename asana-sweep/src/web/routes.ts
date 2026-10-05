@@ -2,7 +2,7 @@ import { Router, type Request, type Response } from 'express';
 import { Queries } from '../db/queries.js';
 import { Scheduler } from '../scheduler/index.js';
 import { CRON_PRESETS, describeSchedule, isValidTimezone, nextRun, validateCron } from '../scheduler/describe.js';
-import type { AccountInput, AccountStatusRow, Analytics, AnalyticsAccount, AnalyticsAm, CheckSettings, ChecklistItemInput } from '../sweep/types.js';
+import type { Account, InboxChannel, AccountInput, AccountStatusRow, Analytics, AnalyticsAccount, AnalyticsAm, CheckSettings, ChecklistItemInput } from '../sweep/types.js';
 import { checkAccount, deadlineLabel, isCheckRunning, refreshLive, runAllChecks, todayIn } from '../checklist/checker.js';
 import { isDue } from '../checklist/evaluate.js';
 import { DEFAULT_REMINDER_TEXT, incompleteByPerson, notifyAms, renderReminder } from '../checklist/reminders.js';
@@ -30,7 +30,8 @@ import { scanEnterpriseAlerts, syncWatchlistFromSheet } from '../bd/alerts.js';
 import { mineTiktokContacts } from '../bd/tts-directory.js';
 import { draftCallFollowups, tldv } from '../bd/tldv.js';
 import type { BdContact, BdFollowup, TtsContact } from '../sweep/types.js';
-import { autoReplyBlocker, inboxSettings, sendReply, syncInbox } from '../inbox/sync.js';
+import { inboxSettings, sendReply, syncInbox } from '../inbox/sync.js';
+import { feedback as replyFeedback, repliesData, replyBlocker, sampleThread, savePolicy, summary as repliesSummary, waitingAll } from '../inbox/replies.js';
 import { buildContext, renderPrompt } from '../inbox/context.js';
 import { draftWithClaude } from '../inbox/llm.js';
 import { LANGUAGE_NAMES } from '../inbox/language.js';
@@ -2424,20 +2425,29 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     res.json(inboxData());
   });
 
-  const conversationDetail = (id: number, language?: string | null): ConversationDetail => {
+  const conversationDetail = async (id: number, language?: string | null): Promise<ConversationDetail> => {
     const conversation = q.getConversation(id);
     if (!conversation) throw new HttpError(404, 'Conversation not found');
     const messages = q.listMessages(id);
-    return { conversation, messages, replies: q.listReplies(id), context: buildContext(q, conversation, messages, language) };
+    return { conversation, messages, replies: q.listReplies(id), context: await buildContext(q, conversation, messages, language) };
   };
 
-  r.get('/inbox/conversations/:id', (req, res) => {
-    const d = conversationDetail(idParam(req));
-    const s = inboxSettings(q);
-    res.json({ ...d, auto_reply_blocker: autoReplyBlocker(d.conversation, s, d.conversation.last_message_id ? q.autoRepliedTo(d.conversation.id, d.conversation.last_message_id) : false, q.lastAutoReplyAt(d.conversation.id)) });
+  r.get('/inbox/conversations/:id', async (req, res) => {
+    const d = await conversationDetail(idParam(req));
+    res.json({ ...d, auto_reply_blocker: replyBlocker(q, d.conversation), events: q.listReplyEvents({ conversationRef: d.conversation.id, limit: 20 }) });
   });
 
-  r.put('/inbox/conversations/:id', (req, res) => {
+  /** Pause or resume automatic replies on one thread. */
+  r.post('/inbox/conversations/:id/pause', async (req, res) => {
+    const c = q.getConversation(idParam(req));
+    if (!c) throw new HttpError(404, 'Conversation not found');
+    const paused = Boolean((req.body ?? {}).paused ?? true);
+    q.setSetting(`reply_pause:${c.id}`, paused ? '1' : '');
+    liveEvents.emitUpdate({ kind: 'inbox' });
+    res.json({ paused, ...(await conversationDetail(c.id)) });
+  });
+
+  r.put('/inbox/conversations/:id', async (req, res) => {
     const b = (req.body ?? {}) as Record<string, unknown>;
     if (!q.getConversation(idParam(req))) throw new HttpError(404, 'Conversation not found');
     if (b.status !== undefined) {
@@ -2446,19 +2456,19 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     }
     if (b.language !== undefined) q.setConversationLanguage(idParam(req), optText(b.language));
     liveEvents.emitUpdate({ kind: 'inbox' });
-    res.json(conversationDetail(idParam(req)));
+    res.json(await conversationDetail(idParam(req)));
   });
 
   /** Draft a reply with Claude using the full context. Nothing is sent. */
   r.post('/inbox/conversations/:id/draft', async (req, res) => {
     const b = (req.body ?? {}) as { language?: string; instructions?: string };
-    const d = conversationDetail(idParam(req), optText(b.language));
+    const d = await conversationDetail(idParam(req), optText(b.language));
     const { system, user } = renderPrompt(d.conversation, d.messages, d.context);
     const extra = optText(b.instructions);
     try {
       const text = await draftWithClaude(system, extra ? `${user}\n\nExtra instruction from the team: ${extra}` : user);
-      const reply = q.addReply({ conversation_ref: d.conversation.id, text, mode: 'draft', created_by: 'dashboard', in_reply_to: d.conversation.last_message_id });
-      res.json({ reply, ...conversationDetail(d.conversation.id, optText(b.language)) });
+      const reply = q.addReply({ conversation_ref: d.conversation.id, text, mode: 'draft', created_by: actorOf(req) ?? 'dashboard', in_reply_to: d.conversation.last_message_id });
+      res.json({ reply, ...(await conversationDetail(d.conversation.id, optText(b.language))) });
     } catch (err) {
       throw new HttpError(502, (err as Error).message);
     }
@@ -2473,10 +2483,11 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const c = q.getConversation(idParam(req));
     if (!c) throw new HttpError(404, 'Conversation not found');
     if (!c.can_send) throw new HttpError(409, 'TikTok does not allow the shop to message this buyer right now (no recent order or conversation).');
-    const reply = q.addReply({ conversation_ref: c.id, text, mode: 'manual', created_by: 'dashboard', in_reply_to: c.last_message_id });
+    const reply = q.addReply({ conversation_ref: c.id, text, mode: 'manual', created_by: actorOf(req) ?? 'dashboard', in_reply_to: c.last_message_id });
     try {
       await sendReply(q, c, reply.id, text);
-      res.json(conversationDetail(c.id));
+      q.setSetting(`reply_pause:${c.id}`, '');
+      res.json(await conversationDetail(c.id));
     } catch (err) {
       throw new HttpError(502, (err as Error).message);
     }
@@ -2524,6 +2535,69 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   r.delete('/inbox/context/:id', (req, res) => {
     if (!q.deleteContext(idParam(req))) throw new HttpError(404, 'Entry not found');
     res.json({ entries: q.listContext() });
+  });
+
+  // ---- Replies per account (Creators / Customer service tabs) ----
+  const scopeLive = (scope: 'customer_service' | 'affiliate_seller') => scheduler.health.scopeLive(scope);
+  const channelParam = (req: Request): InboxChannel => {
+    const ch = String(req.params.channel ?? '');
+    if (ch === 'creators' || ch === 'affiliate') return 'affiliate';
+    if (ch === 'cs' || ch === 'customer-service' || ch === 'buyers') return 'cs';
+    throw new HttpError(400, 'channel must be creators or cs');
+  };
+  const accountParam = (req: Request): Account => {
+    const a = q.getAccount(Number(req.params.accountId));
+    if (!a) throw new HttpError(404, 'Account not found');
+    return a;
+  };
+  r.get('/replies/summary', (_req, res) => res.json({ rows: repliesSummary(q, scopeLive), waiting: waitingAll(q), master_on: inboxSettings(q).auto_reply_master, llm_configured: inboxSettings(q).llm_configured }));
+  r.get('/replies/:accountId/:channel', (req, res) => res.json(repliesData(q, accountParam(req), channelParam(req), scopeLive)));
+  r.put('/replies/:accountId/:channel/policy', (req, res) => {
+    const a = accountParam(req);
+    const channel = channelParam(req);
+    try { savePolicy(q, a.id, channel, (req.body ?? {}) as Record<string, unknown>); } catch (err) { throw new HttpError(400, (err as Error).message); }
+    res.json(repliesData(q, a, channel, scopeLive));
+  });
+  r.post('/replies/:accountId/:channel/sample', async (req, res) => {
+    const a = accountParam(req);
+    const channel = channelParam(req);
+    const b = (req.body ?? {}) as { text?: string; language?: string };
+    const text = String(b.text ?? '').trim();
+    if (!text) throw new HttpError(400, 'Write the message the buyer or creator would send.');
+    try {
+      const out = await sampleThread(q, a, channel, text, optText(b.language));
+      res.json({ ...out, data: repliesData(q, a, channel, scopeLive) });
+    } catch (err) {
+      throw new HttpError(502, (err as Error).message);
+    }
+  });
+  r.post('/replies/events/:id/feedback', (req, res) => {
+    const b = (req.body ?? {}) as { feedback?: 'right' | 'wrong' | null; note?: string; teach?: { title?: string; body?: string } | null };
+    if (b.feedback !== undefined && b.feedback !== null && !['right', 'wrong'].includes(String(b.feedback))) throw new HttpError(400, 'feedback must be right, wrong or null');
+    try {
+      const ev = replyFeedback(q, idParam(req), b.feedback === undefined ? null : b.feedback, optText(b.note), b.teach ?? null, actorOf(req));
+      res.json({ event: ev });
+    } catch (err) {
+      throw new HttpError(404, (err as Error).message);
+    }
+  });
+  /** Approve a pending draft: send it as the team. */
+  r.post('/replies/drafts/:id/send', async (req, res) => {
+    const draft = q.getReply(idParam(req));
+    if (!draft) throw new HttpError(404, 'Draft not found');
+    if (draft.sent_at) throw new HttpError(409, 'Already sent');
+    const c = q.getConversation(draft.conversation_ref);
+    if (!c) throw new HttpError(404, 'Conversation not found');
+    if (c.conversation_id.startsWith('sample-')) throw new HttpError(409, 'Sample threads are never sent.');
+    const text = String((req.body ?? {}).text ?? draft.text).trim();
+    if (!text) throw new HttpError(400, 'Reply text is empty.');
+    const reply = text === draft.text ? draft : q.addReply({ conversation_ref: c.id, text, mode: 'manual', created_by: actorOf(req) ?? 'dashboard', in_reply_to: c.last_message_id });
+    try {
+      await sendReply(q, c, reply.id, text);
+      res.json(await conversationDetail(c.id));
+    } catch (err) {
+      throw new HttpError(502, (err as Error).message);
+    }
   });
 
   /** Cruva outreach memory: rows of { creator_handle, summary, occurred_at?, account_id? } (e.g. exported from Cruva outreach logs). */

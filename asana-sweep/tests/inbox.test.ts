@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { guessLanguage } from '../src/inbox/language';
-import { autoReplyBlocker, mapAffMessage, mapCsMessage } from '../src/inbox/sync';
+import { mapAffMessage, mapCsMessage } from '../src/inbox/sync';
+import { replyBlocker } from '../src/inbox/replies';
 import { buildContext, renderPrompt } from '../src/inbox/context';
 import { openDb } from '../src/db/index';
 import { Queries } from '../src/db/queries';
@@ -34,24 +35,6 @@ describe('TikTok message mapping', () => {
   });
 });
 
-describe('auto-reply gate', () => {
-  const conv = (o: Partial<InboxConversation>): InboxConversation => ({ id: 1, tts_shop_id: 's', shop_name: 'Shop', account_id: 1, account_name: 'Acme', market: 'DE', channel: 'cs', conversation_id: 'c', counterpart_name: 'Anna', counterpart_id: 'u1', unread_count: 1, last_message_at: new Date(Date.now() - 3600000).toISOString(), last_message_text: 'Where is my parcel?', last_sender: 'them', last_message_id: 'm1', can_send: true, status: 'open', language: 'de', needs_reply: true, auto_reply_on: true, synced_at: '', updated_at: '', ...o });
-  const on = { auto_reply_master: true, max_age_hours: 48, llm_configured: true };
-
-  it('only fires with every switch on, a fresh message from them, and no prior auto reply', () => {
-    expect(autoReplyBlocker(conv({}), on, false, null)).toBeNull();
-    expect(autoReplyBlocker(conv({}), { ...on, auto_reply_master: false }, false, null)).toBe('master switch off');
-    expect(autoReplyBlocker(conv({ auto_reply_on: false }), on, false, null)).toMatch(/auto-reply off/);
-    expect(autoReplyBlocker(conv({ last_sender: 'us' }), on, false, null)).toBe('last message is ours');
-    expect(autoReplyBlocker(conv({ can_send: false }), on, false, null)).toMatch(/does not allow/);
-    expect(autoReplyBlocker(conv({ last_message_at: new Date(Date.now() - 80 * 3600000).toISOString() }), on, false, null)).toBe('older than 48h');
-    expect(autoReplyBlocker(conv({}), on, true, null)).toBe('already auto-replied to this message');
-    expect(autoReplyBlocker(conv({}), on, false, new Date(Date.now() - 60000).toISOString())).toMatch(/less than 10 minutes/);
-    expect(autoReplyBlocker(conv({ status: 'closed' }), on, false, null)).toBe('conversation closed');
-    expect(autoReplyBlocker(conv({}), { ...on, llm_configured: false }, false, null)).toBe('ANTHROPIC_API_KEY not set');
-  });
-});
-
 describe('inbox storage and context', () => {
   const setup = () => {
     const q = new Queries(openDb(':memory:'));
@@ -79,7 +62,7 @@ describe('inbox storage and context', () => {
     expect(c.account_name).toBe(q.listAccounts()[0].name);
   });
 
-  it('builds context from the library, account switch and history, and renders a prompt', () => {
+  it('builds context from the library, account switch and history, and renders a prompt', async () => {
     const { q, account } = setup();
     q.setAccountReply(account.id, { auto_reply_cs: true });
     q.createContext({ language: 'de', scope: 'cs', account_id: account.id, title: 'Lieferzeit', body: 'Lieferung in DE dauert 2-4 Werktage.' });
@@ -91,15 +74,16 @@ describe('inbox storage and context', () => {
     q.upsertMessages(cur.id, [{ message_id: 'n1', sender_role: 'them', sender_name: 'Anna', text: 'Hallo, wann kommt meine Bestellung bitte? Danke', created_at: '2026-09-16T10:00:00.000Z' }]);
     const c = q.getConversation(cur.id)!;
     expect(c.auto_reply_on).toBe(true);
-    const ctx = buildContext(q, c, q.listMessages(cur.id));
+    const ctx = await buildContext(q, c, q.listMessages(cur.id));
     expect(ctx.language).toBe('de');
+    expect(replyBlocker(q, c)).toMatch(/replies are off/);
     expect(ctx.library.map((l) => l.title)).toContain('Lieferzeit');
     expect(ctx.library.map((l) => l.title)).not.toContain('FR only');
     expect(ctx.library.map((l) => l.title)).not.toContain('Aff only');
     expect(ctx.history[0].text).toBe('Ich hatte schon mal ein Problem');
     const { system, user } = renderPrompt(c, q.listMessages(cur.id), ctx);
     expect(system).toContain('Lieferung in DE dauert 2-4 Werktage.');
-    expect(system).toContain('Reply language: de');
+    expect(system).toContain('Reply language: German (de)');
     expect(user).toContain('BUYER (Anna): Hallo, wann kommt meine Bestellung bitte? Danke');
   });
 

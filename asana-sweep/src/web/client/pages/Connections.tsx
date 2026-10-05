@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api, type ConnectionRow } from '../api';
 import { WindsorPanel } from './Gmv';
+import type { InboxSettings } from '../../../sweep/types';
+import { useIsAdmin } from '../session';
 
 /** Every integration the dashboard runs on, whether it is live, and a test where one exists. */
 export default function ConnectionsPage() {
@@ -57,8 +59,49 @@ export default function ConnectionsPage() {
           </table>
         </>
       )}
+      <h2>Automatic replies</h2>
+      <RepliesMaster onError={setError} />
       <h2>Windsor.ai shops</h2>
       <WindsorPanel onSynced={load} />
     </>
+  );
+}
+
+/** The one kill switch for every automatic send, plus how often inboxes are read. Policies per account live under Accounts › Creators / Customer service. */
+function RepliesMaster({ onError }: { onError: (e: string | null) => void }) {
+  const isAdmin = useIsAdmin();
+  const [s, setS] = useState<InboxSettings | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { api.inbox().then((d) => setS(d.settings)).catch((e) => onError((e as Error).message)); }, [onError]);
+  if (!s) return <p className="sub">Loading…</p>;
+  const save = async (patch: Parameters<typeof api.saveInboxSettings>[0]) => { setBusy(true); try { setS((await api.saveInboxSettings(patch)).settings); } catch (e) { onError((e as Error).message); } finally { setBusy(false); } };
+  const ok = s.tts_configured && s.llm_configured;
+  return (
+    <div className={`card master ${s.auto_reply_master ? 'on' : 'off'}`} style={{ marginBottom: 16 }}>
+      <div className="master-row">
+        <div>
+          <div className="master-title">Master switch is <b>{s.auto_reply_master ? 'ON' : 'OFF'}</b></div>
+          <div className="sub">
+            {s.auto_reply_master ? 'Accounts set to Automatic under Creators or Customer service send on their own, within their cap, filters and quiet hours.' : 'Nothing is sent automatically anywhere. Accounts set to Automatic behave like Draft until this is on.'}
+            {!s.tts_configured && ' TikTok app not configured (TTS_APP_KEY / TTS_APP_SECRET).'}
+            {!s.llm_configured && ' ANTHROPIC_API_KEY not set, so nothing is classified or drafted.'}
+            {s.last_sync_at && ` Inboxes last read ${new Date(s.last_sync_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}.`}{s.last_sync_error && ` Last error: ${s.last_sync_error}`}
+          </div>
+        </div>
+        {isAdmin && (
+          <button className={`switch ${s.auto_reply_master ? 'on' : ''}`} disabled={busy || (!s.auto_reply_master && !ok)} title={!s.auto_reply_master && !ok ? 'Configure the TikTok app and ANTHROPIC_API_KEY first' : ''}
+            onClick={() => { if (s.auto_reply_master || window.confirm('Turn the master switch ON? Accounts set to Automatic will answer creators and buyers without a human reading first.')) void save({ auto_reply_master: !s.auto_reply_master }); }}>
+            <span className="knob" /> {s.auto_reply_master ? 'ON' : 'OFF'}
+          </button>
+        )}
+      </div>
+      {isAdmin && (
+        <div className="inline-form" style={{ marginTop: 12 }}>
+          <label className="field" style={{ minWidth: 140 }}><span className="lbl">Read inboxes every (s)</span><input type="number" min={30} defaultValue={s.poll_seconds} onBlur={(e) => Number(e.target.value) !== s.poll_seconds && void save({ poll_seconds: Number(e.target.value) })} /></label>
+          <label className="field check"><input type="checkbox" checked={s.inbox_enabled} onChange={(e) => void save({ inbox_enabled: e.target.checked })} /> Read inboxes in the background</label>
+          <span className="sub">Model: {s.model}</span>
+        </div>
+      )}
+    </div>
   );
 }
