@@ -1006,13 +1006,15 @@ export interface AccountCampaign {
 }
 
 /** What the monitor shows when one account is opened: numbers against targets, series for the charts, and the checklist walk-through. */
-export interface AccountSeriesPoint { date: string; gmv: number; orders: number; visitors: number; conversion: number | null; video_gmv: number; live_gmv: number; card_gmv: number; ads_gmv: number | null }
+export interface AccountSeriesPoint { date: string; gmv: number; orders: number; visitors: number; conversion: number | null; video_gmv: number; live_gmv: number; card_gmv: number; ads_gmv: number | null; /** Cruva-sourced days carry these instead of orders and visitors. */ affiliate_gmv?: number | null; units?: number | null; videos?: number | null; views?: number | null }
 
 /** Daily analytics for an account over a chosen range, straight from the Analytics API, with the period before it for comparison. */
 export interface AccountSeries {
   from: string;
   to: string;
   currency: string;
+  /** Where the days came from: the TikTok Analytics API, or Cruva when no shop is authorised. */
+  source: 'tts' | 'cruva' | 'none';
   series: AccountSeriesPoint[];
   previous: AccountSeriesPoint[];
   /** Shops that could not be read (token expired, scope missing). */
@@ -1022,6 +1024,10 @@ export interface AccountSeries {
 export interface AccountOverview {
   account: Account;
   shops: { id: string; name: string; region: string; market: string | null; token_ok: boolean; last_pull_at: string | null; pull_ok: boolean; pull_error: string | null }[];
+  /** Cruva shops on the account that fill in where the TikTok app is not connected. */
+  cruva_shops: { shop_id: string; shop_name: string; last_pull_at: string | null; pull_ok: boolean; pull_error: string | null }[];
+  /** Where the daily series came from. */
+  series_source: 'tts' | 'cruva' | 'none';
   currency: string;
   kpis: AccountKpi[];
   series: AccountSeriesPoint[];
@@ -1067,6 +1073,8 @@ export interface AccountKpi {
   state: 'good' | 'warn' | 'crit' | null;
   /** Why there is no value: the scope that is missing, or where the number lives when the API has none. */
   note: string | null;
+  /** Set when the number came from Cruva because the TikTok scope is not live. */
+  via?: 'cruva';
   /** 'higher' when more is better, 'lower' when less is better. */
   direction: 'higher' | 'lower';
 }
@@ -1111,6 +1119,10 @@ export interface HealthThresholds {
   /** Affiliate (samples, from the TikTok Shop Affiliate seller scope) */
   samples_review_hours: number;
   samples_drop_pct: number;
+  /** Cruva */
+  sps_min: number;
+  dms_drop_pct: number;
+  affiliate_gmv_drop_pct: number;
   /** Returns and CS */
   return_response_grace_hours: number;
   cs_response_pct_min: number;
@@ -1492,6 +1504,10 @@ export interface ReplyPolicy {
   quiet_from: string | null;
   quiet_to: string | null;
   max_age_hours: number;
+  /** TikTok shop ids (countries) switched off for this channel; empty = every shop on the account. */
+  shops_off: string[];
+  /** Reply language per TikTok shop id; unset = detect from the message, then the shop's market. */
+  languages: Record<string, string>;
   updated_at: string | null;
 }
 
@@ -1525,7 +1541,7 @@ export interface RepliesData {
   /** Channel readiness: the TikTok scope and shops behind it. */
   channel_ready: boolean;
   channel_note: string | null;
-  shops: { id: string; name: string; market: string | null; token_ok: boolean }[];
+  shops: { id: string; name: string; market: string | null; token_ok: boolean; off: boolean; language: string | null }[];
   counts: { replied_today: number; auto_today: number; manual_today: number; cap: number | null; waiting: number; escalated: number; drafts: number; skipped_today: number; median_minutes: number | null; wrong_7d: number };
   waiting: (InboxConversation & { event: ReplyEvent | null; draft: InboxReply | null })[];
   log: ReplyEvent[];
@@ -1535,6 +1551,17 @@ export interface RepliesData {
   languages: Record<string, string>;
 }
 
+/** Cruva pull: the 4-hourly read of every linked shop's stats, score, samples and stock. */
+export interface CruvaPullStatus { configured: boolean; running: boolean; last_run_at: string | null; last_error: string | null; shops: number; shops_ok: number; next_run_at: string | null; every_hours: number }
+
+/** Alerts calendar: one cell per day with the traffic light and what sits behind it. */
+export type AlertLight = 'crit' | 'warn' | 'good' | 'none';
+export interface AlertDayAccount { account_id: number; account_name: string; am_name: string | null; light: AlertLight; incidents: { id: number; kind: string; title: string; severity: IncidentSeverity; message: string; slack_channel: string | null; posted_at: string | null; resolved_at: string | null; opened_today: boolean }[]; flags: { code: string; severity: 'crit' | 'warn' | 'info'; message: string; opened_today: boolean; resolved_at: string | null }[]; checklist: { status: CheckStatus | null; combined_complete: boolean; am_done: number; am_total: number; aa_done: number; aa_total: number } | null }
+export interface AlertDay { date: string; light: AlertLight; crit: number; warn: number; info: number; resolved: number; checklist_complete: number; checklist_checked: number; accounts: AlertDayAccount[] }
+export interface AlertCalendar { month: string; today: string; days: AlertDay[]; totals: { crit: number; warn: number; info: number; resolved: number; days_red: number; days_amber: number; days_green: number }; channels: { id: number; name: string; slack_channel: string | null }[]; default_channel: string }
+
+export interface SlackChannel { id: string; name: string; is_private: boolean; is_member: boolean; num_members: number | null }
+
 export interface RepliesSummaryRow { account_id: number; account_name: string; am_name: string | null; channel: InboxChannel; mode: ReplyMode; waiting: number; auto_today: number; cap: number | null; ready: boolean }
 
 // ---- Stock ----
@@ -1542,6 +1569,8 @@ export interface RepliesSummaryRow { account_id: number; account_name: string; a
 export interface StockSku {
   shop_id: string;
   account_id: number | null;
+  /** tts: TikTok Shop API snapshot; cruva: read through Cruva for shops the TikTok app cannot read. */
+  source: 'tts' | 'cruva';
   product_id: string;
   product_title: string;
   sku_id: string;
@@ -1581,13 +1610,14 @@ export interface StockProjection {
 }
 
 export interface StockData {
-  shops: { shop_id: string; shop_name: string; account_id: number | null; account_name: string | null; market: string | null; token_ok: boolean; skus: number; captured_at: string | null; out: number; crit: number; warn: number; next_stockout_days: number | null }[];
+  shops: { shop_id: string; shop_name: string; account_id: number | null; account_name: string | null; market: string | null; token_ok: boolean; source: 'tts' | 'cruva'; skus: number; captured_at: string | null; out: number; crit: number; warn: number; next_stockout_days: number | null }[];
   alerts: (StockProjectionRow & { shop_name: string; account_name: string | null })[];
   settings: { crit_days: number; warn_days: number; default_cover_days: number; default_lead_days: number };
   last_scan_at: string | null;
   last_scan_error: string | null;
   scanning: boolean;
   tts_configured: boolean;
+  cruva_configured: boolean;
 }
 
 // ---- Website enquiries (brightform.agency contact form) ----

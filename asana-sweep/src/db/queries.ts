@@ -1984,15 +1984,15 @@ export class Queries {
 
   // ---- Stock snapshots ----
 
-  replaceStockSnapshot(shopId: string, accountId: number | null, rows: Omit<StockSku, 'shop_id' | 'account_id' | 'captured_at' | 'velocity_override' | 'exclude' | 'note'>[], capturedAt = new Date().toISOString()): number {
+  replaceStockSnapshot(shopId: string, accountId: number | null, rows: Omit<StockSku, 'shop_id' | 'account_id' | 'captured_at' | 'velocity_override' | 'exclude' | 'note' | 'source'>[], capturedAt = new Date().toISOString(), source: StockSku['source'] = 'tts'): number {
     const del = this.db.prepare('DELETE FROM stock_snapshots WHERE shop_id = ?');
-    const ins = this.db.prepare(`INSERT INTO stock_snapshots (shop_id, account_id, product_id, product_title, sku_id, sku_name, seller_sku, product_status, on_hand, sold_7d, sold_30d, captured_at)
-      VALUES (@shop_id, @account_id, @product_id, @product_title, @sku_id, @sku_name, @seller_sku, @product_status, @on_hand, @sold_7d, @sold_30d, @captured_at)
-      ON CONFLICT(shop_id, sku_id) DO UPDATE SET product_title = excluded.product_title, sku_name = excluded.sku_name, seller_sku = excluded.seller_sku, product_status = excluded.product_status, on_hand = excluded.on_hand, sold_7d = excluded.sold_7d, sold_30d = excluded.sold_30d, captured_at = excluded.captured_at, account_id = excluded.account_id`);
+    const ins = this.db.prepare(`INSERT INTO stock_snapshots (shop_id, account_id, product_id, product_title, sku_id, sku_name, seller_sku, product_status, on_hand, sold_7d, sold_30d, captured_at, source)
+      VALUES (@shop_id, @account_id, @product_id, @product_title, @sku_id, @sku_name, @seller_sku, @product_status, @on_hand, @sold_7d, @sold_30d, @captured_at, @source)
+      ON CONFLICT(shop_id, sku_id) DO UPDATE SET product_title = excluded.product_title, sku_name = excluded.sku_name, seller_sku = excluded.seller_sku, product_status = excluded.product_status, on_hand = excluded.on_hand, sold_7d = excluded.sold_7d, sold_30d = excluded.sold_30d, captured_at = excluded.captured_at, account_id = excluded.account_id, source = excluded.source`);
     let n = 0;
     this.db.transaction(() => {
       del.run(shopId);
-      for (const r of rows) n += ins.run({ ...r, shop_id: shopId, account_id: accountId, captured_at: capturedAt }).changes;
+      for (const r of rows) n += ins.run({ ...r, shop_id: shopId, account_id: accountId, captured_at: capturedAt, source }).changes;
     })();
     return n;
   }
@@ -2002,7 +2002,7 @@ export class Queries {
       ? this.db.prepare('SELECT s.*, o.velocity AS velocity_override, o.exclude AS exclude, o.note AS note FROM stock_snapshots s LEFT JOIN stock_overrides o ON o.shop_id = s.shop_id AND o.sku_id = s.sku_id WHERE s.shop_id = ? ORDER BY s.product_title COLLATE NOCASE, s.sku_name COLLATE NOCASE').all(shopId)
       : this.db.prepare('SELECT s.*, o.velocity AS velocity_override, o.exclude AS exclude, o.note AS note FROM stock_snapshots s LEFT JOIN stock_overrides o ON o.shop_id = s.shop_id AND o.sku_id = s.sku_id ORDER BY s.shop_id, s.product_title COLLATE NOCASE').all()) as Row[];
     return rows.map((r) => ({
-      shop_id: r.shop_id as string, account_id: (r.account_id as number | null) ?? null, product_id: r.product_id as string, product_title: r.product_title as string, sku_id: r.sku_id as string, sku_name: (r.sku_name as string | null) ?? null, seller_sku: (r.seller_sku as string | null) ?? null, product_status: (r.product_status as string | null) ?? null,
+      shop_id: r.shop_id as string, account_id: (r.account_id as number | null) ?? null, source: (r.source as StockSku['source']) ?? 'tts', product_id: r.product_id as string, product_title: r.product_title as string, sku_id: r.sku_id as string, sku_name: (r.sku_name as string | null) ?? null, seller_sku: (r.seller_sku as string | null) ?? null, product_status: (r.product_status as string | null) ?? null,
       on_hand: Number(r.on_hand), sold_7d: Number(r.sold_7d), sold_30d: Number(r.sold_30d), captured_at: r.captured_at as string,
       velocity_override: r.velocity_override === null || r.velocity_override === undefined ? null : Number(r.velocity_override), exclude: Boolean(r.exclude), note: (r.note as string | null) ?? null,
     }));
@@ -2029,6 +2029,11 @@ export class Queries {
 
   listIncidents(opts: { open?: boolean; limit?: number } = {}): Incident[] {
     return (this.db.prepare(`SELECT i.*, a.name AS account_name FROM incidents i LEFT JOIN accounts a ON a.id = i.account_id ${opts.open ? 'WHERE i.resolved_at IS NULL' : ''} ORDER BY i.created_at DESC LIMIT ?`).all(opts.limit ?? 300) as Row[]).map((r) => this.rowToIncident(r));
+  }
+
+  /** Incidents that were open at any point between two dates (inclusive), oldest first. */
+  listIncidentsBetween(from: string, to: string): Incident[] {
+    return (this.db.prepare('SELECT i.*, a.name AS account_name FROM incidents i LEFT JOIN accounts a ON a.id = i.account_id WHERE substr(i.created_at, 1, 10) <= ? AND (i.resolved_at IS NULL OR substr(i.resolved_at, 1, 10) >= ?) ORDER BY i.created_at').all(to, from) as Row[]).map((r) => this.rowToIncident(r));
   }
 
   getIncident(id: number): Incident | null {
@@ -2250,7 +2255,7 @@ export class Queries {
   getReplyPolicy(accountId: number, channel: InboxChannel): ReplyPolicy | null {
     const r = this.db.prepare('SELECT * FROM reply_policies WHERE account_id = ? AND channel = ?').get(accountId, channel) as Row | undefined;
     if (!r) return null;
-    return { account_id: accountId, channel, mode: r.mode as ReplyPolicy['mode'], daily_cap: r.daily_cap === null || r.daily_cap === undefined ? null : Number(r.daily_cap), only: parseJson<string[]>(r.only_json, []), never: parseJson<string[]>(r.never_json, []), auto_intents: parseJson<string[]>(r.auto_intents_json, []), quiet_from: (r.quiet_from as string | null) ?? null, quiet_to: (r.quiet_to as string | null) ?? null, max_age_hours: Number(r.max_age_hours ?? 48), updated_at: (r.updated_at as string | null) ?? null };
+    return { account_id: accountId, channel, mode: r.mode as ReplyPolicy['mode'], daily_cap: r.daily_cap === null || r.daily_cap === undefined ? null : Number(r.daily_cap), only: parseJson<string[]>(r.only_json, []), never: parseJson<string[]>(r.never_json, []), auto_intents: parseJson<string[]>(r.auto_intents_json, []), quiet_from: (r.quiet_from as string | null) ?? null, quiet_to: (r.quiet_to as string | null) ?? null, max_age_hours: Number(r.max_age_hours ?? 48), shops_off: parseJson<string[]>(r.shops_off_json, []), languages: parseJson<Record<string, string>>(r.languages_json, {}), updated_at: (r.updated_at as string | null) ?? null };
   }
 
   listReplyPolicies(): ReplyPolicy[] {
@@ -2258,9 +2263,9 @@ export class Queries {
   }
 
   saveReplyPolicy(p: ReplyPolicy): ReplyPolicy {
-    this.db.prepare(`INSERT INTO reply_policies (account_id, channel, mode, daily_cap, only_json, never_json, auto_intents_json, quiet_from, quiet_to, max_age_hours, updated_at) VALUES (@account_id, @channel, @mode, @daily_cap, @only_json, @never_json, @auto_intents_json, @quiet_from, @quiet_to, @max_age_hours, @updated_at)
-      ON CONFLICT(account_id, channel) DO UPDATE SET mode = excluded.mode, daily_cap = excluded.daily_cap, only_json = excluded.only_json, never_json = excluded.never_json, auto_intents_json = excluded.auto_intents_json, quiet_from = excluded.quiet_from, quiet_to = excluded.quiet_to, max_age_hours = excluded.max_age_hours, updated_at = excluded.updated_at`)
-      .run({ account_id: p.account_id, channel: p.channel, mode: p.mode, daily_cap: p.daily_cap, only_json: JSON.stringify(p.only), never_json: JSON.stringify(p.never), auto_intents_json: JSON.stringify(p.auto_intents), quiet_from: p.quiet_from, quiet_to: p.quiet_to, max_age_hours: p.max_age_hours, updated_at: new Date().toISOString() });
+    this.db.prepare(`INSERT INTO reply_policies (account_id, channel, mode, daily_cap, only_json, never_json, auto_intents_json, quiet_from, quiet_to, max_age_hours, shops_off_json, languages_json, updated_at) VALUES (@account_id, @channel, @mode, @daily_cap, @only_json, @never_json, @auto_intents_json, @quiet_from, @quiet_to, @max_age_hours, @shops_off_json, @languages_json, @updated_at)
+      ON CONFLICT(account_id, channel) DO UPDATE SET mode = excluded.mode, daily_cap = excluded.daily_cap, only_json = excluded.only_json, never_json = excluded.never_json, auto_intents_json = excluded.auto_intents_json, quiet_from = excluded.quiet_from, quiet_to = excluded.quiet_to, max_age_hours = excluded.max_age_hours, shops_off_json = excluded.shops_off_json, languages_json = excluded.languages_json, updated_at = excluded.updated_at`)
+      .run({ account_id: p.account_id, channel: p.channel, mode: p.mode, daily_cap: p.daily_cap, only_json: JSON.stringify(p.only), never_json: JSON.stringify(p.never), auto_intents_json: JSON.stringify(p.auto_intents), quiet_from: p.quiet_from, quiet_to: p.quiet_to, max_age_hours: p.max_age_hours, shops_off_json: JSON.stringify(p.shops_off ?? []), languages_json: JSON.stringify(p.languages ?? {}), updated_at: new Date().toISOString() });
     return this.getReplyPolicy(p.account_id, p.channel)!;
   }
 

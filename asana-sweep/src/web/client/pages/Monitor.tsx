@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import type { AccountArea, AccountCampaign, AccountKpi, AccountOverview, AccountSeries, AccountSeriesPoint, AccountSkuPrice, AccountTarget, AreaLight, HealthAssessment, HealthThresholds, Incident, IncidentsData, MonitorAccountRow, MonitorData, MonitorFlag, MonitorRule, TargetKey, TtsScope, TtsScopeStatus } from '../../../sweep/types';
+import type { SlackChannel, AccountArea, AccountCampaign, AccountKpi, AccountOverview, AccountSeries, AccountSeriesPoint, AccountSkuPrice, AccountTarget, AreaLight, HealthAssessment, HealthThresholds, Incident, IncidentsData, MonitorAccountRow, MonitorData, MonitorFlag, MonitorRule, TargetKey, TtsScope, TtsScopeStatus } from '../../../sweep/types';
 import { api, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
 import { fmtValue, LineChart, PaceBar, StackedBars } from '../charts';
@@ -245,7 +245,7 @@ function AreaRow({ area, currency, rules, open, onToggle }: { area: AccountArea;
             <div className="kpis" style={{ marginTop: area.flags.length ? 10 : 0 }}>
               {area.metrics.map((m) => (
                 <div key={m.key} className="kpi" title={m.note ?? ''}>
-                  <span className="k">{m.label}</span>
+                  <span className="k">{m.label}{m.via === 'cruva' && <span className="badge muted via" title="From Cruva: the TikTok scope for this number is not live">Cruva</span>}</span>
                   <span className={`v ${m.value === null ? 'nodata' : ''}`}>{m.value === null ? (m.note ?? 'no data') : kpiValue(m, currency)} {m.value !== null && arrow(m.value, m.previous, m.direction)}</span>
                   {m.target !== null && m.value !== null && <span className="t">{m.direction === 'higher' ? 'target' : 'limit'} {fmtValue(m.target, m.unit, currency)} · {m.state === 'good' ? 'on track' : m.state === 'warn' ? 'slightly behind' : 'behind'}</span>}
                   {m.value !== null && m.target === null && m.previous !== null && <span className="t">vs {fmtValue(m.previous, m.unit, currency)} the week before</span>}
@@ -301,6 +301,7 @@ function AccountDetail({ id, data, isAdmin, onError, onNotice, reload, dialog, s
   const vs = (key: 'gmv' | 'orders' | 'visitors', avg = false) => { const a = avg ? (points.length ? sum(points, key) / points.length : null) : sum(points, key); const b = prevPoints.length ? (avg ? sum(prevPoints, key) / prevPoints.length : sum(prevPoints, key)) : null; return { a, b }; };
   const rangeLabel = preset === 'custom' ? `${shortDay(range.from)} – ${shortDay(range.to)}` : PRESETS.find((p) => p.key === preset)!.label.toLowerCase();
   const headline = (key: 'gmv' | 'orders' | 'visitors', avg = false): { value: ReactNode; change: number | null } => { const { a, b } = vs(key, avg); return { value: a !== null && points.length ? fmtValue(a, key === 'gmv' ? 'money' : 'count', cur) : <span className="sub">no data</span>, change: a !== null && b !== null && b > 0 ? ((a - b) / b) * 100 : null }; };
+  const extraHead = (key: 'affiliate_gmv' | 'units' | 'videos', unit: 'money' | 'count'): { value: ReactNode; change: number | null } => { const a = points.reduce((n, p) => n + (p[key] ?? 0), 0); const b = prevPoints.length ? prevPoints.reduce((n, p) => n + (p[key] ?? 0), 0) : null; return { value: points.length ? fmtValue(a, unit, cur) : <span className="sub">no data</span>, change: b !== null && b > 0 ? ((a - b) / b) * 100 : null }; };
   const conversion = conv(points);
   const isOpen = (a: AccountArea) => Boolean(open?.[a.key]);
   const needsAffiliate = o.shops.some((sh) => sh.pull_error && /affiliate app/i.test(sh.pull_error));
@@ -330,6 +331,7 @@ function AccountDetail({ id, data, isAdmin, onError, onNotice, reload, dialog, s
         </div>
       </div>
       {needsReauth && <div className="banner warn">A scope added in Partner Center is not in this shop's token yet. Remove and re-authorise the shop under <Link to="/promotions?connection=1">Promotions › Connection</Link>, then pull again.</div>}
+      {(stored ? o.series_source === 'cruva' : fetched?.source === 'cruva') && <div className="banner info">No TikTok shop is authorised for this account, so the charts and the gaps in the KPIs come from Cruva ({o.cruva_shops.map((s) => s.shop_name).join(', ')}): GMV, affiliate GMV, units, videos. Orders, visitors and conversion need the TikTok app.</div>}
       {needsAffiliate && <div className="banner warn">This shop has not authorised the affiliate app yet, so samples and creator conversations cannot be read. Authorise it under <Link to="/promotions?connection=1">Promotions › Connection › Affiliate app</Link>, then pull again.</div>}
       {o.assessment && (
         <div className={`review ${o.assessment.risk === 'red' ? 'crit' : o.assessment.risk === 'amber' ? 'warn' : 'good'}`} onClick={() => setReviewOpen(!reviewOpen)}>
@@ -346,7 +348,14 @@ function AccountDetail({ id, data, isAdmin, onError, onNotice, reload, dialog, s
         {seriesBusy && <span className="badge muted">Loading…</span>}
         {fetched && fetched.errors.length > 0 && <span className="badge warn" title={fetched.errors.join(' · ')}>{fetched.errors.length} shop{fetched.errors.length === 1 ? '' : 's'} not read</span>}
       </div>
-      {points.length ? (
+      {points.length && (stored ? o.series_source === 'cruva' : fetched?.source === 'cruva') ? (
+        <div className="charts four">
+          <LineChart title="GMV" value={headline('gmv').value} change={headline('gmv').change} note={<>{rangeLabel} · via Cruva</>} points={points.map((d) => ({ date: d.date, value: d.gmv }))} previous={prevPoints.map((d) => ({ date: d.date, value: d.gmv }))} kind="money" currency={cur} height={120} footer={gmvMtd && gmvMtd.value !== null ? <div className="sub chart-foot">Month to date {fmtValue(gmvMtd.value, 'money', cur)}{gmvMtd.target !== null ? <> · target so far {fmtValue(gmvMtd.target, 'money', cur)} · {gmvMtd.state === 'good' ? 'on track' : 'behind'}</> : ' · no monthly target set'}<PaceBar value={gmvMtd.value} target={gmvMtd.target} direction="higher" state={gmvMtd.state} /></div> : null} />
+          <LineChart title="Affiliate GMV" value={extraHead('affiliate_gmv', 'money').value} change={extraHead('affiliate_gmv', 'money').change} note={rangeLabel} points={points.map((d) => ({ date: d.date, value: d.affiliate_gmv ?? 0 }))} previous={prevPoints.map((d) => ({ date: d.date, value: d.affiliate_gmv ?? 0 }))} kind="money" currency={cur} height={120} />
+          <LineChart title="Units sold" value={extraHead('units', 'count').value} change={extraHead('units', 'count').change} note={rangeLabel} points={points.map((d) => ({ date: d.date, value: d.units ?? 0 }))} previous={prevPoints.map((d) => ({ date: d.date, value: d.units ?? 0 }))} kind="count" height={120} />
+          <LineChart title="Videos posted" value={extraHead('videos', 'count').value} change={extraHead('videos', 'count').change} note={<>{rangeLabel} · {fmtValue(points.reduce((n, d) => n + (d.views ?? 0), 0), 'count')} views</>} points={points.map((d) => ({ date: d.date, value: d.videos ?? 0 }))} previous={prevPoints.map((d) => ({ date: d.date, value: d.videos ?? 0 }))} kind="count" height={120} />
+        </div>
+      ) : points.length ? (
         <div className="charts four">
           <LineChart title="GMV" value={headline('gmv').value} change={headline('gmv').change} note={rangeLabel} points={points.map((d) => ({ date: d.date, value: d.gmv }))} previous={prevPoints.map((d) => ({ date: d.date, value: d.gmv }))} kind="money" currency={cur} height={120} footer={gmvMtd && gmvMtd.value !== null ? <div className="sub chart-foot">Month to date {fmtValue(gmvMtd.value, 'money', cur)}{gmvMtd.target !== null ? <> · target so far {fmtValue(gmvMtd.target, 'money', cur)} · {gmvMtd.state === 'good' ? 'on track' : 'behind'}</> : ' · no monthly target set'}<PaceBar value={gmvMtd.value} target={gmvMtd.target} direction="higher" state={gmvMtd.state} /></div> : null} />
           <StackedBars title="GMV by channel" value={fmtValue(points.reduce((n, d) => n + d.video_gmv + d.live_gmv + d.card_gmv, 0), 'money', cur)} note={rangeLabel} days={points.map((d) => ({ date: d.date, values: [d.video_gmv, d.live_gmv, d.card_gmv] }))} series={[{ label: 'Video', color: 'var(--s1)' }, { label: 'LIVE', color: 'var(--s2)' }, { label: 'Product card', color: 'var(--s3)' }]} currency={cur} height={120} />
@@ -719,7 +728,7 @@ function Incidents({ isAdmin, onError, onNotice }: { isAdmin: boolean; onError: 
           <div className="inline-form">
             <label className="field check"><input type="checkbox" checked={data.settings.enabled} onChange={(e) => run('s', () => api.incidentsSettings({ enabled: e.target.checked }))} /> Alerts on</label>
             <label className="field check"><input type="checkbox" checked={data.settings.post_to_slack} onChange={(e) => run('s', () => api.incidentsSettings({ post_to_slack: e.target.checked }))} /> Post to Slack</label>
-            <label className="field" style={{ minWidth: 200 }}><span className="lbl">Default Slack channel</span><input type="text" defaultValue={data.settings.default_channel} placeholder="#ops-alerts" onBlur={(e) => e.target.value !== data.settings.default_channel && run('s', () => api.incidentsSettings({ default_channel: e.target.value }))} /><span className="help">Used when the account has no internal channel.</span></label>
+            <label className="field" style={{ minWidth: 240 }}><span className="lbl">Default Slack channel</span><ChannelPicker value={data.settings.default_channel} onChange={(v) => v !== data.settings.default_channel && run('s', () => api.incidentsSettings({ default_channel: v }))} /><span className="help">Used when the account has no internal channel.</span></label>
             <label className="field" style={{ minWidth: 120 }}><span className="lbl">Re-alert after (hours)</span><input type="number" min={0} defaultValue={data.settings.cooldown_hours} onBlur={(e) => run('s', () => api.incidentsSettings({ cooldown_hours: Number(e.target.value) || 0 }))} /></label>
           </div>
         )}
@@ -734,7 +743,7 @@ function Incidents({ isAdmin, onError, onNotice }: { isAdmin: boolean; onError: 
         <div className="card" style={{ marginBottom: 14 }}>
           <div className="page-head" style={{ marginBottom: 6 }}><h3 style={{ margin: 0 }}>Channels per account</h3><span className="sub">Internal channel the account's incidents post to (the bot must be a member). Also on the Accounts page.</span></div>
           <div className="inline-form">
-            {data.accounts.map((a) => <label key={a.id} className="field" style={{ minWidth: 200 }}><span className="lbl">{a.name}{a.open ? ` (${a.open} open)` : ''}</span><input type="text" defaultValue={a.slack_channel ?? ''} placeholder={data.settings.default_channel || '#channel'} onBlur={(e) => e.target.value !== (a.slack_channel ?? '') && run(`c${a.id}`, () => api.incidentChannel(a.id, e.target.value))} /></label>)}
+            {data.accounts.map((a) => <label key={a.id} className="field" style={{ minWidth: 220 }}><span className="lbl">{a.name}{a.open ? ` (${a.open} open)` : ''}</span><ChannelPicker value={a.slack_channel ?? ''} placeholder={data.settings.default_channel ? `default (${data.settings.default_channel})` : 'default channel'} onChange={(v) => v !== (a.slack_channel ?? '') && run(`c${a.id}`, () => api.incidentChannel(a.id, v))} /></label>)}
           </div>
           <details style={{ marginTop: 8 }}>
             <summary className="sub" style={{ cursor: 'pointer' }}>Raise an incident by hand (ad account disconnected, campaign rejected)</summary>
@@ -770,5 +779,22 @@ function Incidents({ isAdmin, onError, onNotice }: { isAdmin: boolean; onError: 
         </tbody></table></div>
       )}
     </>
+  );
+}
+
+/** A Slack channel picker from the bot's own channel list; a plain input when Slack is not connected or the list fails. */
+export function ChannelPicker({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
+  const [channels, setChannels] = useState<SlackChannel[] | null | undefined>(undefined);
+  useEffect(() => { api.slackChannels().then((r) => setChannels(r.configured ? r.channels : null)).catch(() => setChannels(null)); }, []);
+  if (channels === undefined) return <input type="text" value={value} readOnly placeholder="Loading channels…" />;
+  if (channels === null) return <input type="text" defaultValue={value} placeholder={placeholder ?? '#channel'} onBlur={(e) => onChange(e.target.value.trim())} />;
+  const names = channels.map((c) => `#${c.name}`);
+  const current = value.trim();
+  return (
+    <select value={current} onChange={(e) => onChange(e.target.value)}>
+      <option value="">{placeholder ?? 'None'}</option>
+      {current && !names.includes(current) && <option value={current}>{current} (not found)</option>}
+      {channels.map((c) => <option key={c.id} value={`#${c.name}`}>#{c.name}{c.is_private ? ' (private)' : ''}{!c.is_member ? ' · bot not a member' : ''}</option>)}
+    </select>
   );
 }

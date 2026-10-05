@@ -6,7 +6,9 @@ import { config } from '../config.js';
 import { todayIn } from '../checklist/checker.js';
 import { liveEvents } from '../live/events.js';
 import { log } from '../logger.js';
-import { AI_RULES, CRUVA_METRIC_KEYS, DEFAULT_THRESHOLDS, evaluateWindsor, parseCruvaMetrics, parseThresholds, WINDSOR_RULES, type Found, type WindsorRows } from './rules.js';
+import { AI_RULES, CRUVA_METRIC_KEYS, CRUVA_RULES, DEFAULT_THRESHOLDS, evaluateWindsor, parseCruvaMetrics, parseThresholds, WINDSOR_RULES, type CruvaMetrics, type Found, type WindsorRows } from './rules.js';
+import { cruvaRest } from '../cruva/rest.js';
+import type { CruvaDayRow } from '../cruva/pull.js';
 import { ALL_TTS_RULES, emptyTtsRows, evaluateTargets, evaluateTts, lastDays, SCOPE_LABELS, SECTIONS, startOfWeek, targetValue, TARGET_RULES, type TtsRows } from './tts-rules.js';
 import { BLOCK_SCOPES, parseDay, pullShop, type AffiliateAccess } from './tts-pull.js';
 import { tts, ttsAffiliate, type TtsClient } from '../tts/client.js';
@@ -130,6 +132,38 @@ export class HealthEngine {
   }
 
   // ---- Rules over the stored pulls ----
+
+  /** Cruva rules from the 4-hourly pull: performance score, outreach, samples, content, affiliate GMV, automations, staleness. */
+  cruvaFlags(enabled: Set<string>, now = Date.now()): Found[] {
+    const t = this.thresholds();
+    const out: Found[] = [];
+    const linked = this.q.listShops('cruva');
+    const drop = (cur: number | null | undefined, prev: number | null | undefined): number | null => (typeof cur === 'number' && typeof prev === 'number' && prev > 0 ? Math.round(((prev - cur) / prev) * 100) : null);
+    for (const p of this.q.latestHealthPulls('cruva')) {
+      const s = linked.find((x) => x.shop_id === p.shop_id);
+      if (!s || s.account_id === null) continue;
+      const base = { account_id: s.account_id, shop_id: s.shop_id };
+      const add = (code: string, severity: Found['severity'], message: string, detail: string | null = null) => { if (enabled.has(code)) out.push({ ...base, code, severity, message: `${s.shop_name}: ${message}`, detail }); };
+      const ageH = (now - Date.parse(p.pulled_at)) / 3600000;
+      if (ageH > t.data_stale_hours || !p.ok) { add('c_data_stale', 'info', p.ok ? `Cruva data is ${Math.round(ageH)}h old` : `Cruva pull failed: ${p.error ?? 'unknown error'}`); if (!p.ok) continue; }
+      const m = p.metrics as CruvaMetrics;
+      const hist = this.q.healthMetricsHistory(s.shop_id, 'cruva', 3).filter((h) => h.pull_date < p.pull_date);
+      const prevSps = hist.length ? (hist[hist.length - 1].metrics.sps as number | null | undefined) : undefined;
+      if (typeof m.sps === 'number' && m.sps < t.sps_min) add('c_sps_low', 'crit', `shop performance score ${m.sps} is under ${t.sps_min}; Cruva cannot send DMs until it recovers`);
+      if (typeof m.sps === 'number' && typeof prevSps === 'number' && prevSps - m.sps >= 0.3) add('c_sps_drop', 'warn', `shop performance score fell from ${prevSps} to ${m.sps}`);
+      const dmsDrop = drop(m.dms_sent_7d, m.dms_sent_prev_7d);
+      if ((m.dms_sent_7d === 0 && (m.automations_active ?? 0) > 0) || (dmsDrop !== null && dmsDrop >= t.dms_drop_pct && (m.dms_sent_prev_7d ?? 0) >= 20)) add('c_dms_stopped', 'warn', m.dms_sent_7d === 0 ? `no DMs sent in 7 days while ${m.automations_active} automation(s) are active` : `DMs sent down ${dmsDrop}% on the week before (${m.dms_sent_7d} vs ${m.dms_sent_prev_7d})`);
+      const apprDrop = drop(m.samples_approved_7d, m.samples_approved_prev_7d); const shipDrop = drop(m.samples_shipped_7d, m.samples_shipped_prev_7d);
+      if ((apprDrop !== null && apprDrop >= t.samples_drop_pct && (m.samples_approved_prev_7d ?? 0) >= 5) || (shipDrop !== null && shipDrop >= t.samples_drop_pct && (m.samples_shipped_prev_7d ?? 0) >= 5)) add('c_samples_drop', 'warn', `samples approved ${m.samples_approved_7d} vs ${m.samples_approved_prev_7d}, shipped ${m.samples_shipped_7d} vs ${m.samples_shipped_prev_7d} week on week`);
+      if ((m.samples_pending_review ?? 0) > 0 && (m.samples_pending_review_oldest_hours ?? 0) > t.samples_review_hours) add('c_samples_waiting', 'warn', `${m.samples_pending_review} sample request(s) waiting on review, oldest ${Math.round((m.samples_pending_review_oldest_hours ?? 0) / 24)} days`);
+      if ((m.content_pending ?? 0) >= 20) add('c_content_pending', 'info', `${m.content_pending} creators have a delivered sample and no post yet`);
+      const affDrop = drop(m.affiliate_gmv_7d, m.affiliate_gmv_prev_7d);
+      if (affDrop !== null && affDrop >= t.affiliate_gmv_drop_pct && (m.affiliate_gmv_prev_7d ?? 0) >= 500) add('c_affiliate_gmv_drop', 'warn', `affiliate GMV down ${affDrop}% on the week before (${Math.round(m.affiliate_gmv_7d ?? 0)} vs ${Math.round(m.affiliate_gmv_prev_7d ?? 0)})`);
+      if ((m.videos_posted_7d ?? 0) >= 10 && (m.affiliate_gmv_7d ?? 0) === 0) add('c_videos_no_sales', 'info', `${m.videos_posted_7d} videos posted in 7 days and no affiliate sale`);
+      if ((m.automations_total ?? 0) > 0 && (m.automations_active ?? 0) === 0) add('c_automations_off', 'warn', 'no automation is running in Cruva');
+    }
+    return out;
+  }
 
   windsorFlags(enabled: Set<string>, now = Date.now()): Found[] {
     const t = this.thresholds();
@@ -364,8 +398,24 @@ export class HealthEngine {
     for (const sh of shops) {
       try { cur.push(await read(sh, from, to)); prev.push(await read(sh, prevFrom, prevTo)); } catch (err) { errors.push(`${sh.name}: ${(err as Error).message}`); }
     }
-    if (!shops.length) errors.push('No authorised TikTok shop is linked to this account');
-    return { from, to, currency, series: sumPoints(cur), previous: sumPoints(prev), errors };
+    if (shops.length && cur.some((c) => c.length)) return { from, to, currency, source: 'tts', series: sumPoints(cur), previous: sumPoints(prev), errors };
+    // No TikTok shop can be read: Cruva has the same days for every linked shop, with affiliate GMV, units and videos instead of orders and visitors.
+    const cruvaShops = this.q.listShops('cruva').filter((s) => s.account_id === accountId);
+    if (!cruvaShops.length || !cruvaRest.configured) { if (!shops.length) errors.push(cruvaShops.length ? 'CRUVA_API_KEY is not set' : 'No authorised TikTok shop or Cruva shop is linked to this account'); return { from, to, currency, source: 'none', series: sumPoints(cur), previous: sumPoints(prev), errors }; }
+    const readCruva = async (sh: { shop_id: string; shop_name: string }, a: string, b: string): Promise<AccountSeriesPoint[]> => {
+      const key = `cruva:${sh.shop_id}:${a}:${b}`;
+      const hit = this.seriesCache.get(key);
+      if (hit && now - hit.at < 15 * 60000) return hit.days;
+      const { daysFromStats } = await import('../cruva/pull.js');
+      const days = daysFromStats(await cruvaRest.stats(sh.shop_id, a, b)).map(cruvaPoint);
+      this.seriesCache.set(key, { at: now, days });
+      return days;
+    };
+    const cCur: AccountSeriesPoint[][] = []; const cPrev: AccountSeriesPoint[][] = [];
+    for (const sh of cruvaShops) {
+      try { cCur.push(await readCruva(sh, from, to)); cPrev.push(await readCruva(sh, prevFrom, prevTo)); } catch (err) { errors.push(`${sh.shop_name} (Cruva): ${(err as Error).message}`); }
+    }
+    return { from, to, currency, source: 'cruva', series: sumPoints(cCur), previous: sumPoints(cPrev), errors: errors.filter((e) => !/^No authorised/.test(e)) };
   }
 
   accountOverview(accountId: number, rules: MonitorRule[], now = Date.now()): AccountOverview | null {
@@ -378,13 +428,19 @@ export class HealthEngine {
     const currency = currencyForMarket(shops[0]?.market ?? markets[0] ?? '');
     const scopes = this.scopeStatus();
     const live = (scope: TtsScope) => scope === 'none' || pulls.some((p) => (p.rows as unknown as Partial<TtsRows>).scopes?.[scope]?.ok);
+    const cruvaShops = this.q.listShops('cruva').filter((s) => s.account_id === accountId);
+    const cPulls = this.q.latestHealthPulls('cruva').filter((p) => cruvaShops.some((s) => s.shop_id === p.shop_id) && p.ok);
+    const cm = (k: string): number | null => { let any = false; let n = 0; for (const p of cPulls) { const v = p.metrics[k]; if (typeof v === 'number') { any = true; n += v; } } return any ? n : null; };
     const flags = this.q.listFlags(false).filter((f) => f.account_id === accountId);
     const resolved = this.q.listFlagsBetween(new Date(now - 14 * 86400000).toISOString().slice(0, 10), new Date(now).toISOString().slice(0, 10)).filter((f) => f.account_id === accountId && f.resolved_at);
     const targets = this.q.listAccountTargets(accountId);
     const tv = (k: Parameters<typeof targetValue>[1]) => targetValue(targets, k);
 
     // Daily series summed over the account's shops.
-    const series = sumDays(pulls.filter((p) => (p.rows as unknown as Partial<TtsRows>).scopes?.analytics?.ok).map((p) => ((p.rows as unknown as Partial<TtsRows>).analytics ?? [])));
+    const ttsSeries = sumDays(pulls.filter((p) => (p.rows as unknown as Partial<TtsRows>).scopes?.analytics?.ok).map((p) => ((p.rows as unknown as Partial<TtsRows>).analytics ?? [])));
+    const cruvaSeries = ttsSeries.length ? [] : sumPoints(cPulls.map((p) => (((p.rows as { days?: CruvaDayRow[] }).days ?? []).map(cruvaPoint))));
+    const series = ttsSeries.length ? ttsSeries : cruvaSeries;
+    const seriesSource: AccountOverview['series_source'] = ttsSeries.length ? 'tts' : cruvaSeries.length ? 'cruva' : 'none';
     const sumM = (k: string) => { let any = false; let n = 0; for (const p of pulls) { const v = p.metrics[k]; if (typeof v === 'number') { any = true; n += v; } } return any ? n : null; };
     const avgM = (k: string) => { const vals = pulls.map((p) => p.metrics[k]).filter((v): v is number => typeof v === 'number'); return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null; };
     const missing = (scope: TtsScope) => { const st = scopes.find((s) => s.scope === scope); return st?.state === 'unavailable' ? `${SCOPE_LABELS[scope]} is not offered on this app: manual check in Seller Center` : st?.state === 'denied' ? `Needs the ${SCOPE_LABELS[scope]} scope on the app` : st?.state === 'error' ? `${SCOPE_LABELS[scope]} pull failed (see Rules & API coverage)` : shops.length ? `Not pulled yet (${SCOPE_LABELS[scope]})` : 'No TikTok shop authorised for this account'; };
@@ -419,6 +475,20 @@ export class HealthEngine {
       kpi('cs_response', 'CS answered within 24h', live('customer_service') ? avgM('cs_response_pct') : null, t.cs_response_pct_min, null, 'pct', 'higher', 'customer_service'),
       kpi('shop_score', 'Shop performance score', null, null, null, 'ratio', 'higher', 'none', 'Not available through the API: Seller Center only'),
     ];
+    // Cruva fills the gaps: any KPI the TikTok scopes could not give, when a linked Cruva shop has it.
+    const fill = (key: string, value: number | null, previous: number | null = null, note: string | null = null) => {
+      const x = kpis.find((k) => k.key === key);
+      if (!x || x.value !== null || value === null) return;
+      x.value = value; x.previous = previous; x.via = 'cruva'; x.note = note; x.state = state(value, x.target, x.direction);
+    };
+    const last7 = cruvaSeries.filter((d) => d.date >= new Date(now - 7 * 86400000).toISOString().slice(0, 10) && d.date < new Date(now).toISOString().slice(0, 10));
+    const prev7 = cruvaSeries.filter((d) => d.date >= new Date(now - 14 * 86400000).toISOString().slice(0, 10) && d.date < new Date(now - 7 * 86400000).toISOString().slice(0, 10));
+    fill('gmv_7d', last7.length ? last7.reduce((n, d) => n + d.gmv, 0) : cm('total_gmv_7d'), prev7.length ? prev7.reduce((n, d) => n + d.gmv, 0) : cm('total_gmv_prev_7d'));
+    fill('samples_week', cm('samples_approved_7d'), cm('samples_approved_prev_7d'), 'Approved in the last 7 days (Cruva)');
+    fill('samples_pending', cm('samples_pending_review'));
+    fill('oos', cm('out_of_stock_skus'), null, 'SKUs at zero stock that sold in the last 30 days (Cruva)');
+    const sps = cPulls.map((p) => p.metrics.sps).filter((v): v is number => typeof v === 'number');
+    fill('shop_score', sps.length ? Math.round((sps.reduce((a, b) => a + b, 0) / sps.length) * 10) / 10 : null, null, 'Out of 5, from Cruva. Under 3.5 restricts DMs.');
 
     // Checklist walk-through: every section of the AM checklist, with the rules that cover it and what they found.
     const sections: AccountSection[] = [];
@@ -488,6 +558,8 @@ export class HealthEngine {
     return {
       account,
       shops: shops.map((sh) => { const p = pulls.find((x) => x.shop_id === sh.id); return { id: sh.id, name: sh.name, region: sh.region, market: sh.market, token_ok: sh.token_ok, last_pull_at: p?.pulled_at ?? null, pull_ok: p?.ok ?? false, pull_error: p?.error ?? null }; }),
+      cruva_shops: cruvaShops.map((s) => { const p = this.q.latestHealthPulls('cruva').find((x) => x.shop_id === s.shop_id); return { shop_id: s.shop_id, shop_name: s.shop_name, last_pull_at: p?.pulled_at ?? null, pull_ok: p?.ok ?? false, pull_error: p?.error ?? null }; }),
+      series_source: seriesSource,
       currency,
       kpis,
       series,
@@ -517,7 +589,7 @@ export class HealthEngine {
 
   /** Every rule code the in-process scan owns (so the scan may resolve them); routine findings are left to the next ingest. */
   ownedCodes(): string[] {
-    return [...WINDSOR_RULES, ...ALL_TTS_RULES, ...AI_RULES].map((r) => r.code);
+    return [...WINDSOR_RULES, ...ALL_TTS_RULES, ...AI_RULES, ...CRUVA_RULES].map((r) => r.code);
   }
 
   // ---- What the AI (and the routine) sees per account ----
@@ -709,10 +781,16 @@ function sumPoints(perShop: AccountSeriesPoint[][]): AccountSeriesPoint[] {
     const cur = byDate.get(d.date) ?? { date: d.date, gmv: 0, orders: 0, visitors: 0, conversion: null, video_gmv: 0, live_gmv: 0, card_gmv: 0, ads_gmv: null, _cw: 0 };
     cur.gmv += d.gmv; cur.orders += d.orders; cur.visitors += d.visitors; cur.video_gmv += d.video_gmv; cur.live_gmv += d.live_gmv; cur.card_gmv += d.card_gmv;
     if (d.ads_gmv !== null) cur.ads_gmv = (cur.ads_gmv ?? 0) + d.ads_gmv;
+    for (const k of ['affiliate_gmv', 'units', 'videos', 'views'] as const) { const v = d[k]; if (typeof v === 'number') cur[k] = (cur[k] ?? 0) + v; }
     if (d.conversion !== null) { cur._cw += d.conversion * Math.max(1, d.visitors); }
     byDate.set(d.date, cur);
   }
   return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date)).map(({ _cw, ...p }) => ({ ...p, conversion: _cw ? _cw / Math.max(1, p.visitors) : p.conversion }));
+}
+
+/** A Cruva day as a series point: GMV and the affiliate fields it has; orders and visitors are not in Cruva. */
+export function cruvaPoint(d: CruvaDayRow): AccountSeriesPoint {
+  return { date: d.date, gmv: d.total_gmv, orders: 0, visitors: 0, conversion: null, video_gmv: 0, live_gmv: 0, card_gmv: 0, ads_gmv: null, affiliate_gmv: d.affiliate_gmv, units: d.units, videos: d.videos, views: d.views };
 }
 
 function sumDays(perShop: { date: string; gmv: number; orders: number; visitors: number; conversion: number; video_gmv: number; live_gmv: number; card_gmv: number; ads_gmv: number | null }[][]): AccountSeriesPoint[] {

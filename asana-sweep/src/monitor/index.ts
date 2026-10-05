@@ -88,6 +88,7 @@ export class AccountMonitor {
         found.push(...this.health.ttsFlags(enabled));
         found.push(...this.health.targetFlags(enabled));
         found.push(...this.health.windsorFlags(enabled));
+        found.push(...this.health.cruvaFlags(enabled));
         found.push(...this.health.aiFlags(enabled));
       }
       // Findings posted by the daily routine are not re-evaluated here, so they are left out of the resolve pass.

@@ -11,6 +11,15 @@ export interface CruvaSample { product: string; status: string; requested: strin
 export interface CruvaOutreachLog { when: string; campaign: string; channel: string; status: string }
 export interface CruvaProduct { id: string; title: string; price: number | null; stock: number | null; units_sold: number | null; open_plan: boolean | null; status: string | null }
 export interface CruvaCampaign { title: string; type: string; status: string; link: string | null; ends: string | null; metric: string | null }
+export interface CruvaSku { sku_id: string; sku_name: string | null; product_id: string; product_name: string; price: number | null; cogs: number | null; stock: number }
+export interface CruvaSkuPeriod { sku_id: string; units: number; gmv: number; orders: number }
+export interface CruvaStatDay { date: string; count: number }
+export interface CruvaStat { key: string; title: string; total: number; change_pct: number | null; days: CruvaStatDay[] }
+export interface CruvaSampleFunnel { total: number; by_status: { status: string; count: number; is_open: boolean; avg_age_days: number | null; oldest_age_days: number | null }[]; funnel: { stage: string; count: number }[] }
+export interface CruvaAutomation { id: string; name: string; status: string; message_type: string | null }
+
+/** The stat keys /shop/stats accepts that the dashboard reads. */
+export const CRUVA_STAT_KEYS = ['total_gmv', 'affiliate_gmv', 'total_units_sold', 'affiliate_units_sold', 'videos_posted', 'video_views', 'samples_approved', 'samples_shipped', 'dms_sent', 'aov'] as const;
 
 type Fetch = typeof fetch;
 const TTL = 60 * 60000;
@@ -86,6 +95,49 @@ export class CruvaRest {
       const rows = r.data?.results ?? r.results ?? [];
       return rows.map((x) => ({ title: String(x.title ?? ''), type: String(x.campaign_type ?? ''), status: String(x.status ?? ''), link: str(x.share_link), ends: str(x.end_date), metric: str(x.progress_metric) }));
     });
+  }
+
+  /** Daily stats for a date range (inclusive), one series per key; not cached (the pull engine stores them). */
+  async stats(shopId: string, from: string, to: string, keys: readonly string[] = CRUVA_STAT_KEYS, timezone?: string | null): Promise<CruvaStat[]> {
+    const r = await this.post<{ data?: { stats?: Record<string, unknown>[] } }>('/shop/stats', shopId, { date_range: { from, to }, include_charts: true, stats: [...keys], ...(timezone ? { timezone } : {}) });
+    return (r.data?.stats ?? []).map((x) => ({ key: String(x.key ?? ''), title: String(x.title ?? x.key ?? ''), total: num(x.total_count) ?? 0, change_pct: num(x.percent_change), days: ((x.daily_counts as Record<string, unknown>[] | undefined) ?? []).map((d) => ({ date: String(d.date ?? '').slice(0, 10), count: num(d.count) ?? 0 })).filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d.date)) }));
+  }
+
+  /** Shop performance score (0-5) or null when TikTok has not assigned one yet. */
+  async sps(shopId: string): Promise<number | null> {
+    const r = await this.post<{ data?: { sps?: unknown } }>('/shop/sps', shopId, {}, 'GET');
+    return num(r.data?.sps);
+  }
+
+  /** Sample requests by current status (To Review, Content Pending…) with ageing, over the last `days` days of requests. */
+  async sampleFunnel(shopId: string, from: string, to: string): Promise<CruvaSampleFunnel> {
+    const r = await this.post<{ data?: { total_count?: unknown; by_status?: Record<string, unknown>[]; funnel?: Record<string, unknown>[] } }>('/affiliate/samples/funnel', shopId, { time_field: 'timestamp', time_from: from, time_to: to, include_ignored: false });
+    const d = r.data ?? {};
+    return { total: num(d.total_count) ?? 0, by_status: (d.by_status ?? []).map((x) => ({ status: String(x.status ?? ''), count: num(x.count) ?? 0, is_open: Boolean(x.is_open), avg_age_days: num(x.avg_age_days), oldest_age_days: num(x.oldest_age_days) })), funnel: (d.funnel ?? []).map((x) => ({ stage: String(x.stage ?? ''), count: num(x.count) ?? 0 })) };
+  }
+
+  /** Every SKU with its current stock, price and custom COGS. */
+  async skus(shopId: string): Promise<CruvaSku[]> {
+    const r = await this.post<{ data?: Record<string, unknown>[] | { results?: Record<string, unknown>[] } }>('/shop/skus', shopId, { search: '', product_id: null, sort_by: 'stock', sort_direction: 'desc', page_size: 500 });
+    const rows = Array.isArray(r.data) ? r.data : (r.data?.results ?? []);
+    return rows.map((x) => ({ sku_id: String(x.sku_id ?? ''), sku_name: str(x.sku_name), product_id: String(x.product_id ?? ''), product_name: String(x.product_name ?? ''), price: num(x.price), cogs: num(x.custom_cogs), stock: num(x.stock) ?? 0 })).filter((x) => x.sku_id);
+  }
+
+  /** Units, GMV and orders per SKU over a date range (inclusive), every page. */
+  async skuPeriod(shopId: string, from: string, to: string): Promise<CruvaSkuPeriod[]> {
+    const out: CruvaSkuPeriod[] = [];
+    for (let page = 1; page <= 20; page += 1) {
+      const r = await this.post<{ data?: Record<string, unknown>[]; has_more?: boolean }>('/timeseries/skus', shopId, { page_size: 100, page_number: page, search_params: { date_range: { from, to }, sort_by: 'units_sold', sort_direction: 'DESC' } });
+      for (const x of r.data ?? []) out.push({ sku_id: String(x.sku_id ?? ''), units: num(x.units_sold) ?? 0, gmv: num(x.gmv) ?? 0, orders: num(x.orders) ?? 0 });
+      if (!r.has_more || !(r.data ?? []).length) break;
+    }
+    return out.filter((x) => x.sku_id);
+  }
+
+  /** Automations with their status, first 100 by GMV. */
+  async automations(shopId: string): Promise<CruvaAutomation[]> {
+    const r = await this.post<{ data?: { results?: Record<string, unknown>[] } }>('/automations/list', shopId, { page: 1, page_size: 100, sort_by: 'affiliate_gmv', sort_direction: 'desc' });
+    return (r.data?.results ?? []).map((x) => ({ id: String(x.campaign_id ?? ''), name: String(x.campaign_name ?? ''), status: String(x.status ?? ''), message_type: str(x.message_type) }));
   }
 
   /** Everything the reply model may want about one creator on one shop; failures become notes, never throws. */

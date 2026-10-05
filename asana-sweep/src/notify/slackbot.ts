@@ -56,6 +56,23 @@ export class SlackBot {
     }
   }
 
+  /** Every channel the bot can see, for the channel pickers (cached for ten minutes). */
+  private channelsCache: { at: number; rows: { id: string; name: string; is_private: boolean; is_member: boolean; num_members: number | null }[] } | null = null;
+  async listChannels(): Promise<{ id: string; name: string; is_private: boolean; is_member: boolean; num_members: number | null }[]> {
+    if (this.channelsCache && Date.now() - this.channelsCache.at < 10 * 60000) return this.channelsCache.rows;
+    const rows: { id: string; name: string; is_private: boolean; is_member: boolean; num_members: number | null }[] = [];
+    let cursor = '';
+    for (let i = 0; i < 10; i += 1) {
+      const data = await this.call<{ channels?: { id: string; name: string; is_private?: boolean; is_member?: boolean; num_members?: number }[]; response_metadata?: { next_cursor?: string } }>('conversations.list', { limit: 500, types: 'public_channel,private_channel', exclude_archived: true, ...(cursor ? { cursor } : {}) });
+      for (const c of data.channels ?? []) { rows.push({ id: c.id, name: c.name, is_private: Boolean(c.is_private), is_member: Boolean(c.is_member), num_members: typeof c.num_members === 'number' ? c.num_members : null }); this.channelCache.set(c.name.toLowerCase(), c.id); }
+      cursor = data.response_metadata?.next_cursor ?? '';
+      if (!cursor) break;
+    }
+    rows.sort((a, b) => Number(b.is_member) - Number(a.is_member) || a.name.localeCompare(b.name));
+    this.channelsCache = { at: Date.now(), rows };
+    return rows;
+  }
+
   /** Resolve "#name" to a channel id via conversations.list (cached per process). */
   private channelCache = new Map<string, string>();
   async channelId(nameOrId: string): Promise<string> {

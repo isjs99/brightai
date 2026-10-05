@@ -57,13 +57,13 @@ export default function StockPage() {
       <div className="page-head">
         <div>
           <h1>Stock</h1>
-          <p className="hint" style={{ margin: 0 }}>Days of stock left per SKU from the TikTok Shop inventory and the last 30 days of orders, and what to send in to cover the days you choose. The CSV goes straight to the client or the 3PL.</p>
+          <p className="hint" style={{ margin: 0 }}>Days of stock left per SKU from the TikTok Shop inventory and the last 30 days of orders, read through Cruva for every shop the TikTok app cannot reach (refreshed with the 4-hourly Cruva pull), and what to send in to cover the days you choose. The CSV goes straight to the client or the 3PL.</p>
         </div>
         <div className="actions">
           {connected && <span className="badge muted">Live</span>}
           <span className={`badge ${data.last_scan_error ? 'crit' : data.last_scan_at ? 'good' : 'muted'}`} title={data.last_scan_error ?? ''}>{data.scanning ? 'Refreshing…' : data.last_scan_at ? `Refreshed ${fmtRelative(data.last_scan_at)}` : 'Not refreshed yet'}</span>
           {!data.tts_configured && <span className="badge muted" title="TTS_APP_KEY / TTS_APP_SECRET">TikTok API not configured</span>}
-          {isAdmin && <button className="primary" disabled={busy === 'scan' || data.scanning} onClick={() => run('scan', () => api.stockScan(shop || undefined), 'Stock refreshed from TikTok Shop.')}>{busy === 'scan' ? 'Refreshing…' : shop ? 'Refresh this shop' : 'Refresh all shops'}</button>}
+          {isAdmin && <button className="primary" disabled={busy === 'scan' || data.scanning} onClick={() => run('scan', () => api.stockScan(shop || undefined), 'Stock refreshed.')}>{busy === 'scan' ? 'Refreshing…' : shop ? 'Refresh this shop' : 'Refresh all shops'}</button>}
         </div>
       </div>
       {error && <div className="banner crit">{error}</div>}
@@ -98,7 +98,7 @@ export default function StockPage() {
       <div className="toolbar">
         <select value={shop} onChange={(e) => setShop(e.target.value)}>
           <option value="">Pick a shop for the projection…</option>
-          {data.shops.map((s) => <option key={s.shop_id} value={s.shop_id}>{s.account_name ? `${s.account_name} · ` : ''}{s.shop_name}{s.next_stockout_days !== null ? ` (next stock-out in ${Math.max(0, Math.round(s.next_stockout_days))}d)` : s.skus ? '' : ' (no snapshot)'}</option>)}
+          {data.shops.map((s) => <option key={s.shop_id} value={s.shop_id}>{s.account_name ? `${s.account_name} · ` : ''}{s.shop_name}{s.source === 'cruva' ? ' (Cruva)' : ''}{s.next_stockout_days !== null ? ` (next stock-out in ${Math.max(0, Math.round(s.next_stockout_days))}d)` : s.skus ? '' : ' (no snapshot)'}</option>)}
         </select>
         {isAdmin && (
           <details style={{ marginLeft: 'auto' }}>
@@ -114,11 +114,11 @@ export default function StockPage() {
       </div>
 
       {!shop ? (
-        data.shops.length === 0 ? <div className="empty">No TikTok shops authorised yet. Authorise them under Promotions (TikTok Shop) and the stock snapshot follows.</div> : (
+        data.shops.length === 0 ? <div className="empty">No TikTok shop authorised and no Cruva shop linked yet. Authorise shops under Promotions (TikTok Shop) or set CRUVA_API_KEY and link shops under Cruva; the stock snapshot follows.</div> : (
           <div className="grid-wrap"><table><thead><tr><th>Shop</th><th>Account</th><th className="num">SKUs</th><th className="num">Out</th><th className="num">Critical</th><th className="num">Low</th><th>Next stock-out</th><th>Snapshot</th></tr></thead><tbody>
             {data.shops.map((s) => (
               <tr key={s.shop_id} className="clickable" onClick={() => setShop(s.shop_id)}>
-                <td><b>{s.shop_name}</b>{s.market ? <span className="badge muted" style={{ marginLeft: 6 }}>{s.market}</span> : null}{!s.token_ok && <span className="badge crit" style={{ marginLeft: 6 }}>auth</span>}</td>
+                <td><b>{s.shop_name}</b>{s.market ? <span className="badge muted" style={{ marginLeft: 6 }}>{s.market}</span> : null}{s.source === 'cruva' ? <span className="badge accent" style={{ marginLeft: 6 }} title="Stock and sales read through Cruva: the TikTok app is not connected for this shop">via Cruva</span> : !s.token_ok && <span className="badge crit" style={{ marginLeft: 6 }}>auth</span>}</td>
                 <td className="sub">{s.account_name ?? '–'}</td>
                 <td className="num">{s.skus}</td>
                 <td className="num">{s.out || ''}</td>

@@ -8,7 +8,7 @@ import { isDue } from '../checklist/evaluate.js';
 import { DEFAULT_REMINDER_TEXT, incompleteByPerson, notifyAms, renderReminder } from '../checklist/reminders.js';
 import { slackBot } from '../notify/slackbot.js';
 import { liveEvents } from '../live/events.js';
-import { buildCalendar, buildGmv, buildGmvExplore } from '../reports/index.js';
+import { buildAlertCalendar, buildCalendar, buildGmv, buildGmvExplore } from '../reports/index.js';
 import { syncGmv } from '../gmv/sync.js';
 import { cruva } from '../gmv/cruva.js';
 import { discoverWindsorShops, syncWindsorGmv, windsor, windsorStatus } from '../gmv/windsor.js';
@@ -650,6 +650,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   };
 
   r.get('/calendar', (req, res) => res.json(buildCalendar(q, monthParam(req))));
+  r.get('/calendar/alerts', (req, res) => res.json(buildAlertCalendar(q, monthParam(req))));
 
   // ---- GMV ----
   r.get('/gmv', (req, res) => res.json(buildGmv(q, monthParam(req))));
@@ -775,7 +776,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
       connections: [
         { key: 'windsor', name: 'Windsor.ai (TikTok Shop data)', role: 'Shops, orders, stock and payouts for account management and GMV', configured: w.configured, ok: w.configured && !w.last_error, detail: !w.configured ? 'WINDSOR_API_KEY not set' : w.last_error ? `Last sync error: ${w.last_error}` : `${w.discovered.length} shop(s) discovered, ${wShops.length} linked to accounts${w.last_sync_at ? `, last sync ${w.last_sync_at}` : ', never synced'}`, link: '/gmv', testable: w.configured },
         { key: 'cruva_mcp', name: 'Cruva MCP (best practice rollout)', role: 'The portal reads every Cruva shop\'s automations, groups, lists, briefs and senders and rolls out the missing pieces through mcp.cruva.com', configured: scheduler.playbook.data().mcp_configured, ok: scheduler.playbook.data().mcp_configured && !scheduler.playbook.data().last_error && Boolean(scheduler.playbook.data().last_check_at), detail: !scheduler.playbook.data().mcp_configured ? 'CRUVA_API_KEY not set (Cruva › Dashboard › API › Generate API key)' : scheduler.playbook.data().last_check_at ? `${scheduler.playbook.data().shops.length} shop(s) linked, last check ${scheduler.playbook.data().last_check_at}${scheduler.playbook.data().last_error ? `; ${scheduler.playbook.data().last_error}` : ''}` : 'Key set, no check yet (Accounts › Cruva › Sync shops)', link: '/cruva', testable: scheduler.playbook.data().mcp_configured },
-        { key: 'cruva', name: 'Cruva (REST API)', role: 'Affiliate GMV per shop for the GMV page; optional, the daily review routine covers the creator side over MCP', configured: cruva.configured, ok: cruva.configured && gm?.status !== 'error', detail: !cruva.configured ? `CRUVA_API_KEY not set (separate Cruva subscription); ${q.listShops('cruva').length} Cruva shop(s) linked to accounts for the routine` : gm ? `Last GMV sync ${gm.status} at ${gm.finished_at ?? gm.started_at}${gm.error_message ? `: ${gm.error_message}` : ''}` : 'never synced', link: '/gmv', testable: false },
+        { key: 'cruva', name: 'Cruva (REST API pull)', role: 'Every 4 hours: daily GMV, affiliate GMV, units, videos, DMs, samples, performance score and stock per SKU for every linked shop; fills the Overview, GMV and Stock pages wherever the TikTok app is not connected', configured: scheduler.cruvaPull.status().configured, ok: scheduler.cruvaPull.status().configured && Boolean(scheduler.cruvaPull.status().last_run_at) && !scheduler.cruvaPull.status().last_error, detail: !scheduler.cruvaPull.status().configured ? `CRUVA_API_KEY not set; ${q.listShops('cruva').length} Cruva shop(s) linked` : scheduler.cruvaPull.status().last_run_at ? `${scheduler.cruvaPull.status().shops_ok}/${scheduler.cruvaPull.status().shops} shop(s) pulled, last ${scheduler.cruvaPull.status().last_run_at}${scheduler.cruvaPull.status().last_error ? `; ${scheduler.cruvaPull.status().last_error}` : ''}` : 'Key set, first pull runs shortly after start', link: '/monitor', testable: scheduler.cruvaPull.status().configured },
         { key: 'tts', name: 'TikTok Shop Partner app', role: 'Promotions push and the CS / affiliate inbox (needs Partner Center approval)', configured: tts.configured, ok: tts.configured && ttsShops.length > 0 && ttsShops.every((s) => s.token_ok), detail: !tts.configured ? 'TTS_APP_KEY / TTS_APP_SECRET not set' : ttsShops.length ? `${ttsShops.length} shop(s) authorised${ttsShops.some((s) => !s.token_ok) ? ', some tokens expired' : ''}` : 'app configured, no shop authorised yet', link: '/promotions', testable: false },
         { key: 'apollo', name: 'Apollo.io', role: 'Decision makers for the BD pipeline', configured: ap.configured, ok: ap.configured && ap.ok && !ap.exhausted, detail: !ap.configured ? 'APOLLO_API_KEY not set' : ap.exhausted ? 'out of credits' : ap.error ? ap.error : `${ap.remaining ?? '?'} credits left`, link: '/bd', testable: true },
         { key: 'fastmoss', name: 'FastMoss', role: 'Daily pull of fast-rising shops', configured: fm.configured, ok: fm.configured && !fm.last_error, detail: !fm.configured ? 'FASTMOSS_API_KEY not set' : fm.last_error ? fm.last_error : fm.last_pull_at ? `last pull ${fm.last_pull_at}` : 'no pull yet', link: '/bd', testable: true },
@@ -2797,6 +2798,18 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   const bad = (err: unknown): never => { throw new HttpError(400, (err as Error).message); };
   r.get('/playbook', (_req, res) => res.json(playbook.data()));
   r.get('/playbook/test', async (_req, res) => res.json(await cruvaMcp.test()));
+  // Cruva pull (REST): stats, score, samples and stock for every linked shop.
+  r.get('/cruva/pull', (_req, res) => res.json(scheduler.cruvaPull.status()));
+  r.post('/cruva/pull', async (req, res) => {
+    const shopId = optText((req.body ?? {}).shop_id) ?? undefined;
+    const result = await scheduler.cruvaPull.run(shopId);
+    res.json({ ...result, ...scheduler.cruvaPull.status() });
+  });
+  // Slack channels for the pickers.
+  r.get('/slack/channels', async (_req, res) => {
+    if (!slackBot.configured) return res.json({ configured: false, channels: [] });
+    try { res.json({ configured: true, channels: await slackBot.listChannels() }); } catch (err) { throw new HttpError(502, (err as Error).message); }
+  });
   r.post('/playbook/shops/sync', async (_req, res) => {
     try { const result = await playbook.syncShops(); res.json({ ...result, ...playbook.data() }); } catch (err) { bad(err); }
   });

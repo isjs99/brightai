@@ -4,6 +4,8 @@ import { tts, type TtsClient } from '../tts/client.js';
 import { shopCredentials } from '../tts/promotions.js';
 import { liveEvents } from '../live/events.js';
 import { log } from '../logger.js';
+import { marketOfShopName } from '../reports/index.js';
+import { cruvaRest } from '../cruva/rest.js';
 
 /**
  * Stock countdown and replenishment projection per TikTok shop. A snapshot per SKU (on hand from
@@ -63,7 +65,22 @@ export class StockTracker {
   private scanning = false;
   private timer: NodeJS.Timeout | null = null;
 
+  /** Set by the scheduler: refreshes the Cruva-sourced snapshots (the Cruva pull) when the page asks for a refresh. */
+  cruvaRefresh: ((shopId?: string) => Promise<{ shops: number; errors: string[] }>) | null = null;
+
   constructor(private q: Queries, private client: TtsClient = tts) {}
+
+  /** Every shop the page lists: TikTok shops, plus the Cruva shops whose market no authorised TikTok shop on the account covers. */
+  shopList(): { shop_id: string; shop_name: string; account_id: number | null; market: string | null; token_ok: boolean; source: 'tts' | 'cruva' }[] {
+    const ttsShops = this.q.listTtsShops();
+    const out: { shop_id: string; shop_name: string; account_id: number | null; market: string | null; token_ok: boolean; source: 'tts' | 'cruva' }[] = ttsShops.map((s) => ({ shop_id: s.id, shop_name: s.name, account_id: s.account_id, market: s.market, token_ok: s.token_ok, source: 'tts' as const }));
+    for (const c of this.q.listShops('cruva')) {
+      const market = marketOfShopName(c.shop_name);
+      const covered = ttsShops.some((t) => t.account_id === c.account_id && t.token_ok && (!market || (t.market ?? '').toUpperCase() === market));
+      if (!covered) out.push({ shop_id: c.shop_id, shop_name: c.shop_name, account_id: c.account_id, market, token_ok: cruvaRest.configured, source: 'cruva' as const });
+    }
+    return out;
+  }
 
   start(): void {
     this.stop();
@@ -81,13 +98,13 @@ export class StockTracker {
     const s = stockSettings(this.q);
     const cover = Math.min(Math.max(Math.round(coverDays ?? s.default_cover_days), 1), 365);
     const lead = Math.min(Math.max(Math.round(leadDays ?? s.default_lead_days), 0), 120);
-    const shop = this.q.listTtsShops().find((x) => x.id === shopId);
+    const shop = this.shopList().find((x) => x.shop_id === shopId);
     const account = shop?.account_id ? this.q.getAccount(shop.account_id) : null;
     const rows = projectRows(this.q.listStock(shopId), { coverDays: cover, leadDays: lead, critDays: s.crit_days, warnDays: s.warn_days });
     const order: Record<StockProjectionRow['level'], number> = { out: 0, crit: 1, warn: 2, ok: 3, idle: 4 };
     rows.sort((a, b) => order[a.level] - order[b.level] || (a.days_left ?? Infinity) - (b.days_left ?? Infinity) || a.product_title.localeCompare(b.product_title));
     return {
-      shop_id: shopId, shop_name: shop?.name ?? shopId, account_id: shop?.account_id ?? null, account_name: account?.name ?? null, cover_days: cover, lead_days: lead,
+      shop_id: shopId, shop_name: shop?.shop_name ?? shopId, account_id: shop?.account_id ?? null, account_name: account?.name ?? null, cover_days: cover, lead_days: lead,
       captured_at: rows[0]?.captured_at ?? null, rows,
       totals: { skus: rows.length, send_in_units: rows.reduce((n, r) => n + r.send_in, 0), send_in_skus: rows.filter((r) => r.send_in > 0).length, out: rows.filter((r) => r.level === 'out').length, crit: rows.filter((r) => r.level === 'crit').length, warn: rows.filter((r) => r.level === 'warn').length },
     };
@@ -97,14 +114,14 @@ export class StockTracker {
     const s = stockSettings(this.q);
     const all = projectRows(this.q.listStock(), { coverDays: s.default_cover_days, leadDays: s.default_lead_days, critDays: s.crit_days, warnDays: s.warn_days });
     const accounts = new Map(this.q.listAccounts().map((a) => [a.id, a.name]));
-    const shops = this.q.listTtsShops().map((shop) => {
-      const mine = all.filter((r) => r.shop_id === shop.id);
+    const shops = this.shopList().map((shop) => {
+      const mine = all.filter((r) => r.shop_id === shop.shop_id);
       const soonest = mine.filter((r) => r.days_left !== null && !r.exclude).map((r) => r.days_left as number).sort((a, b) => a - b)[0];
-      return { shop_id: shop.id, shop_name: shop.name, account_id: shop.account_id, account_name: shop.account_id ? accounts.get(shop.account_id) ?? null : null, market: shop.market, token_ok: shop.token_ok, skus: mine.length, captured_at: mine[0]?.captured_at ?? null, out: mine.filter((r) => r.level === 'out').length, crit: mine.filter((r) => r.level === 'crit').length, warn: mine.filter((r) => r.level === 'warn').length, next_stockout_days: soonest ?? null };
+      return { shop_id: shop.shop_id, shop_name: shop.shop_name, account_id: shop.account_id, account_name: shop.account_id ? accounts.get(shop.account_id) ?? null : null, market: shop.market, token_ok: shop.token_ok, source: shop.source, skus: mine.length, captured_at: mine[0]?.captured_at ?? null, out: mine.filter((r) => r.level === 'out').length, crit: mine.filter((r) => r.level === 'crit').length, warn: mine.filter((r) => r.level === 'warn').length, next_stockout_days: soonest ?? null };
     });
     const names = new Map(shops.map((x) => [x.shop_id, x]));
     const alerts = all.filter((r) => !r.exclude && (r.level === 'out' || r.level === 'crit' || r.level === 'warn')).sort((a, b) => (a.days_left ?? -1) - (b.days_left ?? -1)).slice(0, 100).map((r) => ({ ...r, shop_name: names.get(r.shop_id)?.shop_name ?? r.shop_id, account_name: names.get(r.shop_id)?.account_name ?? null }));
-    return { shops, alerts, settings: s, last_scan_at: this.q.getSetting('stock_last_scan_at', '') || null, last_scan_error: this.q.getSetting('stock_last_scan_error', '') || null, scanning: this.scanning, tts_configured: this.client.configured };
+    return { shops, alerts, settings: s, last_scan_at: this.q.getSetting('stock_last_scan_at', '') || null, last_scan_error: this.q.getSetting('stock_last_scan_error', '') || null, scanning: this.scanning, tts_configured: this.client.configured, cruva_configured: cruvaRest.configured };
   }
 
   /** Pull products (stock on hand) and the last 30 days of orders (velocity) for one shop or every authorised shop. */
@@ -115,7 +132,12 @@ export class StockTracker {
     let shops = 0;
     let skus = 0;
     try {
-      if (!this.client.configured) throw new Error('TikTok Shop app is not configured (TTS_APP_KEY / TTS_APP_SECRET).');
+      const cruvaShop = shopId ? this.shopList().find((s) => s.shop_id === shopId && s.source === 'cruva') : null;
+      if (cruvaShop || (!shopId && this.cruvaRefresh && cruvaRest.configured)) {
+        if (this.cruvaRefresh) { const r = await this.cruvaRefresh(cruvaShop ? cruvaShop.shop_id : undefined); shops += r.shops; errors.push(...r.errors); skus += this.q.listStock().filter((x) => x.source === 'cruva').length; }
+        if (cruvaShop) { this.q.setSetting('stock_last_scan_at', new Date().toISOString()); this.q.setSetting('stock_last_scan_error', errors.length ? errors.join(' · ').slice(0, 500) : ''); return { shops, skus, errors }; }
+      }
+      if (!this.client.configured) { if (shops) { this.q.setSetting('stock_last_scan_at', new Date().toISOString()); this.q.setSetting('stock_last_scan_error', errors.length ? errors.join(' · ').slice(0, 500) : ''); return { shops, skus, errors }; } throw new Error('TikTok Shop app is not configured (TTS_APP_KEY / TTS_APP_SECRET).'); }
       for (const shop of this.q.listTtsShops().filter((s) => s.token_ok && (!shopId || s.id === shopId))) {
         try {
           const n = await this.scanShop(shop.id, shop.account_id);

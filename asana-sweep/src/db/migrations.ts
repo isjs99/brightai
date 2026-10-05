@@ -1444,6 +1444,17 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 37,
+    name: 'stock snapshots carry their source; reply policies get per-shop switches and languages',
+    up(db) {
+      db.exec(`
+        ALTER TABLE stock_snapshots ADD COLUMN source TEXT NOT NULL DEFAULT 'tts';
+        ALTER TABLE reply_policies ADD COLUMN shops_off_json TEXT NOT NULL DEFAULT '[]';
+        ALTER TABLE reply_policies ADD COLUMN languages_json TEXT NOT NULL DEFAULT '{}';
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

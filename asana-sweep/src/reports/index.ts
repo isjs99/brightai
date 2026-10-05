@@ -5,7 +5,7 @@ import { attainmentOf, bonusTarget, growthPct, projectMonth, requiredGrowthPct, 
 import { cruva } from '../gmv/cruva.js';
 import { windsor } from '../gmv/windsor.js';
 import { DEFAULT_REPORT_CURRENCY, parseFx, toReportCurrency } from '../gmv/currency.js';
-import type {
+import type { AlertCalendar, AlertDay, AlertDayAccount, AlertLight, CheckStatus,
   Account,
   BonusStatus,
   CalendarAccountRow,
@@ -76,6 +76,54 @@ export function buildCalendar(q: Queries, month: string): CalendarData {
   return { month, workdays, today, target: 100, ams, totals: { checked_days: checked, complete_days: complete, missed: checked - complete, compliance: pct(complete, checked) } };
 }
 
+// ---- Alerts calendar ----
+
+/**
+ * One cell per calendar day: the traffic light (red = a critical incident or flag was open, amber = a warning,
+ * green = nothing open and the checklist complete, grey = nothing recorded), with the incidents, flags and
+ * checklist state per account behind it.
+ */
+export function buildAlertCalendar(q: Queries, month: string): AlertCalendar {
+  const tz = q.getSetting('check_timezone', 'Europe/Madrid');
+  const today = todayIn(tz);
+  const { from, to } = monthRange(month);
+  const accounts = q.listAccounts().filter((a) => a.enabled);
+  const incidents = q.listIncidentsBetween(from, to);
+  const flags = q.listFlagsBetween(from, to);
+  const checks = q.listChecksBetween(from, to);
+  const checkOf = new Map<string, Check>();
+  for (const c of checks) checkOf.set(`${c.account_id}:${c.check_date}`, c);
+  const days: AlertDay[] = [];
+  const d0 = Date.parse(from + 'T12:00:00Z'); const d1 = Date.parse(to + 'T12:00:00Z');
+  const openOn = (date: string, created: string, resolved: string | null) => created.slice(0, 10) <= date && (!resolved || resolved.slice(0, 10) >= date);
+  for (let t = d0; t <= d1; t += 86400000) {
+    const date = new Date(t).toISOString().slice(0, 10);
+    const perAccount: AlertDayAccount[] = accounts.map((a) => {
+      const inc = incidents.filter((i) => i.account_id === a.id && openOn(date, i.created_at, i.resolved_at)).map((i) => ({ id: i.id, kind: i.kind, title: i.title, severity: i.severity, message: i.message, slack_channel: i.slack_channel, posted_at: i.posted_at, resolved_at: i.resolved_at, opened_today: i.created_at.slice(0, 10) === date }));
+      const fl = flags.filter((f) => f.account_id === a.id && openOn(date, f.first_seen_at, f.resolved_at)).map((f) => ({ code: f.code, severity: f.severity, message: f.message, opened_today: f.first_seen_at.slice(0, 10) === date, resolved_at: f.resolved_at }));
+      const c = checkOf.get(`${a.id}:${date}`);
+      const checklist = c ? { status: c.status, combined_complete: c.combined_complete, am_done: c.am_done, am_total: c.am_total, aa_done: c.aa_done, aa_total: c.aa_total } : null;
+      const crit = inc.some((i) => i.severity === 'crit') || fl.some((f) => f.severity === 'crit');
+      const warn = inc.some((i) => i.severity === 'warn') || fl.some((f) => f.severity === 'warn');
+      const light: AlertLight = date > today ? 'none' : crit ? 'crit' : warn ? 'warn' : inc.length || fl.length || checklist ? 'good' : 'none';
+      return { account_id: a.id, account_name: a.name, am_name: a.am_name, light, incidents: inc, flags: fl, checklist };
+    });
+    const count = (sev: 'crit' | 'warn' | 'info') => perAccount.reduce((n, a) => n + a.incidents.filter((i) => i.severity === sev && i.opened_today).length + a.flags.filter((f) => f.severity === sev && f.opened_today).length, 0);
+    const resolved = perAccount.reduce((n, a) => n + a.incidents.filter((i) => i.resolved_at?.slice(0, 10) === date).length + a.flags.filter((f) => f.resolved_at?.slice(0, 10) === date).length, 0);
+    const checked = perAccount.filter((a) => a.checklist && COUNTABLE.has(a.checklist.status as CheckStatus)).length;
+    const complete = perAccount.filter((a) => a.checklist?.combined_complete).length;
+    const light: AlertLight = date > today ? 'none' : perAccount.some((a) => a.light === 'crit') ? 'crit' : perAccount.some((a) => a.light === 'warn') ? 'warn' : perAccount.some((a) => a.light === 'good') ? 'good' : 'none';
+    days.push({ date, light, crit: count('crit'), warn: count('warn'), info: count('info'), resolved, checklist_complete: complete, checklist_checked: checked, accounts: perAccount.filter((a) => a.light !== 'none' || a.checklist) });
+  }
+  const past = days.filter((d) => d.date <= today);
+  return {
+    month, today, days,
+    totals: { crit: days.reduce((n, d) => n + d.crit, 0), warn: days.reduce((n, d) => n + d.warn, 0), info: days.reduce((n, d) => n + d.info, 0), resolved: days.reduce((n, d) => n + d.resolved, 0), days_red: past.filter((d) => d.light === 'crit').length, days_amber: past.filter((d) => d.light === 'warn').length, days_green: past.filter((d) => d.light === 'good').length },
+    channels: accounts.map((a) => ({ id: a.id, name: a.name, slack_channel: a.slack_channel })),
+    default_channel: q.getSetting('incidents_default_channel', ''),
+  };
+}
+
 // ---- GMV ----
 
 export function gmvSettings(q: Queries): GmvSettings {
@@ -94,6 +142,23 @@ export function gmvSettings(q: Queries): GmvSettings {
  * While the month is running, "to date" excludes today (today's figures are still moving).
  * Each account's target is the bonus rule applied to last month's GMV unless a manual target is set.
  */
+/**
+ * An account can be linked to both a Windsor shop (TikTok orders) and a Cruva shop for the same market. Windsor is
+ * the primary source when it has rows; Cruva fills in only for the accounts (or markets) Windsor does not cover.
+ */
+export function shopsForGmv<T extends { shop_id: string; shop_name: string; source: 'cruva' | 'windsor' }>(mine: T[], hasRows: (shopId: string) => boolean): T[] {
+  const windsor = mine.filter((s) => s.source === 'windsor' && hasRows(s.shop_id));
+  if (!windsor.length) return mine;
+  const covered = new Set(windsor.map((s) => marketOfShopName(s.shop_name) ?? '*'));
+  return mine.filter((s) => s.source === 'windsor' || (!covered.has('*') && !covered.has(marketOfShopName(s.shop_name) ?? '*')));
+}
+
+/** "Kijimea IT", "TBC (DE)", "Vaseline - FR" → the two-letter market at the end of a shop name, or null. */
+export function marketOfShopName(name: string): string | null {
+  const m = name.trim().match(/(?:^|[\s(\-_])([A-Z]{2})\)?(?:\s*\[[^\]]*\])?$/);
+  return m ? (m[1] === 'GB' ? 'UK' : m[1]) : null;
+}
+
 export function buildGmv(q: Queries, month: string): GmvData {
   const tz = q.getSetting('check_timezone', 'Europe/Madrid');
   const today = todayIn(tz);
@@ -136,7 +201,7 @@ export function buildGmv(q: Queries, month: string): GmvData {
   const accounts = q.listAccounts();
   const accountRows: GmvAccountRow[] = accounts
     .map((account) => {
-      const mine = shops.filter((s) => s.account_id === account.id);
+      const mine = shopsForGmv(shops.filter((s) => s.account_id === account.id), (id) => byShop.has(id) || prevByShop.has(id));
       const shopRows: GmvShopRow[] = mine.map((shop) => {
         const list = byShop.get(shop.shop_id) ?? [];
         const gmv = round2(sum(list.map((r) => r.total_gmv)));
@@ -277,7 +342,7 @@ export function buildGmvExplore(q: Queries, from: string, to: string, opts: { ac
   const rows: GmvExploreRow[] = accounts
     .filter((a) => opts.accountId === null || opts.accountId === undefined || a.id === opts.accountId)
     .map((a) => {
-      const mine = shops.filter((s) => s.account_id === a.id);
+      const mine = shopsForGmv(shops.filter((s) => s.account_id === a.id), (id) => cur.some((r) => r.shop_id === id) || prev.some((r) => r.shop_id === id));
       const shopRows = mine.map((s) => {
         const c = cur.filter((r) => r.shop_id === s.shop_id);
         const p = prev.filter((r) => r.shop_id === s.shop_id);

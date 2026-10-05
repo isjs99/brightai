@@ -1,6 +1,8 @@
 import { useEffect, useState, type ReactElement } from 'react';
-import type { CalendarAccountRow, CalendarCell, CalendarData } from '../../../sweep/types';
-import { api, currentMonth, fmtPct, monthLabel, shiftMonth } from '../api';
+import type { AlertCalendar, AlertDay, CalendarAccountRow, CalendarCell, CalendarData } from '../../../sweep/types';
+import { Link, useSearchParams } from 'react-router-dom';
+import { useAccountScope } from '../hubs';
+import { api, currentMonth, fmtPct, fmtRelative, monthLabel, shiftMonth, useLiveUpdates } from '../api';
 
 const CELL: Record<string, string> = { complete: '✓', partial: '◐', none: '○', empty: '–', error: '!', unlinked: '–' };
 
@@ -26,6 +28,98 @@ function Compliance({ value, target }: { value: number | null; target: number })
 }
 
 export default function CalendarPage() {
+  const [params, setParams] = useSearchParams();
+  const view = params.get('view') === 'alerts' ? 'alerts' : 'checklist';
+  const setView = (v: 'checklist' | 'alerts') => { const n = new URLSearchParams(params); if (v === 'alerts') n.set('view', 'alerts'); else n.delete('view'); setParams(n); };
+  if (view === 'alerts') return <AlertsCalendar onView={setView} />;
+  return <ChecklistCalendar onView={setView} />;
+}
+
+function ViewTabs({ view, onView }: { view: 'checklist' | 'alerts'; onView: (v: 'checklist' | 'alerts') => void }) {
+  return <div className="tabs" style={{ marginBottom: 0 }}><button className={`tab ${view === 'checklist' ? 'active' : ''}`} onClick={() => onView('checklist')}>Checklist</button><button className={`tab ${view === 'alerts' ? 'active' : ''}`} onClick={() => onView('alerts')}>Alerts</button></div>;
+}
+
+/** Alerts view: a month of traffic lights. Red = a critical incident or flag was open that day, amber = a warning, green = nothing open and the checklist done. */
+function AlertsCalendar({ onView }: { onView: (v: 'checklist' | 'alerts') => void }) {
+  const scope = useAccountScope();
+  const [month, setMonth] = useState(currentMonth());
+  const [data, setData] = useState<AlertCalendar | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [sel, setSel] = useState<string | null>(null);
+  const load = () => api.alertCalendar(month).then((d) => { setData(d); setSel((cur) => cur && cur.startsWith(month) ? cur : d.today.startsWith(month) ? d.today : d.days[d.days.length - 1]?.date ?? null); }).catch((e) => setError((e as Error).message));
+  useEffect(() => { setData(null); load(); }, [month]); // eslint-disable-line react-hooks/exhaustive-deps
+  useLiveUpdates((e) => { if (e.kind === 'incidents' || e.kind === 'monitor' || e.kind === 'check') load(); });
+  const scoped = (d: AlertDay) => (scope === null ? d.accounts : d.accounts.filter((a) => a.account_id === scope));
+  const lightOf = (d: AlertDay) => { if (scope === null) return d.light; const mine = scoped(d); return d.date > (data?.today ?? '') ? 'none' : mine.some((a) => a.light === 'crit') ? 'crit' : mine.some((a) => a.light === 'warn') ? 'warn' : mine.some((a) => a.light === 'good') ? 'good' : 'none'; };
+  const day = data?.days.find((d) => d.date === sel) ?? null;
+  const first = data ? new Date(data.days[0].date + 'T12:00:00Z').getUTCDay() : 0; // 0 = Sunday
+  const lead = (first + 6) % 7; // Monday first
+  const LIGHT_LABEL = { crit: 'Critical', warn: 'Warning', good: 'All clear', none: 'Nothing recorded' } as const;
+  return (
+    <>
+      <div className="page-head">
+        <div>
+          <h1>Calendar</h1>
+          <p className="hint" style={{ margin: 0 }}>Every day graded by what was open on it: red for a critical incident or flag, amber for a warning, green when nothing was open and the checklist was done. Click a day for the alerts, flags and checklist behind it.</p>
+        </div>
+        <div className="toolbar" style={{ margin: 0 }}>
+          <ViewTabs view="alerts" onView={onView} />
+          <button className="small" onClick={() => setMonth(shiftMonth(month, -1))}>‹</button>
+          <b>{monthLabel(month)}</b>
+          <button className="small" onClick={() => setMonth(shiftMonth(month, 1))} disabled={month >= currentMonth()}>›</button>
+        </div>
+      </div>
+      {error && <div className="banner crit">{error}</div>}
+      {!data ? <p>Loading…</p> : (
+        <>
+          <div className="kpis">
+            <div className="kpi"><div className="v">{data.totals.days_red}</div><div className="k">red days</div><div className="d">{data.totals.days_amber} amber · {data.totals.days_green} green</div></div>
+            <div className="kpi"><div className="v">{data.totals.crit}</div><div className="k">critical alerts opened</div><div className="d">{data.totals.warn} warnings · {data.totals.info} info</div></div>
+            <div className="kpi"><div className="v">{data.totals.resolved}</div><div className="k">resolved this month</div></div>
+            <div className="kpi"><div className="v">{data.default_channel || '–'}</div><div className="k">default Slack channel</div><div className="d"><Link to="/monitor?tab=incidents">Channel pickers ▸</Link></div></div>
+          </div>
+          <div className="alert-split">
+            <div className="alert-cal">
+              {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map((d) => <div key={d} className="dow">{d}</div>)}
+              {Array.from({ length: lead }).map((_, i) => <div key={`e${i}`} className="alert-day empty" />)}
+              {data.days.map((d) => {
+                const l = lightOf(d);
+                const mine = scoped(d);
+                const crit = mine.reduce((n, a) => n + a.incidents.filter((i) => i.severity === 'crit' && i.opened_today).length + a.flags.filter((f) => f.severity === 'crit' && f.opened_today).length, 0);
+                const warn = mine.reduce((n, a) => n + a.incidents.filter((i) => i.severity === 'warn' && i.opened_today).length + a.flags.filter((f) => f.severity === 'warn' && f.opened_today).length, 0);
+                const checked = mine.filter((a) => a.checklist).length; const done = mine.filter((a) => a.checklist?.combined_complete).length;
+                return (
+                  <button key={d.date} className={`alert-day ${l} ${sel === d.date ? 'sel' : ''} ${d.date === data.today ? 'today' : ''}`} onClick={() => setSel(d.date)} title={`${d.date}: ${LIGHT_LABEL[l]}`}>
+                    <span className="d">{Number(d.date.slice(8, 10))}<span className={`light ${l}`} /></span>
+                    {d.date <= data.today && <span className="n">{crit ? `${crit} critical · ` : ''}{warn ? `${warn} warning${warn === 1 ? '' : 's'}` : crit ? '' : l === 'good' ? 'clear' : ''}</span>}
+                    {d.date <= data.today && checked > 0 && <span className="n">checklist {done}/{checked}</span>}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="card">
+              {!day ? <p className="sub">Pick a day.</p> : (
+                <>
+                  <div className="page-head" style={{ marginBottom: 8 }}><h3 style={{ margin: 0 }}>{new Date(day.date + 'T12:00:00Z').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })}</h3><span className={`badge ${lightOf(day) === 'crit' ? 'crit' : lightOf(day) === 'warn' ? 'warn' : lightOf(day) === 'good' ? 'good' : 'muted'}`}>{LIGHT_LABEL[lightOf(day)]}</span></div>
+                  {scoped(day).length === 0 ? <p className="sub">Nothing recorded for this day.</p> : scoped(day).filter((a) => a.light !== 'none' || a.checklist).sort((a, b) => ['crit', 'warn', 'good', 'none'].indexOf(a.light) - ['crit', 'warn', 'good', 'none'].indexOf(b.light)).map((a) => (
+                    <div key={a.account_id} className={`alert-acc ${a.light}`}>
+                      <div className="page-head" style={{ marginBottom: 4 }}><b>{a.account_name}</b><span className="sub">{a.am_name ?? ''}{a.checklist ? ` · checklist ${a.checklist.combined_complete ? 'done' : `${a.checklist.am_done + a.checklist.aa_done}/${a.checklist.am_total + a.checklist.aa_total}`}` : ' · no checklist record'}</span></div>
+                      {a.incidents.map((i) => <div key={i.id} className="sub" style={{ marginBottom: 3 }}><span className={`badge ${i.severity === 'crit' ? 'crit' : i.severity === 'warn' ? 'warn' : 'muted'}`}>{i.severity}</span> <b>{i.title}</b> {i.message}{i.slack_channel ? <span className="sub"> · {i.posted_at ? `posted to ${i.slack_channel}` : `not posted (${i.slack_channel})`}</span> : null}{i.resolved_at ? <span className="sub"> · resolved {fmtRelative(i.resolved_at)}</span> : i.opened_today ? <span className="sub"> · opened</span> : <span className="sub"> · still open</span>}</div>)}
+                      {a.flags.filter((f) => !a.incidents.some((i) => i.message.startsWith(f.message.slice(0, 40)))).map((f, idx) => <div key={idx} className="sub" style={{ marginBottom: 3 }}><span className={`badge ${f.severity === 'crit' ? 'crit' : f.severity === 'warn' ? 'warn' : 'muted'}`}>{f.severity}</span> {f.message}{f.resolved_at ? ` · resolved ${fmtRelative(f.resolved_at)}` : ''}</div>)}
+                      {a.incidents.length === 0 && a.flags.length === 0 && <div className="sub">No alerts.</div>}
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function ChecklistCalendar({ onView }: { onView: (v: 'checklist' | 'alerts') => void }) {
   const [month, setMonth] = useState(currentMonth());
   const [data, setData] = useState<CalendarData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +157,7 @@ export default function CalendarPage() {
           <p className="hint" style={{ margin: 0 }}>Who checked off their checklist on each working day. Target is 100%. "Missed" counts every account-day that was not fully complete at the check time.</p>
         </div>
         <div className="toolbar" style={{ margin: 0 }}>
+          <ViewTabs view="checklist" onView={onView} />
           <button className="small" onClick={() => setMonth(shiftMonth(month, -1))}>‹</button>
           <b>{monthLabel(month)}</b>
           <button className="small" onClick={() => setMonth(shiftMonth(month, 1))} disabled={month >= currentMonth()}>›</button>

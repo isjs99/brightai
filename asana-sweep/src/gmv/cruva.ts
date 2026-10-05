@@ -1,4 +1,6 @@
 import { log } from '../logger.js';
+import { CruvaRest } from '../cruva/rest.js';
+import { daysFromStats } from '../cruva/pull.js';
 
 /**
  * Cruva REST client (api.cruva.com). Auth is x-api-key + x-shop-id headers per Cruva's docs.
@@ -25,8 +27,14 @@ export class CruvaClient {
     return Boolean(this.apiKey);
   }
 
+  /** Daily GMV, affiliate GMV and units from POST /shop/stats (Cruva's documented endpoint); the legacy path is tried when it is set explicitly. */
   async shopStats(shopId: string, from: string, to: string): Promise<DailyGmv[]> {
     if (!this.apiKey) throw new Error('CRUVA_API_KEY is not set.');
+    if (!process.env.CRUVA_STATS_PATH?.trim()) {
+      const rest = new CruvaRest(this.apiKey, this.baseUrl);
+      const days = daysFromStats(await rest.stats(shopId, from, to, ['total_gmv', 'affiliate_gmv', 'total_units_sold']));
+      return days.map((d) => ({ date: d.date, total_gmv: d.total_gmv, affiliate_gmv: d.affiliate_gmv, units: d.units }));
+    }
     const url = new URL(this.baseUrl + this.statsPath);
     url.searchParams.set('date_from', from);
     url.searchParams.set('date_to', to);

@@ -298,7 +298,7 @@ export default function GmvPage() {
                           <tbody>
                             {a.shops.map((s) => (
                               <tr key={s.shop.id}>
-                                <td>{s.shop.shop_name}</td>
+                                <td>{s.shop.shop_name} <span className={`badge ${s.shop.source === 'cruva' ? 'accent' : 'muted'}`} title={s.shop.source === 'cruva' ? 'Daily GMV from the Cruva pull (TikTok app not connected for this shop)' : 'Daily GMV from Windsor.ai (TikTok Shop orders)'}>{s.shop.source === 'cruva' ? 'via Cruva' : 'Windsor'}</span></td>
                                 <td className="mono sub">{s.shop.shop_id}</td>
                                 <td>{s.shop.currency}</td>
                                 <td className="num">{fmtMoney(s.gmv, s.shop.currency)}</td>
@@ -497,7 +497,7 @@ function Explorer({ accounts, currency }: { accounts: Account[]; currency: strin
                   {open === r.account_id && (
                     <tr key={`${r.account_id}-shops`} className="expand"><td colSpan={7}>
                       <table><thead><tr><th>Shop</th><th>Source</th><th className="num">GMV ({cur})</th><th className="num">Before</th><th className="num">Change</th><th className="num">Units</th></tr></thead><tbody>
-                        {r.shops.map((s) => <tr key={s.shop_id}><td>{s.shop_name}</td><td className="sub">{s.source}</td><td className="num">{fmtMoney(s.gmv, cur)}</td><td className="num sub">{fmtMoney(s.prev_gmv, cur)}</td><td className="num"><UpDown value={s.prev_gmv > 0 ? Math.round(((s.gmv - s.prev_gmv) / s.prev_gmv) * 100) : null} /></td><td className="num">{s.units.toLocaleString()}</td></tr>)}
+                        {r.shops.map((s) => <tr key={s.shop_id}><td>{s.shop_name}</td><td><span className={`badge ${s.source === 'cruva' ? 'accent' : 'muted'}`}>{s.source === 'cruva' ? 'via Cruva' : 'Windsor'}</span></td><td className="num">{fmtMoney(s.gmv, cur)}</td><td className="num sub">{fmtMoney(s.prev_gmv, cur)}</td><td className="num"><UpDown value={s.prev_gmv > 0 ? Math.round(((s.gmv - s.prev_gmv) / s.prev_gmv) * 100) : null} /></td><td className="num">{s.units.toLocaleString()}</td></tr>)}
                       </tbody></table>
                     </td></tr>
                   )}

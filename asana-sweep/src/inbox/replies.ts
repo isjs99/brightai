@@ -68,7 +68,7 @@ export const ONLY_FILTERS: Record<InboxChannel, { key: string; label: string }[]
 export const MARKET_TZ: Record<string, string> = { DE: 'Europe/Berlin', AT: 'Europe/Vienna', CH: 'Europe/Zurich', FR: 'Europe/Paris', IT: 'Europe/Rome', ES: 'Europe/Madrid', UK: 'Europe/London', GB: 'Europe/London', IE: 'Europe/Dublin', NL: 'Europe/Amsterdam', BE: 'Europe/Brussels', PL: 'Europe/Warsaw', PT: 'Europe/Lisbon', SE: 'Europe/Stockholm', US: 'America/New_York', AU: 'Australia/Sydney' };
 
 export function defaultPolicy(accountId: number, channel: InboxChannel): ReplyPolicy {
-  return { account_id: accountId, channel, mode: 'off', daily_cap: channel === 'affiliate' ? 50 : 100, only: channel === 'affiliate' ? ['not_do_not_contact'] : [], never: INTENTS[channel].filter((i) => i.escalates).map((i) => i.key), auto_intents: [], quiet_from: null, quiet_to: null, max_age_hours: 48, updated_at: null };
+  return { account_id: accountId, channel, mode: 'off', daily_cap: channel === 'affiliate' ? 50 : 100, only: channel === 'affiliate' ? ['not_do_not_contact'] : [], never: INTENTS[channel].filter((i) => i.escalates).map((i) => i.key), auto_intents: [], quiet_from: null, quiet_to: null, max_age_hours: 48, shops_off: [], languages: {}, updated_at: null };
 }
 
 export function getPolicy(q: Queries, accountId: number, channel: InboxChannel): ReplyPolicy {
@@ -192,7 +192,7 @@ export async function processConversations(q: Queries, ids: number[], deps: Proc
     if (!c || !c.account_id || c.status === 'closed' || c.last_sender !== 'them' || !c.last_message_id) continue;
     if (q.replyEventFor(c.id, c.last_message_id)) continue;
     const policy = getPolicy(q, c.account_id, c.channel);
-    if (policy.mode === 'off') continue;
+    if (policy.mode === 'off' || policy.shops_off.includes(c.tts_shop_id)) continue;
     const messages = q.listMessages(id);
     const last = [...messages].reverse().find((m) => m.message_id === c.last_message_id) ?? null;
     const theirText = last?.text ?? c.last_message_text;
@@ -213,7 +213,7 @@ export async function processConversations(q: Queries, ids: number[], deps: Proc
     let ctx: ReplyContext;
     let cls: Classification;
     try {
-      ctx = await buildContext(q, c, messages, null, cruvaRest);
+      ctx = await buildContext(q, c, messages, policy.languages[c.tts_shop_id] ?? null, cruvaRest);
       const { system, user } = renderPrompt(c, messages, ctx, { json: true, intents: INTENTS[c.channel] });
       cls = parseClassification(await llm(system, user), c.channel);
     } catch (err) {
@@ -261,6 +261,7 @@ export function replyBlocker(q: Queries, c: InboxConversation, now = Date.now())
   if (!c.account_id) return 'shop not linked to an account';
   const policy = getPolicy(q, c.account_id, c.channel);
   if (policy.mode === 'off') return `replies are off for ${c.account_name ?? c.shop_name} (${c.channel === 'cs' ? 'Customer service' : 'Creators'})`;
+  if (policy.shops_off.includes(c.tts_shop_id)) return `${c.shop_name} is switched off for ${c.channel === 'cs' ? 'Customer service' : 'Creators'}`;
   if (policy.mode === 'draft') return 'draft mode: replies wait for the team';
   if (!inboxSettings(q).auto_reply_master) return 'master switch off (Settings)';
   if (!inboxSettings(q).llm_configured) return 'ANTHROPIC_API_KEY not set';
@@ -281,7 +282,8 @@ const dayAgo = (n: number, now = Date.now()) => new Date(now - n * 86400000).toI
 
 export function channelReadiness(q: Queries, accountId: number, channel: InboxChannel, scopeLive: (scope: 'customer_service' | 'affiliate_seller') => boolean, apps: { main: boolean; affiliate: boolean } = { main: tts.configured, affiliate: ttsAffiliate.configured }): { ready: boolean; note: string | null; shops: RepliesData['shops'] } {
   const shops = q.listTtsShops().filter((s) => s.account_id === accountId);
-  const rows = shops.map((s) => ({ id: s.id, name: s.name, market: s.market, token_ok: channel === 'affiliate' ? (apps.affiliate ? s.affiliate_token_ok : s.token_ok) : s.token_ok }));
+  const policy = getPolicy(q, accountId, channel);
+  const rows = shops.map((s) => ({ id: s.id, name: s.name, market: s.market, token_ok: channel === 'affiliate' ? (apps.affiliate ? s.affiliate_token_ok : s.token_ok) : s.token_ok, off: policy.shops_off.includes(s.id), language: policy.languages[s.id] ?? null }));
   if (!shops.length) return { ready: false, note: 'No TikTok shop linked to this account yet (Promotions › Connection).', shops: rows };
   if (channel === 'affiliate') {
     if (!apps.affiliate && !apps.main) return { ready: false, note: 'TikTok app not configured on the server.', shops: rows };
@@ -415,6 +417,8 @@ export function savePolicy(q: Queries, accountId: number, channel: InboxChannel,
     quiet_from: hhmm(body.quiet_from, cur.quiet_from),
     quiet_to: hhmm(body.quiet_to, cur.quiet_to),
     max_age_hours: body.max_age_hours === undefined ? cur.max_age_hours : Number.isFinite(Number(body.max_age_hours)) ? Math.max(1, Math.min(720, Math.round(Number(body.max_age_hours)))) : 48,
+    shops_off: list(body.shops_off, q.listTtsShops().filter((s) => s.account_id === accountId).map((s) => s.id), cur.shops_off),
+    languages: body.languages === undefined ? cur.languages : Object.fromEntries(Object.entries((body.languages ?? {}) as Record<string, unknown>).filter(([k, v]) => q.listTtsShops().some((s) => s.id === k && s.account_id === accountId) && typeof v === 'string' && v !== '*' && v in LANGUAGE_NAMES).map(([k, v]) => [k, String(v)])),
     updated_at: new Date().toISOString(),
   };
   const saved = q.saveReplyPolicy(next);

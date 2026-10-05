@@ -26,6 +26,7 @@ import { StockTracker } from '../stock/index.js';
 import { IncidentEngine } from '../incidents/index.js';
 import { ClientReports } from '../reports/client.js';
 import { PlaybookEngine } from '../playbook/index.js';
+import { CruvaPuller } from '../cruva/pull.js';
 import { Copilot } from '../copilot/index.js';
 import { slackBot } from '../notify/slackbot.js';
 import { apollo } from '../bd/apollo.js';
@@ -60,6 +61,7 @@ export class Scheduler {
   readonly incidents: IncidentEngine;
   readonly reports: ClientReports;
   readonly playbook: PlaybookEngine;
+  readonly cruvaPull: CruvaPuller;
   private cruvaTask: ScheduledTask | null = null;
   private repliesDigestTask: ScheduledTask | null = null;
   readonly copilot: Copilot;
@@ -82,6 +84,8 @@ export class Scheduler {
     this.incidents = new IncidentEngine(q);
     this.reports = new ClientReports(q);
     this.playbook = new PlaybookEngine(q);
+    this.cruvaPull = new CruvaPuller(q);
+    this.stock.cruvaRefresh = (shopId) => this.cruvaPull.run(shopId);
     this.copilot = new Copilot(q, { gmail: this.gmail });
     this.monitor.afterScan = async () => { await this.incidents.scan(); };
   }
@@ -127,6 +131,8 @@ export class Scheduler {
     setTimeout(() => void this.dailyHealth({ onlyIfMissing: true }), 60000);
     // Stock countdown (products + 30 days of orders per shop), Cruva playbook library, client question copilot.
     this.stock.start();
+    // Cruva: stats, score, samples and stock for every linked shop, several times a day; the monitor reads them on its next scan.
+    this.cruvaPull.start();
     this.playbook.seed();
     this.copilot.start();
     // tl;dv: every 30 minutes, draft follow-ups for calls that just ended.

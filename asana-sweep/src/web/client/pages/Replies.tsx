@@ -134,9 +134,14 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
       {/* Policy strip */}
       <div className={`card policy ${policy.mode}`} style={{ marginBottom: 16 }}>
         <div className="policy-row">
-          <div className="seg" role="radiogroup" aria-label="Reply mode">
-            {(['off', 'draft', 'auto'] as ReplyMode[]).map((m) => <button key={m} className={`seg-btn ${policy.mode === m ? 'active' : ''}`} disabled={!isAdmin || busy === 'policy'} onClick={() => policy.mode !== m && setMode(m)}>{MODE_LABEL[m]}</button>)}
-          </div>
+          <button className={`switch ${policy.mode !== 'off' ? 'on' : ''}`} disabled={!isAdmin || busy === 'policy'} title={policy.mode === 'off' ? 'Switch replies on (starts in Draft mode)' : 'Switch replies off'} onClick={() => setMode(policy.mode === 'off' ? 'draft' : 'off')}>
+            <span className="knob" /> {policy.mode === 'off' ? 'OFF' : 'ON'}
+          </button>
+          {policy.mode !== 'off' && (
+            <div className="seg" role="radiogroup" aria-label="Reply mode">
+              {(['draft', 'auto'] as ReplyMode[]).map((m) => <button key={m} className={`seg-btn ${policy.mode === m ? 'active' : ''}`} disabled={!isAdmin || busy === 'policy'} onClick={() => policy.mode !== m && setMode(m)}>{MODE_LABEL[m]}</button>)}
+            </div>
+          )}
           <div className="sub policy-note">
             {policy.mode === 'off' && 'Nothing is drafted or sent. Threads still sync so you can reply by hand.'}
             {policy.mode === 'draft' && `Every ${who(channel)} message gets a drafted reply for the team to approve. Nothing goes out on its own.`}
@@ -187,7 +192,25 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
             </div>
           )}
         </div>
-        <div className="sub policy-foot">Shops: {data.shops.length ? data.shops.map((s) => `${s.name}${s.market ? ` (${s.market})` : ''}${s.token_ok ? '' : ' · not authorised'}`).join(' · ') : 'none linked'}. Languages: {Object.entries(data.languages).filter(([k]) => k !== '*').map(([, v]) => v).join(', ')}. Replies follow the {who(channel)}'s language, then the shop's market.</div>
+        <div className="policy-foot">
+          <div className="lbl">Countries (one TikTok shop each)</div>
+          {data.shops.length === 0 ? <div className="sub">No TikTok shop linked to this account yet.</div> : (
+            <div className="shop-switches">
+              {data.shops.map((s) => (
+                <div key={s.id} className={`shop-switch ${s.off ? 'off' : ''}`}>
+                  <button className={`switch small ${!s.off ? 'on' : ''}`} disabled={!isAdmin || busy === 'policy' || policy.mode === 'off'} title={policy.mode === 'off' ? 'Switch the account on first' : s.off ? 'Switch this country on' : 'Switch this country off'} onClick={() => save({ shops_off: s.off ? policy.shops_off.filter((x) => x !== s.id) : [...policy.shops_off, s.id] })}><span className="knob" /> {s.off ? 'OFF' : 'ON'}</button>
+                  <b>{s.market ?? '–'}</b>
+                  <span className="sub">{s.name}{s.token_ok ? '' : ' · not authorised'}</span>
+                  <select value={s.language ?? ''} disabled={!isAdmin} onChange={(e) => save({ languages: { ...policy.languages, [s.id]: e.target.value } })} aria-label={`Reply language for ${s.name}`}>
+                    <option value="">Language: detect, then market</option>
+                    {Object.entries(data.languages).filter(([k]) => k !== '*').map(([k, v]) => <option key={k} value={k}>Always {v}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="sub" style={{ marginTop: 6 }}>Each country can be on or off on its own, and reply in a fixed language or in the {who(channel)}'s language (falling back to the market: {Object.entries(data.languages).filter(([k]) => k !== '*').map(([, v]) => v).join(', ')}).</div>
+        </div>
       </div>
 
       <div className="kpis">
