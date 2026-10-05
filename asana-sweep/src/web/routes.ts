@@ -857,7 +857,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
         configured: ttsAffiliate.configured,
         service_id: affServiceId,
         authorize_url: affServiceId ? authorizationUrl(affServiceId, 'am-ops-affiliate') : null,
-        callback_url: `${config.publicUrl}/api/tts/affiliate/callback`,
+        callback_url: `${config.publicUrl}/api/tts/affiliate/callback`, // /api/affiliate/callback works too
       },
     };
   };
@@ -872,7 +872,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   });
 
   /** Seller lands here after authorising the affiliate app: its token is stored next to the main one for every shop it covers. */
-  r.get('/tts/affiliate/callback', async (req, res) => {
+  r.get(['/tts/affiliate/callback', '/affiliate/callback'], async (req, res) => {
     const code = String(req.query.code ?? req.query.auth_code ?? '');
     if (!code) throw new HttpError(400, 'Missing auth code in the callback.');
     if (!ttsAffiliate.configured) throw new HttpError(400, 'TTS_AFFILIATE_APP_KEY / TTS_AFFILIATE_APP_SECRET are not set.');
@@ -892,7 +892,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   });
 
   /** Seller lands here after authorising the app. Exchange the code and store every shop it covers. */
-  r.get('/tts/callback', async (req, res) => {
+  r.get(['/tts/callback', '/callback'], async (req, res) => {
     const code = String(req.query.code ?? req.query.auth_code ?? '');
     if (!code) throw new HttpError(400, 'Missing auth code in the callback.');
     if (!tts.configured) throw new HttpError(400, 'TTS_APP_KEY / TTS_APP_SECRET are not set.');

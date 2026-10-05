@@ -229,7 +229,7 @@ function ConnectionPanel({ tts, accounts, onChange }: { tts: TtsStatus; accounts
         {!tts.affiliate.configured ? (
           <div className="banner warn"><b>Affiliate app not configured.</b> Set <code>TTS_AFFILIATE_APP_KEY</code> and <code>TTS_AFFILIATE_APP_SECRET</code> (Fly secrets or <code>.env</code>), set that app's redirect URL to <code>{tts.affiliate.callback_url}</code>, restart, then authorise each shop with the link below. Until then samples and creator conversations read through the main app.</div>
         ) : (
-          <p className="hint" style={{ margin: '0 0 8px' }}>Affiliate app configured. Each shop authorises it once more; samples, creator conversations and the affiliate rules then read through it. Redirect URL must be <code>{tts.affiliate.callback_url}</code>.</p>
+          <p className="hint" style={{ margin: '0 0 8px' }}>Affiliate app configured. Each shop authorises it once more; samples, creator conversations and the affiliate rules then read through it. Redirect URL must be <code>{tts.affiliate.callback_url}</code> (the shorter <code>/api/affiliate/callback</code> is accepted too).</p>
         )}
         {isAdmin && (
           <div className="inline-form">

@@ -377,12 +377,12 @@ tr.dim td, .card.dim { opacity: .55; }
 .topbar select:hover, .topbar button:hover { background: #27272b; border-color: #4a4a52; color: #fff; }
 .topbar button.primary { background: #fff; color: #0f0f10; border-color: #fff; }
 .topbar .badge { background: #1c1c1f; color: #c3c2b7; border-color: #3a3a40; }
-.sidebar { background: #232428; border-right-color: #2f3035; }
-.sidebar a { color: #b4b7c1; }
-.sidebar a:hover { color: #fff; background: #303136; }
-.sidebar a.active { color: #fff; background: #303136; }
+.sidebar { background: #2e2f34; border-right-color: #3a3b41; }
+.sidebar a { color: #c3c6cf; }
+.sidebar a:hover { color: #fff; background: #3c3d44; }
+.sidebar a.active { color: #fff; background: #3c3d44; }
 .sidebar a.active::before { background: var(--brand-mint-bright); }
-.sidebar .nav-section { color: #6b6e78; }
+.sidebar .nav-section { color: #8a8d98; }
 .hub-tabs a.tab.active, .tab.active { background: #0f0f10; color: #fff; border-color: #0f0f10; }
 :root[data-theme="dark"] .hub-tabs a.tab.active, :root[data-theme="dark"] .tab.active { background: #fff; color: #0f0f10; border-color: #fff; }
 /* Traffic lights on the account overview. */
