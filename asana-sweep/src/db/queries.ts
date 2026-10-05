@@ -42,6 +42,9 @@ import type {
   PlaybookItem,
   PlaybookKind,
   PlaybookSetupCell,
+  PlaybookRollout,
+  PlaybookDraft,
+  PlaybookDraftStatus,
   CopilotQuestion,
   CopilotSource,
   InboxConversation,
@@ -2164,6 +2167,78 @@ export class Queries {
 
   listRemoteItems(shopId?: string): { shop_id: string; kind: PlaybookKind; remote_id: string; name: string; enabled: boolean; seen_at: string }[] {
     return ((shopId ? this.db.prepare('SELECT shop_id, kind, remote_id, name, enabled, seen_at FROM cruva_remote_items WHERE shop_id = ?').all(shopId) : this.db.prepare('SELECT shop_id, kind, remote_id, name, enabled, seen_at FROM cruva_remote_items').all()) as Row[]).map((r) => ({ shop_id: r.shop_id as string, kind: r.kind as PlaybookKind, remote_id: r.remote_id as string, name: r.name as string, enabled: Boolean(r.enabled), seen_at: r.seen_at as string }));
+  }
+
+  // ---- Cruva rollouts (bulk prepare) ----
+
+  private rowToRollout(r: Row): PlaybookRollout {
+    const counts = Object.fromEntries((['ready', 'needs_input', 'blocked', 'approved', 'skipped', 'done', 'error', 'undone'] as PlaybookDraftStatus[]).map((k) => [k, 0])) as Record<PlaybookDraftStatus, number>;
+    for (const c of this.db.prepare('SELECT status, COUNT(*) AS n FROM cruva_drafts WHERE rollout_id = ? GROUP BY status').all(r.id) as { status: PlaybookDraftStatus; n: number }[]) counts[c.status] = c.n;
+    return { id: r.id as number, created_at: r.created_at as string, created_by: (r.created_by as string | null) ?? null, status: r.status as PlaybookRollout['status'], shop_ids: parseJson<string[]>(r.shop_ids_json, []), note: (r.note as string | null) ?? null, counts, ran_at: (r.ran_at as string | null) ?? null };
+  }
+
+  listRollouts(limit = 30): PlaybookRollout[] {
+    return (this.db.prepare('SELECT * FROM cruva_rollouts ORDER BY id DESC LIMIT ?').all(limit) as Row[]).map((r) => this.rowToRollout(r));
+  }
+
+  getRollout(id: number): PlaybookRollout | null {
+    const r = this.db.prepare('SELECT * FROM cruva_rollouts WHERE id = ?').get(id) as Row | undefined;
+    return r ? this.rowToRollout(r) : null;
+  }
+
+  createRollout(shopIds: string[], createdBy: string | null, note: string | null = null): PlaybookRollout {
+    const id = Number(this.db.prepare('INSERT INTO cruva_rollouts (created_at, created_by, status, shop_ids_json, note) VALUES (?, ?, ?, ?, ?)').run(new Date().toISOString(), createdBy, 'draft', JSON.stringify(shopIds), note).lastInsertRowid);
+    return this.getRollout(id)!;
+  }
+
+  setRolloutStatus(id: number, status: PlaybookRollout['status'], ranAt: string | null = null): void {
+    this.db.prepare('UPDATE cruva_rollouts SET status = ?, ran_at = COALESCE(?, ran_at) WHERE id = ?').run(status, ranAt, id);
+  }
+
+  deleteRollout(id: number): boolean {
+    return this.db.prepare('DELETE FROM cruva_rollouts WHERE id = ?').run(id).changes > 0;
+  }
+
+  private rowToRolloutDraft(r: Row): PlaybookDraft {
+    return {
+      id: r.id as number, rollout_id: r.rollout_id as number, shop_id: r.shop_id as string, shop_name: r.shop_name as string, account_id: (r.account_id as number | null) ?? null,
+      kind: r.kind as PlaybookDraft['kind'], key: r.key as string, name: r.name as string, description: (r.description as string | null) ?? null, language: r.language as string,
+      action: r.action as PlaybookDraft['action'], tool: r.tool as string, payload: parseJson<Record<string, unknown>>(r.payload_json, {}), copy: (r.copy as string | null) ?? null,
+      blockers: parseJson<string[]>(r.blockers_json, []), status: r.status as PlaybookDraftStatus, start_after: Boolean(r.start_after), save_override: Boolean(r.save_override),
+      remote_id: (r.remote_id as string | null) ?? null, remote_name: (r.remote_name as string | null) ?? null, result: (r.result as string | null) ?? null, order_no: Number(r.order_no ?? 0), updated_at: r.updated_at as string,
+    };
+  }
+
+  listRolloutDrafts(rolloutId: number): PlaybookDraft[] {
+    return (this.db.prepare('SELECT * FROM cruva_drafts WHERE rollout_id = ? ORDER BY shop_name, order_no, id').all(rolloutId) as Row[]).map((r) => this.rowToRolloutDraft(r));
+  }
+
+  getRolloutDraft(id: number): PlaybookDraft | null {
+    const r = this.db.prepare('SELECT * FROM cruva_drafts WHERE id = ?').get(id) as Row | undefined;
+    return r ? this.rowToRolloutDraft(r) : null;
+  }
+
+  addRolloutDraft(d: Omit<PlaybookDraft, 'id' | 'updated_at' | 'remote_id' | 'remote_name' | 'result'> & { remote_id?: string | null; remote_name?: string | null }): PlaybookDraft {
+    const id = Number(this.db.prepare(`INSERT INTO cruva_drafts (rollout_id, shop_id, shop_name, account_id, kind, key, name, description, language, action, tool, payload_json, copy, blockers_json, status, start_after, save_override, remote_id, remote_name, order_no, updated_at)
+      VALUES (@rollout_id, @shop_id, @shop_name, @account_id, @kind, @key, @name, @description, @language, @action, @tool, @payload_json, @copy, @blockers_json, @status, @start_after, @save_override, @remote_id, @remote_name, @order_no, @updated_at)`)
+      .run({ rollout_id: d.rollout_id, shop_id: d.shop_id, shop_name: d.shop_name, account_id: d.account_id, kind: d.kind, key: d.key, name: d.name, description: d.description, language: d.language, action: d.action, tool: d.tool, payload_json: JSON.stringify(d.payload), copy: d.copy, blockers_json: JSON.stringify(d.blockers), status: d.status, start_after: d.start_after ? 1 : 0, save_override: d.save_override ? 1 : 0, remote_id: d.remote_id ?? null, remote_name: d.remote_name ?? null, order_no: d.order_no, updated_at: new Date().toISOString() }).lastInsertRowid);
+    return this.getRolloutDraft(id)!;
+  }
+
+  updateRolloutDraft(id: number, patch: Partial<Pick<PlaybookDraft, 'payload' | 'copy' | 'blockers' | 'status' | 'start_after' | 'save_override' | 'remote_id' | 'remote_name' | 'result' | 'name'>>): PlaybookDraft | null {
+    const sets: string[] = []; const params: Record<string, unknown> = { id, updated_at: new Date().toISOString() };
+    if (patch.payload !== undefined) { sets.push('payload_json = @payload_json'); params.payload_json = JSON.stringify(patch.payload); }
+    if (patch.copy !== undefined) { sets.push('copy = @copy'); params.copy = patch.copy; }
+    if (patch.blockers !== undefined) { sets.push('blockers_json = @blockers_json'); params.blockers_json = JSON.stringify(patch.blockers); }
+    if (patch.status !== undefined) { sets.push('status = @status'); params.status = patch.status; }
+    if (patch.start_after !== undefined) { sets.push('start_after = @start_after'); params.start_after = patch.start_after ? 1 : 0; }
+    if (patch.save_override !== undefined) { sets.push('save_override = @save_override'); params.save_override = patch.save_override ? 1 : 0; }
+    if (patch.remote_id !== undefined) { sets.push('remote_id = @remote_id'); params.remote_id = patch.remote_id; }
+    if (patch.remote_name !== undefined) { sets.push('remote_name = @remote_name'); params.remote_name = patch.remote_name; }
+    if (patch.result !== undefined) { sets.push('result = @result'); params.result = patch.result; }
+    if (patch.name !== undefined) { sets.push('name = @name'); params.name = patch.name; }
+    if (sets.length) this.db.prepare(`UPDATE cruva_drafts SET ${sets.join(', ')}, updated_at = @updated_at WHERE id = @id`).run(params);
+    return this.getRolloutDraft(id);
   }
 
   // ---- Client question copilot ----

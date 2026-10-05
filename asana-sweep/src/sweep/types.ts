@@ -1680,7 +1680,7 @@ export interface ReportsData {
 
 // ---- Cruva playbook (best practice matrix) ----
 
-export type PlaybookKind = 'automation' | 'workflow' | 'email_campaign' | 'group' | 'list';
+export type PlaybookKind = 'group' | 'automation' | 'workflow' | 'email_campaign' | 'list' | 'brief' | 'sender' | 'tag' | 'manual';
 
 export interface PlaybookItem {
   id: number;
@@ -1699,7 +1699,8 @@ export interface PlaybookSetupCell {
   shop_id: string;
   kind: PlaybookKind;
   playbook_key: string;
-  status: 'set' | 'missing' | 'unknown' | 'queued' | 'error';
+  /** set = in place · paused = exists but stopped · drift = copy differs from the library · missing · manual = Cruva UI only (or marked by hand) · queued = in a rollout · error */
+  status: PlaybookCellStatus;
   remote_id: string | null;
   remote_name: string | null;
   checked_at: string | null;
@@ -1707,15 +1708,80 @@ export interface PlaybookSetupCell {
   note: string | null;
 }
 
+export type PlaybookCellStatus = 'set' | 'paused' | 'drift' | 'missing' | 'manual' | 'unknown' | 'queued' | 'error';
+
+/** What the check learnt about a shop from its existing setup, reused when drafting: categories, products, contact email, timezone, senders, lists, brief link. */
+export interface PlaybookLearned {
+  categories: string[];
+  products: string[];
+  contact_email: string | null;
+  timezone: string | null;
+  sender_emails: string[];
+  lists: { id: string; name: string; count: number }[];
+  brief_link: string | null;
+  plan: string | null;
+}
+
+export interface PlaybookRollout {
+  id: number;
+  created_at: string;
+  created_by: string | null;
+  status: 'draft' | 'running' | 'done' | 'undone';
+  shop_ids: string[];
+  note: string | null;
+  counts: Record<PlaybookDraftStatus, number>;
+  ran_at: string | null;
+}
+
+export type PlaybookDraftStatus = 'ready' | 'needs_input' | 'blocked' | 'approved' | 'skipped' | 'done' | 'error' | 'undone';
+
+export interface PlaybookDraft {
+  id: number;
+  rollout_id: number;
+  shop_id: string;
+  shop_name: string;
+  account_id: number | null;
+  kind: PlaybookKind;
+  key: string;
+  name: string;
+  description: string | null;
+  language: string;
+  /** create a new object, update an existing one (drift), or start a paused one. */
+  action: 'create' | 'update' | 'start';
+  tool: string;
+  payload: Record<string, unknown>;
+  /** The editable copy (DM text, invite message or email body), mirrored into the payload on save. */
+  copy: string | null;
+  /** Fields the reviewer still has to fill (needs_input) or cannot (blocked). */
+  blockers: string[];
+  status: PlaybookDraftStatus;
+  start_after: boolean;
+  save_override: boolean;
+  remote_id: string | null;
+  remote_name: string | null;
+  result: string | null;
+  order_no: number;
+  updated_at: string;
+}
+
 export interface PlaybookData {
   items: PlaybookItem[];
-  shops: { shop_id: string; shop_name: string; account_id: number; account_name: string; language: string; market: string | null; remote_counts: Record<string, number>; checked_at: string | null }[];
+  shops: PlaybookShop[];
+  /** Cruva shops not linked to any account yet (from list_shops). */
+  unlinked: { shop_id: string; shop_name: string; plan: string | null }[];
   cells: PlaybookSetupCell[];
   languages: string[];
+  /** The portal talks to Cruva itself (CRUVA_API_KEY set). */
+  mcp_configured: boolean;
   cruva_configured: boolean;
   endpoints: Record<string, string>;
   last_error: string | null;
+  last_check_at: string | null;
+  checking: boolean;
+  rollouts: PlaybookRollout[];
 }
+
+export interface PlaybookShop { shop_id: string; shop_name: string; account_id: number; account_name: string; am_name: string | null; language: string; market: string | null; plan: string | null; remote_counts: Record<string, number>; checked_at: string | null; learned: PlaybookLearned | null }
 
 // ---- Client question copilot ----
 

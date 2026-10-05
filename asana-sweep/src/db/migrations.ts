@@ -1358,6 +1358,49 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 35,
+    name: 'cruva rollouts and drafts (bulk prepare, review, roll out)',
+    up(db) {
+      db.exec(`
+        CREATE TABLE cruva_rollouts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          created_at TEXT NOT NULL,
+          created_by TEXT,
+          status TEXT NOT NULL DEFAULT 'draft',
+          shop_ids_json TEXT NOT NULL DEFAULT '[]',
+          note TEXT,
+          ran_at TEXT
+        );
+        CREATE TABLE cruva_drafts (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          rollout_id INTEGER NOT NULL REFERENCES cruva_rollouts(id) ON DELETE CASCADE,
+          shop_id TEXT NOT NULL,
+          shop_name TEXT NOT NULL,
+          account_id INTEGER,
+          kind TEXT NOT NULL,
+          key TEXT NOT NULL,
+          name TEXT NOT NULL,
+          description TEXT,
+          language TEXT NOT NULL DEFAULT 'en',
+          action TEXT NOT NULL DEFAULT 'create',
+          tool TEXT NOT NULL,
+          payload_json TEXT NOT NULL DEFAULT '{}',
+          copy TEXT,
+          blockers_json TEXT NOT NULL DEFAULT '[]',
+          status TEXT NOT NULL DEFAULT 'ready',
+          start_after INTEGER NOT NULL DEFAULT 0,
+          save_override INTEGER NOT NULL DEFAULT 0,
+          remote_id TEXT,
+          remote_name TEXT,
+          result TEXT,
+          order_no INTEGER NOT NULL DEFAULT 0,
+          updated_at TEXT NOT NULL
+        );
+        CREATE INDEX cruva_drafts_rollout ON cruva_drafts(rollout_id);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

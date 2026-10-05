@@ -43,7 +43,7 @@ import { bodyToHtml, LANGUAGES as OUTREACH_LANGUAGES, outreachInputs } from '../
 import { generateDraft as generateOutreachDraft } from '../bd/draft.js';
 import { bulkCandidates, pickBestLinkedin } from '../bd/bulk.js';
 import { generateLarkMessage, pickLarkRecipient, spreadDates } from '../bd/lark.js';
-import type { LarkMessage, TtsScope } from '../sweep/types.js';
+import type { LarkMessage, PlaybookDraftStatus, TtsScope } from '../sweep/types.js';
 import { BLOCK_SCOPES } from '../health/tts-pull.js';
 import { projectionCsv } from '../stock/index.js';
 import { periodBounds } from '../reports/client.js';
@@ -770,6 +770,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     res.json({
       connections: [
         { key: 'windsor', name: 'Windsor.ai (TikTok Shop data)', role: 'Shops, orders, stock and payouts for account management and GMV', configured: w.configured, ok: w.configured && !w.last_error, detail: !w.configured ? 'WINDSOR_API_KEY not set' : w.last_error ? `Last sync error: ${w.last_error}` : `${w.discovered.length} shop(s) discovered, ${wShops.length} linked to accounts${w.last_sync_at ? `, last sync ${w.last_sync_at}` : ', never synced'}`, link: '/gmv', testable: w.configured },
+        { key: 'cruva_mcp', name: 'Cruva MCP (best practice rollout)', role: 'The portal reads every Cruva shop\'s automations, groups, lists, briefs and senders and rolls out the missing pieces through mcp.cruva.com', configured: scheduler.playbook.data().mcp_configured, ok: scheduler.playbook.data().mcp_configured && !scheduler.playbook.data().last_error && Boolean(scheduler.playbook.data().last_check_at), detail: !scheduler.playbook.data().mcp_configured ? 'CRUVA_API_KEY not set (Cruva › Dashboard › API › Generate API key)' : scheduler.playbook.data().last_check_at ? `${scheduler.playbook.data().shops.length} shop(s) linked, last check ${scheduler.playbook.data().last_check_at}${scheduler.playbook.data().last_error ? `; ${scheduler.playbook.data().last_error}` : ''}` : 'Key set, no check yet (Accounts › Cruva › Sync shops)', link: '/cruva', testable: false },
         { key: 'cruva', name: 'Cruva (REST API)', role: 'Affiliate GMV per shop for the GMV page; optional, the daily review routine covers the creator side over MCP', configured: cruva.configured, ok: cruva.configured && gm?.status !== 'error', detail: !cruva.configured ? `CRUVA_API_KEY not set (separate Cruva subscription); ${q.listShops('cruva').length} Cruva shop(s) linked to accounts for the routine` : gm ? `Last GMV sync ${gm.status} at ${gm.finished_at ?? gm.started_at}${gm.error_message ? `: ${gm.error_message}` : ''}` : 'never synced', link: '/gmv', testable: false },
         { key: 'tts', name: 'TikTok Shop Partner app', role: 'Promotions push and the CS / affiliate inbox (needs Partner Center approval)', configured: tts.configured, ok: tts.configured && ttsShops.length > 0 && ttsShops.every((s) => s.token_ok), detail: !tts.configured ? 'TTS_APP_KEY / TTS_APP_SECRET not set' : ttsShops.length ? `${ttsShops.length} shop(s) authorised${ttsShops.some((s) => !s.token_ok) ? ', some tokens expired' : ''}` : 'app configured, no shop authorised yet', link: '/promotions', testable: false },
         { key: 'apollo', name: 'Apollo.io', role: 'Decision makers for the BD pipeline', configured: ap.configured, ok: ap.configured && ap.ok && !ap.exhausted, detail: !ap.configured ? 'APOLLO_API_KEY not set' : ap.exhausted ? 'out of credits' : ap.error ? ap.error : `${ap.remaining ?? '?'} credits left`, link: '/bd', testable: true },
@@ -2713,26 +2714,27 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     res.json(reports.data());
   });
 
-  // ---- Cruva playbook (best practice matrix) ----
+  // ---- Cruva playbook: best practice per shop, bulk prepare, review, roll out ----
   const playbook = scheduler.playbook;
-  const KINDS: PlaybookKind[] = ['automation', 'workflow', 'email_campaign', 'group', 'list'];
+  const KINDS: PlaybookKind[] = ['automation', 'workflow', 'email_campaign', 'group', 'list', 'brief', 'sender', 'tag', 'manual'];
+  const bad = (err: unknown): never => { throw new HttpError(400, (err as Error).message); };
   r.get('/playbook', (_req, res) => res.json(playbook.data()));
+  r.post('/playbook/shops/sync', async (_req, res) => {
+    try { const result = await playbook.syncShops(); res.json({ ...result, ...playbook.data() }); } catch (err) { bad(err); }
+  });
+  r.post('/playbook/shops/link', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const accountId = Number(b.account_id);
+    if (!q.getAccount(accountId)) throw new HttpError(404, 'Account not found');
+    playbook.linkShop(String(b.shop_id ?? ''), String(b.shop_name ?? b.shop_id ?? ''), accountId);
+    res.json(playbook.data());
+  });
   r.post('/playbook/check', async (req, res) => {
-    try {
-      const result = await playbook.check(optText((req.body ?? {}).shop_id) ?? undefined);
-      res.json({ ...result, ...playbook.data() });
-    } catch (err) {
-      throw new HttpError(400, (err as Error).message);
-    }
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    try { const result = await playbook.check(optText(b.shop_id) ?? undefined, b.deep === undefined ? true : bool(b.deep, true)); res.json({ ...result, ...playbook.data() }); } catch (err) { bad(err); }
   });
   r.post('/playbook/shops/:shopId/import', (req, res) => {
-    const text = String((req.body ?? {}).text ?? '');
-    try {
-      const result = playbook.importListing(String(req.params.shopId), text);
-      res.json({ ...result, ...playbook.data() });
-    } catch (err) {
-      throw new HttpError(400, (err as Error).message);
-    }
+    try { const result = playbook.importListing(String(req.params.shopId), String((req.body ?? {}).text ?? '')); res.json({ ...result, ...playbook.data() }); } catch (err) { bad(err); }
   });
   r.put('/playbook/shops/:shopId', (req, res) => {
     const b = (req.body ?? {}) as Record<string, unknown>;
@@ -2740,20 +2742,46 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     liveEvents.emitUpdate({ kind: 'playbook' });
     res.json(playbook.data());
   });
-  r.post('/playbook/apply', async (req, res) => {
+  /** Draft the missing pieces for the ticked shops into a rollout; nothing goes to Cruva yet. */
+  r.post('/playbook/prepare', (req, res) => {
     const b = (req.body ?? {}) as Record<string, unknown>;
     const shopIds = Array.isArray(b.shop_ids) ? (b.shop_ids as unknown[]).map(String) : [];
     const keys = Array.isArray(b.keys) ? (b.keys as unknown[]).map(String) : [];
-    if (!shopIds.length || !keys.length) throw new HttpError(400, 'Pick at least one shop and one playbook item.');
-    const result = await playbook.apply({ shop_ids: shopIds, keys, language: optText(b.language), brands: b.brands && typeof b.brands === 'object' ? (b.brands as Record<string, string>) : undefined });
-    res.json({ ...result, ...playbook.data() });
+    try { res.status(201).json(playbook.prepare({ shop_ids: shopIds, keys, created_by: actorOf(req) })); } catch (err) { bad(err); }
+  });
+  r.get('/playbook/rollouts/:id', (req, res) => { try { res.json(playbook.drafts(idParam(req))); } catch (err) { throw new HttpError(404, (err as Error).message); } });
+  r.delete('/playbook/rollouts/:id', (req, res) => { playbook.deleteRollout(idParam(req)); res.json(playbook.data()); });
+  r.put('/playbook/drafts/:id', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    let payload: Record<string, unknown> | undefined;
+    if (b.payload !== undefined) { try { payload = typeof b.payload === 'string' ? (JSON.parse(b.payload) as Record<string, unknown>) : (b.payload as Record<string, unknown>); } catch { throw new HttpError(400, 'Payload must be valid JSON.'); } }
+    try { res.json(playbook.updateDraft(idParam(req), { copy: b.copy === undefined ? undefined : (b.copy === null ? null : String(b.copy)), payload, status: b.status === undefined ? undefined : (String(b.status) as PlaybookDraftStatus), start_after: b.start_after === undefined ? undefined : bool(b.start_after, false), save_override: b.save_override === undefined ? undefined : bool(b.save_override, false), name: optText(b.name) ?? undefined })); } catch (err) { bad(err); }
+  });
+  r.post('/playbook/drafts/:id/rewrite', async (req, res) => {
+    try { res.json(await playbook.rewriteDraft(idParam(req), optText((req.body ?? {}).instruction))); } catch (err) { bad(err); }
+  });
+  /** Approve or skip many drafts at once: { ids: [], status: 'approved' | 'skipped' | 'ready' }. */
+  r.post('/playbook/rollouts/:id/drafts', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const ids = Array.isArray(b.ids) ? (b.ids as unknown[]).map(Number) : [];
+    const status = String(b.status ?? '') as PlaybookDraftStatus;
+    if (!['approved', 'skipped', 'ready'].includes(status)) throw new HttpError(400, 'Bad status.');
+    const errors: string[] = [];
+    for (const id of ids) { try { playbook.updateDraft(id, { status }); } catch (err) { errors.push(`#${id}: ${(err as Error).message}`); } }
+    res.json({ errors, ...playbook.drafts(idParam(req)) });
+  });
+  r.post('/playbook/rollouts/:id/run', async (req, res) => {
+    try { const result = await playbook.runRollout(idParam(req), actorOf(req)); res.json({ ...result, ...playbook.drafts(idParam(req)) }); } catch (err) { bad(err); }
+  });
+  r.post('/playbook/rollouts/:id/undo', async (req, res) => {
+    try { const result = await playbook.undoRollout(idParam(req)); res.json({ ...result, ...playbook.drafts(idParam(req)) }); } catch (err) { bad(err); }
   });
   r.post('/playbook/cells', (req, res) => {
     const b = (req.body ?? {}) as Record<string, unknown>;
     const kind = String(b.kind ?? '') as PlaybookKind;
     if (!KINDS.includes(kind)) throw new HttpError(400, 'Bad kind.');
     const status = String(b.status ?? '') as PlaybookSetupCell['status'];
-    if (!['set', 'missing', 'unknown', 'queued', 'error'].includes(status)) throw new HttpError(400, 'Bad status.');
+    if (!['set', 'missing', 'unknown', 'manual'].includes(status)) throw new HttpError(400, 'Bad status.');
     playbook.mark(String(b.shop_id ?? ''), kind, String(b.key ?? ''), status, optText(b.note));
     res.json(playbook.data());
   });

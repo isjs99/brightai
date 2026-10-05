@@ -1,11 +1,14 @@
 import type { PlaybookKind } from '../sweep/types.js';
 
 /**
- * Brightform's Cruva best practice, distilled from the shops that perform (GreatVita DE, Kijimea DE
- * and the rest of the portfolio): a first outreach to new affiliates, a monthly deals push, a new
- * product push, the CRM groups that segment existing creators, and the DM automations that run on
- * them (sample sent, content not posted, push more videos, retarget with a bonus, deals info).
- * [brand] is replaced with the shop's brand at apply time; [affiliate_name] is Cruva's own placeholder.
+ * Brightform's Cruva best practice: Cruva's own six lifecycle bots (Shipped, Delivered, First sale,
+ * Content unfulfilled 7d, No post in 10 days, Rejected), our outreach pushes (first outreach, monthly
+ * deals, new product, top creators collab), the CRM groups behind them, a creator brief, the creator
+ * newsletter, and the hygiene items that live in the Cruva UI (auto review rules, blacklist, AI replies,
+ * workflows from Cruva's templates). Every item is checked against the shop; the creatable ones are drafted
+ * in the shop's language with [brand], products, categories and the brief link filled in.
+ * [brand] / [brief_link] / [month] are ours; [affiliate_name] is Cruva's placeholder.
+ * `core: true` marks the bots the monitor warns about when missing or paused.
  */
 
 export interface SeedItem { kind: PlaybookKind; key: string; language: string; name: string; description?: string; config: Record<string, unknown> }
@@ -69,33 +72,113 @@ const dealsInfo: Copy = {
   es: 'Hey [affiliate_name],\n\nAviso: [brand] tiene ofertas activas en TikTok Shop este mes, así que tus vídeos convertirán mejor de lo normal. Misma comisión, más ventas. Merece la pena publicar esta semana.\n\nEquipo [brand]',
 };
 
+const delivered: Copy = {
+  en: 'Hi [affiliate_name], your [brand] sample should have arrived by now 💜\n\nHave fun with it, we cannot wait to see what you create. The brief below has the videos that convert best, the hooks and the do\'s and don\'ts:\n👉 [brief_link]\n\nAny question, just reply here.\n\nTeam [brand]',
+  de: 'Hi [affiliate_name], dein [brand]-Sample sollte inzwischen bei dir sein 💜\n\nViel Spaß damit, wir sind gespannt auf dein Video. Im Brief unten findest du die Videos, die am besten konvertieren, die Hooks und die Do\'s und Don\'ts:\n👉 [brief_link]\n\nBei Fragen einfach hier antworten.\n\nTeam [brand]',
+  fr: 'Hello [affiliate_name], ton échantillon [brand] a dû arriver 💜\n\nAmuse-toi avec, on a hâte de voir ta vidéo. Le brief ci-dessous regroupe les vidéos qui convertissent le mieux, les hooks et les do\'s and don\'ts :\n👉 [brief_link]\n\nUne question ? Réponds ici.\n\nL\'équipe [brand]',
+  it: 'Ciao [affiliate_name], il tuo campione [brand] dovrebbe essere arrivato 💜\n\nDivertiti, non vediamo l\'ora di vedere il tuo video. Nel brief qui sotto trovi i video che convertono meglio, gli hook e i do\'s and don\'ts:\n👉 [brief_link]\n\nPer qualsiasi domanda rispondi qui.\n\nTeam [brand]',
+  es: 'Hola [affiliate_name], tu muestra de [brand] ya debería haber llegado 💜\n\nDisfrútala, tenemos muchas ganas de ver tu vídeo. En el brief de abajo tienes los vídeos que mejor convierten, los hooks y los do\'s and don\'ts:\n👉 [brief_link]\n\nCualquier duda, responde aquí.\n\nEquipo [brand]',
+};
+const firstSale: Copy = {
+  en: 'Congrats on your first [brand] sale, [affiliate_name]! 🎉 That is a real win.\n\nKeep posting videos like that one, creators who post two or three times a week on the same product see their commission climb fast. Need another sample or a different product? Reply here.\n\nTeam [brand]',
+  de: 'Glückwunsch zu deinem ersten [brand]-Verkauf, [affiliate_name]! 🎉 Das ist ein echter Erfolg.\n\nMach genau so weiter: Creator, die zwei- bis dreimal pro Woche zum selben Produkt posten, sehen ihre Provision schnell steigen. Brauchst du ein weiteres Sample oder ein anderes Produkt? Antworte einfach hier.\n\nTeam [brand]',
+  fr: 'Bravo pour ta première vente [brand], [affiliate_name] ! 🎉 C\'est une vraie réussite.\n\nContinue comme ça : les créateurs qui postent deux ou trois fois par semaine sur le même produit voient leur commission grimper vite. Besoin d\'un autre échantillon ou d\'un autre produit ? Réponds ici.\n\nL\'équipe [brand]',
+  it: 'Complimenti per la tua prima vendita [brand], [affiliate_name]! 🎉 È un bel traguardo.\n\nContinua così: i creator che postano due o tre volte a settimana sullo stesso prodotto vedono le commissioni salire in fretta. Ti serve un altro campione o un prodotto diverso? Rispondi qui.\n\nTeam [brand]',
+  es: '¡Enhorabuena por tu primera venta de [brand], [affiliate_name]! 🎉 Es un logro de verdad.\n\nSigue así: los creadores que publican dos o tres veces por semana sobre el mismo producto ven subir su comisión rápido. ¿Necesitas otra muestra u otro producto? Responde aquí.\n\nEquipo [brand]',
+};
+const noPost10: Copy = {
+  en: 'Hi [affiliate_name], we loved what you posted for [brand], great work 💜\n\nIt has been a little while since your last video. Creators who keep a steady rhythm earn the most, and we are putting budget behind the videos that perform. Want a fresh sample or a product to feature next? Reply here and we sort it.\n\nTeam [brand]',
+  de: 'Hi [affiliate_name], dein Content für [brand] hat uns richtig gut gefallen 💜\n\nDein letztes Video ist schon eine Weile her. Creator mit einem festen Rhythmus verdienen am meisten, und wir schieben Budget hinter die Videos, die laufen. Brauchst du ein frisches Sample oder ein neues Produkt? Antworte hier, wir kümmern uns.\n\nTeam [brand]',
+  fr: 'Hello [affiliate_name], on a adoré ce que tu as posté pour [brand], bravo 💜\n\nÇa fait un petit moment depuis ta dernière vidéo. Les créateurs qui gardent un rythme régulier gagnent le plus, et on met du budget derrière les vidéos qui marchent. Envie d\'un nouvel échantillon ou d\'un autre produit ? Réponds ici, on s\'en occupe.\n\nL\'équipe [brand]',
+  it: 'Ciao [affiliate_name], ci è piaciuto molto quello che hai postato per [brand], ottimo lavoro 💜\n\nÈ passato un po\' dal tuo ultimo video. I creator con un ritmo costante guadagnano di più, e noi mettiamo budget dietro ai video che funzionano. Vuoi un nuovo campione o un altro prodotto? Rispondi qui e ci pensiamo noi.\n\nTeam [brand]',
+  es: 'Hola [affiliate_name], nos encantó lo que publicaste para [brand], gran trabajo 💜\n\nHace un tiempo desde tu último vídeo. Los creadores con un ritmo constante son los que más ganan, y ponemos presupuesto detrás de los vídeos que funcionan. ¿Quieres una muestra nueva u otro producto? Responde aquí y lo organizamos.\n\nEquipo [brand]',
+};
+const rejected: Copy = {
+  en: 'Hi [affiliate_name], thank you for your interest in [brand]. We could not approve your sample request this time, usually down to stock or the current campaign focus.\n\nYou are welcome to apply again in a few weeks, and you can still add [brand] to your showcase in the meantime.\n\nTeam [brand]',
+  de: 'Hi [affiliate_name], danke für dein Interesse an [brand]. Wir konnten deine Sample-Anfrage diesmal nicht freigeben, meist liegt das am Lagerbestand oder am aktuellen Kampagnenfokus.\n\nIn ein paar Wochen kannst du dich gern wieder bewerben, und [brand] kannst du jederzeit in dein Showcase aufnehmen.\n\nTeam [brand]',
+  fr: 'Hello [affiliate_name], merci pour ton intérêt pour [brand]. On n\'a pas pu valider ta demande d\'échantillon cette fois-ci, en général à cause du stock ou de la campagne en cours.\n\nTu peux refaire une demande dans quelques semaines, et ajouter [brand] à ta vitrine en attendant.\n\nL\'équipe [brand]',
+  it: 'Ciao [affiliate_name], grazie per il tuo interesse per [brand]. Questa volta non abbiamo potuto approvare la tua richiesta di campione, di solito per lo stock o per il focus della campagna in corso.\n\nPuoi riprovare tra qualche settimana, e nel frattempo puoi aggiungere [brand] alla tua vetrina.\n\nTeam [brand]',
+  es: 'Hola [affiliate_name], gracias por tu interés en [brand]. Esta vez no hemos podido aprobar tu solicitud de muestra, normalmente por stock o por el enfoque de la campaña actual.\n\nPuedes volver a solicitarla en unas semanas, y mientras tanto puedes añadir [brand] a tu escaparate.\n\nEquipo [brand]',
+};
+const inviteMessage: Copy = {
+  en: '[brand] is growing fast on TikTok Shop. Creators posting about us earn 20% commission on every sale plus 5% ad commission, and we send a free sample to get you started. Request yours and we ship this week.',
+  de: '[brand] wächst gerade stark auf TikTok Shop. Creator verdienen 20% Provision auf jeden Verkauf plus 5% Ad-Provision, und wir schicken dir ein kostenloses Sample zum Start. Fordere es an, wir verschicken diese Woche.',
+  fr: '[brand] grandit vite sur TikTok Shop. Les créateurs gagnent 20% de commission sur chaque vente plus 5% de commission pub, et on envoie un échantillon gratuit pour démarrer. Demande le tien, envoi cette semaine.',
+  it: '[brand] sta crescendo velocemente su TikTok Shop. I creator guadagnano il 20% di commissione su ogni vendita più il 5% di commissione ads, e ti mandiamo un campione gratuito per iniziare. Richiedilo, spediamo questa settimana.',
+  es: '[brand] está creciendo rápido en TikTok Shop. Los creadores ganan un 20% de comisión por cada venta más un 5% de comisión por anuncios, y te enviamos una muestra gratis para empezar. Pídela y la enviamos esta semana.',
+};
+const newsletter: Copy = {
+  en: 'Hi [affiliate_name],\n\nQuick update from [brand] for [month]: our deals are live on TikTok Shop, so every video converts better than usual. Commission stays the same, more sales for you.\n\nProducts to push this month and the hooks that work are in the brief: [brief_link]\n\nNeed a fresh sample? Reply to this email.\n\nTeam [brand]',
+  de: 'Hi [affiliate_name],\n\nkurzes Update von [brand] für [month]: Unsere Deals laufen auf TikTok Shop, jedes Video konvertiert also besser als sonst. Die Provision bleibt gleich, mehr Verkäufe für dich.\n\nWelche Produkte diesen Monat laufen und welche Hooks funktionieren, steht im Brief: [brief_link]\n\nBrauchst du ein neues Sample? Antworte einfach auf diese Mail.\n\nTeam [brand]',
+  fr: 'Bonjour [affiliate_name],\n\nPetit point [brand] pour [month] : nos promos sont en ligne sur TikTok Shop, chaque vidéo convertit mieux que d\'habitude. La commission ne change pas, plus de ventes pour toi.\n\nLes produits à pousser ce mois-ci et les hooks qui marchent sont dans le brief : [brief_link]\n\nBesoin d\'un nouvel échantillon ? Réponds à cet e-mail.\n\nL\'équipe [brand]',
+  it: 'Ciao [affiliate_name],\n\nbreve aggiornamento da [brand] per [month]: le nostre offerte sono attive su TikTok Shop, quindi ogni video converte meglio del solito. La commissione resta la stessa, più vendite per te.\n\nI prodotti da spingere questo mese e gli hook che funzionano sono nel brief: [brief_link]\n\nTi serve un nuovo campione? Rispondi a questa email.\n\nTeam [brand]',
+  es: 'Hola [affiliate_name],\n\nBreve actualización de [brand] para [month]: nuestras ofertas están activas en TikTok Shop, así que cada vídeo convierte mejor de lo normal. La comisión se mantiene, más ventas para ti.\n\nLos productos a impulsar este mes y los hooks que funcionan están en el brief: [brief_link]\n\n¿Necesitas una muestra nueva? Responde a este correo.\n\nEquipo [brand]',
+};
+
 const LANGS = ['en', 'de', 'fr', 'it', 'es'];
+const SEND_WINDOW = { time_limits: { start: '08:00', end: '22:00' } };
 
 function dmAutomation(key: string, name: string, description: string, copy: Copy, audience: 'new_affiliates' | 'groups', extra: Record<string, unknown> = {}): SeedItem[] {
-  return LANGS.map((language) => ({ kind: 'automation', key, language, name, description, config: { title: name, message_type: 'dm', outreach_audience: audience, dm_messages: [{ type: 'message', content: copy[language] }], content_type: 'any', status: 'stopped', daily_limits_timezone: 'Europe/Madrid', ...extra } }));
+  return LANGS.map((language) => ({ kind: 'automation', key, language, name, description, config: { title: name, message_type: 'dm', outreach_audience: audience, dm_messages: [{ type: 'message', content: copy[language] }], content_type: 'any', status: 'stopped', ...SEND_WINDOW, ...extra } }));
+}
+
+/** Target collab + DM: the invite card first, then the message. Products and categories are filled in from the shop at prepare time. */
+function inviteAutomation(key: string, name: string, description: string, copy: Copy, invite: Copy, extra: Record<string, unknown> = {}): SeedItem[] {
+  return LANGS.map((language) => ({ kind: 'automation', key, language, name, description, config: {
+    title: name, message_type: 'invite+dm', outreach_audience: 'new_affiliates', content_type: 'any', status: 'stopped', ...SEND_WINDOW,
+    outreach_filters: { categories: [], min_gmv: 10000 },
+    invite_details: { title: '[brand]: free sample + 20%', message: invite[language], offer_free_samples: true, auto_approve_free_samples: false, resolve_conflicts: true, products: [], commission: 20, shop_ads_commission: 5, expire_time: 6, expire_grain: 'weeks' },
+    dm_messages: [{ type: 'invite_card' }, { type: 'message', content: copy[language] }, { type: 'followup', content: copy[language].split('\n')[0] + ' ' + ({ en: 'Just checking you saw this, the sample is still yours if you want it.', de: 'Nur zur Sicherheit, das Sample wartet noch auf dich.', fr: 'Juste pour être sûr que tu as vu, l\'échantillon est toujours pour toi.', it: 'Solo per sicurezza, il campione è ancora tuo se lo vuoi.', es: 'Solo por si no lo viste, la muestra sigue siendo tuya si la quieres.' } as Copy)[language], delay_days: 3 }],
+    ...extra,
+  } }));
 }
 
 export const SEED_PLAYBOOK: SeedItem[] = [
-  // CRM groups (segments of the shop's own creators). Filters are Cruva group filters; adjust thresholds per shop in the library.
-  { kind: 'group', key: 'sample_sent', language: '*', name: 'Sample sent', description: 'Creators whose sample was approved / shipped and who have not posted yet (feeds the "Sample sent" DM).', config: { title: 'Sample sent', filters: { min_samples: 1, max_videos: 0, max_days_sample: 14 } } },
-  { kind: 'group', key: 'content_not_posted', language: '*', name: 'Content not posted', description: 'Sample delivered more than 7 days ago and still no video.', config: { title: 'Content not posted', filters: { min_samples: 1, max_videos: 0, min_days_sample: 7 } } },
-  { kind: 'group', key: 'top_creators', language: '*', name: 'Top creators', description: 'Creators who drove real GMV for this shop (push more videos, collabs, bonuses).', config: { title: 'Top creators', filters: { min_gmv: 300, min_videos: 1 } } },
+  // ---- CRM groups: the segments of the shop's own creators that the bots run on. Cruva group filters; thresholds editable in the library. ----
+  { kind: 'group', key: 'sample_sent', language: '*', name: 'Sample sent', description: 'Sample request status = shipped: the parcel is on its way (feeds the Shipped bot).', config: { title: 'Sample sent', filters: { sample_status: ['shipped'] }, core: true } },
+  { kind: 'group', key: 'content_pending', language: '*', name: 'Delivered, content pending', description: 'Sample delivered, no video yet (feeds the Delivered bot).', config: { title: 'Delivered, content pending', filters: { sample_status: ['content_pending'] }, core: true } },
+  { kind: 'group', key: 'first_sale', language: '*', name: 'First sale', description: 'Creators who sold at least one unit for this shop (feeds the First sale bot).', config: { title: 'First sale', filters: { min_units_sold: 1 }, core: true } },
+  { kind: 'group', key: 'content_not_posted', language: '*', name: 'Content not posted (7d+)', description: 'Sample received 7+ days ago and still no video: Cruva\'s "content unfulfilled" (feeds the Content unfulfilled bot).', config: { title: 'Content not posted', filters: { min_days_unfulfilled: 7 }, core: true } },
+  { kind: 'group', key: 'no_post_10d', language: '*', name: 'Posted, quiet 10 days', description: '1 to 5 posts and nothing in the last 10 days (feeds the No post in 10 days bot).', config: { title: 'Posted, quiet 10 days', filters: { min_videos: 1, max_videos: 5, min_days: 10 }, core: true } },
+  { kind: 'group', key: 'rejected', language: '*', name: 'Rejected', description: 'Sample request status = rejected (feeds the Rejected bot, which only messages creators who enter after rollout).', config: { title: 'Rejected', filters: { sample_status: ['rejected'] }, core: true } },
+  { kind: 'group', key: 'top_creators', language: '*', name: 'Top creators', description: 'Creators who drove real GMV for this shop (push more videos, collabs, bonuses, the VIP tag).', config: { title: 'Top creators', filters: { min_gmv: 300, min_videos: 1 } } },
   { kind: 'group', key: 'inactive_creators', language: '*', name: 'Inactive creators (30d+)', description: 'Posted before, nothing in the last 30 days (retarget with a bonus).', config: { title: 'Inactive creators (30d+)', filters: { min_videos: 1, min_days: 30 } } },
   { kind: 'group', key: 'existing_creators', language: '*', name: 'Existing creators', description: 'Everyone who has posted at least once (deals info, new product messages).', config: { title: 'Existing creators', filters: { min_videos: 1 } } },
-  // New-affiliate outreach automations.
-  ...dmAutomation('first_outreach', 'First outreach', 'Broad DM to new affiliates in the shop\'s categories with a sample offer (the biggest driver of new creators on every shop).', firstOutreach, 'new_affiliates', { outreach_filters: { categories: [] }, daily_message_limits: { dm: 1500 } }),
-  ...dmAutomation('monthly_deals_outreach', 'Monthly deals outreach', 'Monthly refresh of the big outreach tied to the live deals (September Deals, October Deals...). Rename with the month when applying.', dealsOutreach, 'new_affiliates', { outreach_filters: { categories: [] }, daily_message_limits: { dm: 1500 } }),
+  { kind: 'group', key: 'posted_no_gmv', language: '*', name: 'Posted, no sales', description: 'Posted but nothing sold: content that did not convert, worth a brief and a hook.', config: { title: 'Posted, no sales', filters: { min_videos: 1, max_gmv: 0 } } },
+
+  // ---- The six lifecycle bots Cruva says every shop should run (Outreach › Automations › CRM Creators › DM). ----
+  ...dmAutomation('sample_sent', 'Sample sent', 'Cruva bot 1, Shipped: thanks, shipping note, the brief link, three content ideas.', sampleSent, 'groups', { group_key: 'sample_sent', core: true }),
+  ...dmAutomation('delivered', 'Delivered', 'Cruva bot 2, Delivered: the parcel landed, re-anchor the brief so the first video lands fast.', delivered, 'groups', { group_key: 'content_pending', core: true }),
+  ...dmAutomation('first_sale', 'First sale', 'Cruva bot 3, First sale: warm congratulations, ask for a steady rhythm.', firstSale, 'groups', { group_key: 'first_sale', core: true }),
+  ...dmAutomation('content_not_posted', 'Content unfulfilled (7 days)', 'Cruva bot 4: soft chase a week after delivery, framed as keeping the account healthy.', contentNotPosted, 'groups', { group_key: 'content_not_posted', core: true }),
+  ...dmAutomation('no_post_10d', 'No post in 10 days', 'Cruva bot 5: re-engage creators who posted a bit then went quiet.', noPost10, 'groups', { group_key: 'no_post_10d', core: true }),
+  ...dmAutomation('rejected', 'Rejected', 'Cruva bot 6: polite note to rejected creators, door left open. Only creators who enter the group after rollout (entry date guard).', rejected, 'groups', { group_key: 'rejected', filter_by_entry_date: true, entry_date_threshold: '[tomorrow]', core: true }),
+
+  // ---- Our own bots on the CRM groups. ----
+  ...dmAutomation('push_more_videos', 'Push more videos', 'Runs on Top creators: ask for two or three posts a week, offer more samples.', pushMore, 'groups', { group_key: 'top_creators' }),
+  ...dmAutomation('retarget_bonus', 'Retarget + bonus', 'Runs on Inactive creators: come back and post for a commission top-up.', retargetBonus, 'groups', { group_key: 'inactive_creators' }),
+  ...dmAutomation('deals_info_existing', '[month] deals info', 'Runs on Existing creators when deals go live: post this week, same commission, more sales. Renamed with the month at rollout.', dealsInfo, 'groups', { group_key: 'existing_creators' }),
+
+  // ---- New-affiliate outreach. ----
+  ...inviteAutomation('first_outreach', 'First outreach', 'Cruva\'s bread-and-butter: target collab invite + DM to new affiliates in the shop\'s categories with 10k+ GMV, 20% + 5% ads, samples on manual review, follow-up after 3 days, 8am to 10pm.', firstOutreach, inviteMessage, { core: true }),
+  ...dmAutomation('monthly_deals_outreach', '[month] deals outreach', 'Monthly refresh of the big outreach tied to the live deals. Renamed with the month at rollout.', dealsOutreach, 'new_affiliates', { outreach_filters: { categories: [] } }),
   ...dmAutomation('new_product_outreach', 'New product outreach', 'DM to new affiliates whenever a product launches, with the new product attached.', newProduct, 'new_affiliates', { outreach_filters: { categories: [] } }),
-  // Automations on the CRM groups.
-  ...dmAutomation('sample_sent', 'Sample sent', 'Runs on the "Sample sent" group: thanks, shipping note, three content ideas, tag us.', sampleSent, 'groups', { group_key: 'sample_sent' }),
-  ...dmAutomation('content_not_posted', 'Content not posted', 'Runs on the "Content not posted" group: friendly chase a week after delivery.', contentNotPosted, 'groups', { group_key: 'content_not_posted' }),
-  ...dmAutomation('push_more_videos', 'Push more videos', 'Runs on "Top creators": ask for two or three posts a week, offer more samples.', pushMore, 'groups', { group_key: 'top_creators' }),
-  ...dmAutomation('retarget_bonus', 'Retarget + bonus', 'Runs on "Inactive creators": come back and post for a commission top-up.', retargetBonus, 'groups', { group_key: 'inactive_creators' }),
-  ...dmAutomation('deals_info_existing', 'Deals info (existing creators)', 'Runs on "Existing creators" when deals go live: post this week, same commission, more sales.', dealsInfo, 'groups', { group_key: 'existing_creators' }),
-  { kind: 'automation', key: 'ai_auto_replies', language: '*', name: 'AI Auto Replies', description: 'Cruva\'s AI replies to creator DMs (switched on in the Cruva UI; checked here, not created).', config: { title: 'AI Auto Replies', message_type: 'replies', manual: true } },
-  { kind: 'automation', key: 'top_creators_collab', language: '*', name: 'Target collab: top creators', description: 'Invite + DM to a saved list of the top 20 creators in the category (needs a list: build it with the Cruva AI search first).', config: { title: 'Target collab: top creators', message_type: 'invite+dm', outreach_audience: 'list', list_ids: [], manual: true } },
-  // Workflow: chase creators who got a sample and did not post, automatically.
-  { kind: 'workflow', key: 'sample_chase', language: '*', name: 'Sample to post chase', description: 'When a creator\'s sample is delivered and no video after 7 days: DM, wait 7 days, DM again, then tag as "no content".', config: { name: 'Sample to post chase', status: 'paused', trigger: { type: 'creator_matches', config: { conditions: [{ field: 'samples', op: 'gte', value: 1 }, { field: 'videos', op: 'eq', value: 0 }, { field: 'days_since_sample', op: 'gte', value: 7 }] }, next: 'dm1' }, steps: [{ id: 'dm1', type: 'send_dm', config: { message: contentNotPosted.en }, next: 'wait1' }, { id: 'wait1', type: 'wait', config: { days: 7 }, next: 'check' }, { id: 'check', type: 'condition', config: { field: 'videos', op: 'gte', value: 1 }, branches: { onTrue: null, onFalse: 'dm2' } }, { id: 'dm2', type: 'send_dm', config: { message: retargetBonus.en }, next: 'tag' }, { id: 'tag', type: 'tag', config: { tag: 'no content' }, next: null }] } },
-  // Email campaign to existing creators (needs a linked sender email).
-  { kind: 'email_campaign', key: 'creator_newsletter', language: '*', name: 'Creator newsletter (monthly deals)', description: 'Monthly email to existing creators with the deals and the products to push. Needs a sender email linked in Cruva.', config: { title: 'Creator newsletter (monthly deals)', subject: '[brand] on TikTok Shop this month: deals and what to post', email_body: '<p>Hi [affiliate_name],</p><p>[brand] has deals live on TikTok Shop this month, so your videos will convert better than usual. Same commission, more sales.</p><p>Need a fresh sample or a different product? Reply to this email.</p><p>Team [brand]</p>', sender_emails: [], outreach_audience: 'groups', group_key: 'existing_creators', status: 'stopped', manual: true } },
+  { kind: 'automation', key: 'top_creators_collab', language: '*', name: 'Target collab: top creators', description: 'Invite + DM to the saved list of top creators in the category (the list comes from the AI search item).', config: { title: 'Target collab: top creators', message_type: 'invite+dm', outreach_audience: 'list', list_key: 'ai_search_list', content_type: 'any', status: 'stopped', ...SEND_WINDOW, invite_details: { title: '[brand]: top creators collab', message: inviteMessage.en, offer_free_samples: true, auto_approve_free_samples: false, resolve_conflicts: true, products: [], commission: 20, shop_ads_commission: 5, expire_time: 6, expire_grain: 'weeks' }, dm_messages: [{ type: 'invite_card' }, { type: 'message', content: firstOutreach.en }] } },
+  { kind: 'automation', key: 'ai_auto_replies', language: '*', name: 'AI Auto Replies', description: 'Cruva\'s AI answers creator DMs. Switched on in the Cruva UI (Outreach › Auto Replies); checked here, not created.', config: { title: 'AI Auto Replies', message_type: 'replies', manual: true } },
+
+  // ---- Lists, brief, email. ----
+  { kind: 'list', key: 'ai_search_list', language: '*', name: 'Top creators in category (AI search)', description: 'Every creator in the shop\'s categories with 10k+ affiliate GMV, saved as a list for the top creators collab.', config: { title: '[brand] · top creators in category', filters: { categories: [], min_gmv: 10000 }, limit: 2000, strictness: 'balanced' } },
+  { kind: 'brief', key: 'creator_brief', language: '*', name: 'Creator brief', description: 'One branded brief page per shop: the shop\'s top videos (auto), hooks and do/don\'t rules. Its link goes into the Shipped and Delivered bots.', config: { name: '[brand] creator brief', headline: 'How to make [brand] videos that sell', brief_type: 'static', video_mode: 'auto', dynamic_content: { all_products: true, video_count: 6, sort_by: 'gmv', past_months: 6 }, top_hooks: ['POV: you finally found the one that works', '3 things I wish I knew before trying [brand]', 'This replaced my whole routine'], guidelines: [{ type: 'do', description: 'Show the product on camera in the first 2 seconds' }, { type: 'do', description: 'Say what it does for you, in your own words' }, { type: 'do', description: 'Tag the product so viewers can buy from the video' }, { type: 'dont', description: 'Skip the hook: TikTok scrolls in 1.4 seconds' }, { type: 'dont', description: 'Read the packaging out loud' }] } },
+  { kind: 'sender', key: 'sender_email', language: '*', name: 'Sender email', description: 'A sender address for creator emails, ideally on a verified custom subdomain (Outreach › Email Campaigns › Manage Sender Emails). Checked here; the domain is verified in the Cruva UI.', config: { manual: true } },
+  { kind: 'email_campaign', key: 'creator_newsletter', language: '*', name: '[month] creator newsletter', description: 'Monthly email to existing creators with the deals, the products to push and the brief. Needs a sender email on the shop.', config: { title: '[month] creator newsletter', subject: '[brand] · [month] deals and the products to push', email_body: newsletter.en, email_body_by_language: newsletter, outreach_audience: 'groups', group_key: 'existing_creators', sender_emails: [], daily_limit: 60, status: 'stopped' } },
+
+  // ---- Workflows: built from Cruva's templates in the UI (the step graph does not travel well), checked here. ----
+  { kind: 'workflow', key: 'sample_chase', language: '*', name: 'Sample request nudge', description: 'Cruva template: creators by sample status, DM, wait, nudge again. Outreach › Workflows › Browse templates.', config: { manual: true } },
+  { kind: 'workflow', key: 'welcome_new', language: '*', name: 'Welcome new creators', description: 'Cruva template: DM every new creator, wait a few days, follow up anyone who did not reply.', config: { manual: true } },
+
+  // ---- Tags and hygiene: Cruva UI only, ticked by hand once done. ----
+  { kind: 'tag', key: 'do_not_contact', language: '*', name: 'do-not-contact tag', description: 'Static tag excluded from every outreach group: the global blacklist that travels with the creator.', config: { tag: 'do-not-contact', manual: true } },
+  { kind: 'tag', key: 'vip', language: '*', name: 'VIP dynamic tag', description: 'Dynamic tag in sync with the Top creators group (Affiliate CRM › Tag Manager › Create dynamic tag).', config: { tag: 'VIP', group_key: 'top_creators', manual: true } },
+  { kind: 'manual', key: 'auto_review', language: '*', name: 'Auto review rules', description: 'Sample Requests › Auto Review: approve creators over the follower and GMV floor automatically, reject under 1k followers.', config: { manual: true } },
+  { kind: 'manual', key: 'blacklist', language: '*', name: 'Blacklist loaded', description: 'Outreach › Automations › gear › Exclude Affiliates: the agency blacklist CSV uploaded once per shop.', config: { manual: true } },
 ];

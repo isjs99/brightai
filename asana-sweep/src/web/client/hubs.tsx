@@ -40,6 +40,7 @@ export const ACCOUNT_TABS: HubTab[] = [
   { to: '/promotions', label: 'Promotions' },
   { to: '/gmv-max', label: 'GMV Max' },
   { to: '/stock', label: 'Stock' },
+  { to: '/cruva', label: 'Cruva', aliases: ['/playbook'] },
   { to: '/reports', label: 'Reports' },
   { to: '/copilot', label: 'Ask' },
 ];
@@ -61,7 +62,6 @@ export const SETTINGS_TABS: HubTab[] = [
   { to: '/people', label: 'Team' },
   { to: '/checklist-template', label: 'Checklist items' },
   { to: '/connections', label: 'Connections' },
-  { to: '/playbook', label: 'Cruva playbook (archived)' },
 ];
 
 /** Accounts hub: pick the account once; every tab below scopes to it (or shows everything when none is picked). */

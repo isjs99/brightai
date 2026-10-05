@@ -1,6 +1,7 @@
 import type { Queries } from '../db/queries.js';
 import type { MonitorData, MonitorFlag, MonitorRule } from '../sweep/types.js';
 import { tts, type TtsClient, ttsAffiliate } from '../tts/client.js';
+import { PlaybookEngine } from '../playbook/index.js';
 import { todayIn } from '../checklist/checker.js';
 import { liveEvents } from '../live/events.js';
 import { log } from '../logger.js';
@@ -26,6 +27,7 @@ export const RULES: Omit<MonitorRule, 'enabled'>[] = [
   { code: 'gmv_drop_wow', title: 'GMV down 30%+ week on week', description: 'Last 7 days of GMV is at least 30% below the 7 days before (GMV sync; skipped for accounts with a TikTok shop, which the Analytics rule covers).', severity: 'warn', source: 'dashboard', section: 'Analytics' },
   { code: 'gmv_stale', title: 'GMV data stale', description: 'No GMV rows synced for the account in the last 3 days (skipped for accounts with a TikTok shop).', severity: 'info', source: 'dashboard', section: 'Analytics' },
   { code: 'tts_auth_expiring', title: 'TikTok authorisation expiring', description: 'The shop refresh token expires within 7 days or is already invalid.', severity: 'crit', source: 'tts', section: 'Account health' },
+  { code: 'cruva_setup_gap', title: 'Cruva best practice gaps', description: 'A linked Cruva shop is missing one of the six lifecycle bots or has one paused (Accounts › Cruva).', severity: 'warn', source: 'cruva', section: 'Affiliate', scope: 'none' },
   { code: 'no_deal_terms', title: 'No commission terms recorded', description: 'The account has no commission percentage on file, so GMV bonus and MoR figures are guesses.', severity: 'info', source: 'dashboard', section: 'Finance' },
 ];
 
@@ -118,6 +120,7 @@ export class AccountMonitor {
     const shops = this.q.listShops();
     const gmvRows = this.q.listGmvBetween(new Date(now - 15 * 86400000).toISOString().slice(0, 10), new Date(now).toISOString().slice(0, 10));
     const ttsShops = this.q.listTtsShops();
+    const coverage = new PlaybookEngine(this.q).coverageByAccount();
 
     for (const a of accounts) {
       const check = checks.filter((c) => c.account_id === a.id).sort((x, y) => y.checked_at.localeCompare(x.checked_at))[0];
@@ -143,6 +146,10 @@ export class AccountMonitor {
         if (enabled.has('gmv_drop_wow') && prev7 > 0 && last7 < prev7 * 0.7) out.push({ account_id: a.id, shop_id: null, code: 'gmv_drop_wow', severity: 'warn', message: `${a.name}: GMV ${Math.round(last7).toLocaleString('en-GB')} last 7 days vs ${Math.round(prev7).toLocaleString('en-GB')} the week before (${Math.round((1 - last7 / prev7) * 100)}% down)` });
         const latest = mine.map((r) => r.date).sort().pop();
         if (enabled.has('gmv_stale') && (!latest || latest < new Date(now - 3 * 86400000).toISOString().slice(0, 10))) out.push({ account_id: a.id, shop_id: null, code: 'gmv_stale', severity: 'info', message: `${a.name}: no GMV rows synced since ${latest ?? 'ever'}` });
+      }
+      if (enabled.has('cruva_setup_gap')) {
+        const cov = coverage.get(a.id);
+        if (cov && (cov.missing_core.length || cov.paused_core.length)) out.push({ account_id: a.id, shop_id: null, code: 'cruva_setup_gap', severity: 'warn', message: `${a.name}: ${cov.missing_core.length} core Cruva bot(s) missing, ${cov.paused_core.length} paused (${cov.set}/${cov.total} set up)`, detail: [...cov.missing_core.map((m) => `missing ${m}`), ...cov.paused_core.map((m) => `paused ${m}`)].slice(0, 8).join(' · ') });
       }
       if (enabled.has('no_deal_terms') && a.commission_pct === null) out.push({ account_id: a.id, shop_id: null, code: 'no_deal_terms', severity: 'info', message: `${a.name}: no commission terms recorded` });
       if (enabled.has('tts_auth_expiring')) {

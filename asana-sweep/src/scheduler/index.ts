@@ -58,6 +58,7 @@ export class Scheduler {
   readonly incidents: IncidentEngine;
   readonly reports: ClientReports;
   readonly playbook: PlaybookEngine;
+  private cruvaTask: ScheduledTask | null = null;
   readonly copilot: Copilot;
   private tldvTask: ScheduledTask | null = null;
   private apolloTask: ScheduledTask | null = null;
@@ -112,6 +113,8 @@ export class Scheduler {
     this.pullsTask = cron.schedule('0 6 * * *', () => void this.dailyPull({ fastmoss: false }), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // A second pass late morning in case the FastMoss routine ran late.
     this.pullsLateTask = cron.schedule('0 11 * * *', () => void this.dailyPull(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
+    // Cruva best practice: re-read every linked shop's setup overnight so the matrix and the monitor rule are current.
+    this.cruvaTask = cron.schedule('20 5 * * *', () => { if (this.playbook.data().mcp_configured) void this.playbook.check(undefined, true).catch((err) => log.warn(`Cruva nightly check: ${(err as Error).message}`)); }, { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Account monitor: rolling scan of every account for the flags the team otherwise catches by hand.
     this.monitor.start();
     // Account health: the daily Windsor pull, the rules and the AI review, before the AMs start (06:30 Madrid).

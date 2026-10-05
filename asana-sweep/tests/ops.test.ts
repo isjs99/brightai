@@ -170,16 +170,18 @@ describe('cruva playbook', () => {
     expect(cells.find((c) => c.kind === 'automation' && c.playbook_key === 'first_outreach')?.note).toBe('exists but stopped');
     expect(cells.find((c) => c.kind === 'group' && c.playbook_key === 'sample_sent')?.remote_id).toBe('g1');
     expect(cells.find((c) => c.kind === 'automation' && c.playbook_key === 'content_not_posted')?.status).toBe('missing');
-    const r = await eng.apply({ shop_ids: ['gv'], keys: ['group:content_not_posted', 'automation:content_not_posted', 'automation:sample_sent', 'automation:top_creators_collab'] });
-    expect(r.created).toBe(0);
-    expect(r.queued).toBe(1); // the group (automation needs the group first, collab needs a list)
-    expect(r.blocked).toBe(2);
-    const group = r.pack.find((p) => p.tool === 'create_group')!;
+    const r = eng.prepare({ shop_ids: ['gv'], keys: ['group:content_not_posted', 'automation:content_not_posted', 'automation:sample_sent', 'automation:top_creators_collab'] });
+    const group = r.drafts.find((p) => p.tool === 'create_group')!;
     expect(group.payload).toMatchObject({ shop_id: 'gv', title: 'Content not posted' });
-    const auto = r.pack.find((p) => p.tool === 'create_automation' && (p.payload.title as string) === 'Content not posted')!;
-    expect(auto.blockers[0]).toContain('needs the "content_not_posted" group');
+    expect(group.status).toBe('ready');
+    const auto = r.drafts.find((p) => p.tool === 'create_automation' && /Content unfulfilled/.test(p.name))!;
+    expect(auto.payload.group_id).toBe('[group:content_not_posted]'); // the group drafted a line above
     expect((auto.payload.dm_messages as { content: string }[])[0].content).toContain('GreatVita');
     expect((auto.payload.dm_messages as { content: string }[])[0].content).toContain('Sample ist gut bei dir angekommen');
+    const collab = r.drafts.find((p) => /Target collab/.test(p.name))!;
+    expect(collab.status).toBe('blocked');
+    expect(collab.blockers.join(' ')).toContain('saved creator list');
+    expect(r.drafts.some((p) => p.key === 'sample_sent')).toBe(false); // already set on the shop
     expect(q.listPlaybookCells().find((c) => c.kind === 'group' && c.playbook_key === 'content_not_posted')?.status).toBe('queued');
   });
 });

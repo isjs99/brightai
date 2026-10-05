@@ -19,7 +19,7 @@ import InquiriesPage from './pages/Inquiries';
 import MonitorPage from './pages/Monitor';
 import StockPage from './pages/Stock';
 import ReportsPage from './pages/Reports';
-import PlaybookPage from './pages/Playbook';
+import CruvaPage from './pages/Cruva';
 import CopilotPage from './pages/Copilot';
 import ChecklistTemplatePage from './pages/ChecklistTemplate';
 import ConnectionsPage from './pages/Connections';
@@ -106,11 +106,11 @@ function Login({ onDone }: { onDone: (role: Role) => void }) {
 /** Six entries. Each hub owns several paths (its tabs), so the link is active on any of them. */
 const NAV: { to: string; label: string; paths: string[] }[] = [
   { to: '/today', label: 'Today', paths: ['/today'] },
-  { to: '/monitor', label: 'Accounts', paths: ['/monitor', '/checklists', '/calendar', '/promotions', '/gmv-max', '/stock', '/reports', '/copilot'] },
+  { to: '/monitor', label: 'Accounts', paths: ['/monitor', '/checklists', '/calendar', '/promotions', '/gmv-max', '/stock', '/cruva', '/playbook', '/reports', '/copilot'] },
   { to: '/inbox', label: 'Inbox', paths: ['/inbox', '/inquiries'] },
   { to: '/bd', label: 'Growth', paths: ['/bd', '/outreach', '/leads'] },
   { to: '/gmv', label: 'Performance', paths: ['/gmv', '/analytics'] },
-  { to: '/accounts', label: 'Settings', paths: ['/accounts', '/people', '/checklist-template', '/connections', '/playbook'] },
+  { to: '/accounts', label: 'Settings', paths: ['/accounts', '/people', '/checklist-template', '/connections'] },
 ];
 
 export default function App() {
@@ -198,7 +198,8 @@ export default function App() {
               <Route path="/people" element={<Hub title="Settings" tabs={SETTINGS_TABS}><PeoplePage /></Hub>} />
               <Route path="/checklist-template" element={<Hub title="Settings" tabs={SETTINGS_TABS}><ChecklistTemplatePage /></Hub>} />
               <Route path="/connections" element={<Hub title="Settings" tabs={SETTINGS_TABS}><ConnectionsPage /></Hub>} />
-              <Route path="/playbook" element={<Hub title="Settings" tabs={SETTINGS_TABS}><PlaybookPage /></Hub>} />
+              <Route path="/cruva" element={<AccountHub><CruvaPage /></AccountHub>} />
+              <Route path="/playbook" element={<AccountHub><CruvaPage /></AccountHub>} />
               <Route path="*" element={<Navigate to="/today" replace />} />
             </Routes>
           </main>

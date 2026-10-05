@@ -4,7 +4,9 @@
   "private": true,
   "description": "Brightform AM Ops: the AM daily checklist, GMV and bonus tracking, client reports and the BD pipeline in one dashboard.",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "concurrently -k -n server,client \"tsx watch src/index.ts\" \"vite\"",
     "build": "npm run build:server && npm run build:client",
@@ -15,6 +17,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.client.json --noEmit"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "better-sqlite3": "^12.2.0",
     "cron-parser": "^5.4.0",
     "cronstrue": "^3.3.0",

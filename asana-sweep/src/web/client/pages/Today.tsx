@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import type { AccountStatusRow, InboxData, MonitorData, OutreachData } from '../../../sweep/types';
+import type { AccountStatusRow, InboxData, MonitorData, OutreachData, PlaybookData } from '../../../sweep/types';
 import { api, fmtRelative, useActor, useLiveUpdates } from '../api';
 
 /** The landing page: what needs a person today across the accounts you look after. Built from the monitor, the checklist, the inbox and outreach, nothing new to maintain. */
@@ -9,6 +9,7 @@ export default function TodayPage() {
   const [rows, setRows] = useState<AccountStatusRow[] | null>(null);
   const [inbox, setInbox] = useState<InboxData | null>(null);
   const [outreach, setOutreach] = useState<OutreachData | null>(null);
+  const [cruva, setCruva] = useState<PlaybookData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const actor = useActor();
   const [mine, setMine] = useState(Boolean(actor));
@@ -18,9 +19,10 @@ export default function TodayPage() {
     api.listAccounts().then((r) => setRows(r.accounts)).catch(() => setRows([]));
     api.inbox().then(setInbox).catch(() => setInbox(null));
     api.outreach().then(setOutreach).catch(() => setOutreach(null));
+    api.playbook().then(setCruva).catch(() => setCruva(null));
   }, []);
   useEffect(() => { load(); }, [load]);
-  useLiveUpdates((e) => { if (['monitor', 'bd', 'inbox', 'checks', 'settings'].includes(e.kind)) load(); });
+  useLiveUpdates((e) => { if (['monitor', 'bd', 'inbox', 'checks', 'settings', 'playbook'].includes(e.kind)) load(); });
   if (!monitor || !rows) return <p>{error ?? 'Loading…'}</p>;
 
   const isMine = (am: string | null, aa: string | null) => !mine || !actor || [am, aa].some((n) => n && n.toLowerCase().startsWith(actor.toLowerCase()));
@@ -38,6 +40,9 @@ export default function TodayPage() {
   const followups = (outreach?.followups ?? []).filter((f) => !f.done_at && Date.parse(f.due_at) <= now + 12 * 3600000 && (!mine || !actor || (f.created_by ?? '').toLowerCase().startsWith(actor.toLowerCase())));
   const lark = (outreach?.lark_messages ?? []).filter((m) => m.status === 'scheduled' && m.scheduled_for !== null && m.scheduled_for <= today && (!mine || !actor || (m.created_by ?? '').toLowerCase().startsWith(actor.toLowerCase())));
   const nameOf = (id: number | null) => rows.find((r) => r.account.id === id)?.account.name ?? '';
+  // Cruva setup gaps per account: core bots missing or paused on a linked shop.
+  const coreKeys = new Set((cruva?.items ?? []).filter((i) => i.enabled && i.config.core).map((i) => `${i.kind}:${i.key}`));
+  const cruvaGaps = accounts.map((r) => { const shops = (cruva?.shops ?? []).filter((s) => s.account_id === r.account.id).map((s) => s.shop_id); const cells = (cruva?.cells ?? []).filter((c) => shops.includes(c.shop_id) && coreKeys.has(`${c.kind}:${c.playbook_key}`)); return { account: r.account, missing: cells.filter((c) => c.status === 'missing').length, paused: cells.filter((c) => c.status === 'paused').length }; }).filter((g) => g.missing || g.paused);
 
   return (
     <>
@@ -74,7 +79,8 @@ export default function TodayPage() {
             {open.slice(0, 6).map(({ r, c }) => <li key={r.account.id}><span><b>Checklist · {r.account.name}.</b> {c!.am_total - c!.am_done} AM and {c!.aa_total - c!.aa_done} AA line(s) open <Link to={`/checklists?account=${r.account.id}`}>Tick ▸</Link></span></li>)}
             {lark.map((m) => <li key={`l${m.id}`}><span><b>Lark · {m.brand ?? m.shop_name}</b> → {m.contact_name ?? 'TikTok Shop'}{m.scheduled_for && m.scheduled_for < today ? <span className="badge crit" style={{ marginLeft: 6 }}>overdue</span> : null} <Link to="/outreach?tab=lark">Copy &amp; open ▸</Link></span></li>)}
             {followups.slice(0, 6).map((f) => <li key={`f${f.id}`}><span><b>{f.kind === 'linkedin_check' ? 'LinkedIn' : f.kind === 'linkedin_message' ? 'LinkedIn' : f.kind === 'email_chase' ? 'Chase' : 'Reminder'} · {f.shop_name}.</b> {f.title} <span className="sub">{fmtRelative(f.due_at)}</span> <Link to="/outreach?tab=followups">Open ▸</Link></span></li>)}
-            {open.length === 0 && lark.length === 0 && followups.length === 0 && <li><span className="sub">Nothing due.</span></li>}
+            {cruvaGaps.slice(0, 4).map((g) => <li key={`c${g.account.id}`}><span><b>Cruva · {g.account.name}.</b> {g.missing} core bot{g.missing === 1 ? '' : 's'} missing{g.paused ? `, ${g.paused} paused` : ''} <Link to={`/cruva?account=${g.account.id}`}>Prepare ▸</Link></span></li>)}
+            {open.length === 0 && lark.length === 0 && followups.length === 0 && cruvaGaps.length === 0 && <li><span className="sub">Nothing due.</span></li>}
           </ul>
         </div>
         <div className="card" style={{ gridColumn: 'span 2' }}>

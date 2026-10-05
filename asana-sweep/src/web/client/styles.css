@@ -431,3 +431,35 @@ tr.dim td, .card.dim { opacity: .55; }
 .area.brand > .area-body { padding: 12px 16px 16px; }
 .area.brand > .area-body > .page-head { margin-top: 4px; }
 @media (max-width: 900px) { .area.brand > .head { grid-template-columns: 14px 1fr auto; } }
+
+/* Accounts › Cruva: the best-practice matrix and the rollout review. */
+.cruva-legend { display: flex; align-items: center; gap: 6px 10px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.cstate { display: inline-flex; width: 26px; height: 22px; align-items: center; justify-content: center; border-radius: 7px; font-size: 12px; font-weight: 800; border: 1px solid transparent; cursor: pointer; background: var(--surface-2); color: var(--muted); font-family: inherit; padding: 0; }
+.cstate.set { background: var(--good-bg); color: var(--good-ink); border-color: var(--good-border); }
+.cstate.paused { background: var(--warn-bg); color: var(--warn-ink); border-color: var(--warn-border); }
+.cstate.drift { background: var(--accent-bg); color: var(--accent); border-color: var(--accent-border); }
+.cstate.missing { background: var(--crit-bg); color: var(--crit-ink); border-color: var(--crit-border); }
+.cstate.manual { background: var(--surface-2); color: var(--muted); border-color: var(--border); }
+.cstate.unknown { background: transparent; color: var(--faint); border-color: var(--border); border-style: dashed; }
+.cstate.queued { background: var(--surface-2); color: var(--ink); border-color: var(--border-strong); }
+.cstate.error { background: var(--crit-bg); color: var(--crit-ink); border-color: var(--crit); }
+table.cruva th.grp { color: var(--ink); font-size: 10.5px; border-bottom: 0; padding-bottom: 2px; text-align: left; }
+table.cruva th.col { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 10px; white-space: nowrap; padding: 6px 2px; text-align: left; letter-spacing: .04em; height: 150px; vertical-align: top; }
+table.cruva th.grp { border-left: 1px solid var(--border-2); padding-left: 8px; }
+table.cruva td.c:first-of-type { border-left: 1px solid var(--border-2); }
+table.cruva td b { white-space: nowrap; }
+table.cruva td .sub { max-width: 170px; }
+table.cruva td.c { text-align: center; padding: 4px 3px; }
+.rollout-grid { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 14px; align-items: start; }
+.draft-list { border: 1px solid var(--border); border-radius: var(--r-card); padding: 6px; max-height: 70vh; overflow: auto; }
+.draft-list .shop { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 10px 10px 4px; display: flex; align-items: center; gap: 8px; }
+.draft-row { display: flex; align-items: center; gap: 8px; padding: 7px 10px; border-radius: 9px; font-size: 12.5px; cursor: pointer; border: 1px solid transparent; }
+.draft-row:hover { background: var(--surface-2); }
+.draft-row.sel { background: var(--ink); color: var(--bg); }
+.draft-row.sel .badge { background: rgba(255,255,255,.14); color: inherit; border-color: transparent; }
+.draft-row .n { flex: 1; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.draft-pane { border: 1px solid var(--border); border-radius: var(--r-card); padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; }
+.draft-pane textarea.copy { width: 100%; min-height: 180px; line-height: 1.5; font: inherit; font-size: 13.5px; }
+.draft-pane textarea.json { width: 100%; min-height: 160px; font-family: ui-monospace, Menlo, monospace; font-size: 11.5px; }
+.rollout-bar { display: flex; align-items: center; gap: 10px; border: 1px solid var(--ink); border-radius: 12px; padding: 10px 14px; margin-top: 12px; flex-wrap: wrap; }
+@media (max-width: 1000px) { .rollout-grid { grid-template-columns: 1fr; } }
