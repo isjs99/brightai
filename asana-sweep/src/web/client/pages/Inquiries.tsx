@@ -67,10 +67,10 @@ export default function InquiriesPage() {
     setBusy(key); setError(null);
     try { const r = await fn(); setData(r); after?.(r); setHistKey(String(Date.now())); } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   };
+  const me = useActor();
   if (!data) return <p>{error ?? 'Loading…'}</p>;
   const list = data.inquiries.filter((i) => (only === 'all' || i.status === 'new' || i.status === 'qualified') && (kind === 'all' || i.kind === kind));
   const forwardOn = Boolean(data.forward_to);
-  const me = useActor();
   const myGmail = data.gmail_accounts.find((a) => a.person && a.person === me) ?? null;
   return (
     <>
