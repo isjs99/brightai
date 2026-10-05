@@ -27,6 +27,8 @@ export class CruvaMcp implements McpCaller {
 
   /** Which transport the live session came up on, for the Connections test. */
   transport: string | null = null;
+  /** The last message endpoint path the server handed us, for diagnostics. */
+  private lastEndpoint: string | null = null;
 
   /**
    * Cruva documents the API-key route as the SSE URL with ?api_key=. Some deployments only accept the
@@ -40,15 +42,17 @@ export class CruvaMcp implements McpCaller {
       const key = this.apiKey;
       const headers = { 'x-api-key': key };
       const withKey = (path: string) => { const u = new URL(`${this.baseUrl}${path}`); u.searchParams.set('api_key', key); return u; };
+      const sticky = stickyFetch(key, (p) => { this.lastEndpoint = p; });
       const attempts: { name: string; make: () => SSEClientTransport | StreamableHTTPClientTransport }[] = [
-        { name: 'SSE ?api_key', make: () => new SSEClientTransport(withKey('/sse'), { requestInit: { headers } }) },
-        { name: 'HTTP /mcp x-api-key', make: () => new StreamableHTTPClientTransport(new URL(`${this.baseUrl}/mcp`), { requestInit: { headers } }) },
-        { name: 'HTTP /mcp ?api_key', make: () => new StreamableHTTPClientTransport(withKey('/mcp'), { requestInit: { headers } }) },
-        { name: 'HTTP / x-api-key', make: () => new StreamableHTTPClientTransport(new URL(`${this.baseUrl}/`), { requestInit: { headers } }) },
+        { name: 'SSE ?api_key', make: () => new SSEClientTransport(withKey('/sse'), { requestInit: { headers }, fetch: sticky, eventSourceInit: { fetch: sticky } }) },
+        { name: 'HTTP /mcp x-api-key', make: () => new StreamableHTTPClientTransport(new URL(`${this.baseUrl}/mcp`), { requestInit: { headers }, fetch: sticky }) },
+        { name: 'HTTP /mcp ?api_key', make: () => new StreamableHTTPClientTransport(withKey('/mcp'), { requestInit: { headers }, fetch: sticky }) },
+        { name: 'HTTP / x-api-key', make: () => new StreamableHTTPClientTransport(new URL(`${this.baseUrl}/`), { requestInit: { headers }, fetch: sticky }) },
       ];
       const errors: string[] = [];
       for (const a of attempts) {
         const client = new Client({ name: 'brightform-am-ops', version: '1.0.0' });
+        this.lastEndpoint = null;
         try {
           await client.connect(a.make());
           client.onclose = () => { this.client = null; this.transport = null; };
@@ -58,7 +62,7 @@ export class CruvaMcp implements McpCaller {
           if (errors.length) log.warn(`Cruva MCP connected over ${a.name} after: ${errors.join(' · ')}`);
           return client;
         } catch (err) {
-          errors.push(`${a.name}: ${(err as Error).message.replace(/\s+/g, ' ').slice(0, 220)}`);
+          errors.push(`${a.name}: ${(err as Error).message.replace(/\s+/g, ' ').slice(0, 220)}${a.name.startsWith('SSE') && this.lastEndpoint ? ` [message endpoint ${this.lastEndpoint}]` : ''}`);
           await client.close().catch(() => undefined);
         }
       }
@@ -90,7 +94,7 @@ export class CruvaMcp implements McpCaller {
         if (r.isError) throw new ToolError(`Cruva ${tool}: ${text.slice(0, 400) || 'failed'}`);
         return text;
       } catch (err) {
-        if (err instanceof ToolError || attempt >= 3) throw err;
+        if (err instanceof ToolError || attempt >= 3 || /refused every connection/.test((err as Error).message)) throw err;
         log.warn(`Cruva MCP ${tool} failed (${(err as Error).message}); reconnecting (attempt ${attempt + 1})`);
         await this.close();
         await new Promise((r) => setTimeout(r, 1500 * attempt));
@@ -111,6 +115,28 @@ export function unwrap(text: string): string {
     try { const j = JSON.parse(t) as { result?: unknown }; if (typeof j.result === 'string') return j.result; } catch { /* not JSON */ }
   }
   return text;
+}
+
+/**
+ * Cruva's SSE server hands back a message endpoint without the api_key and keys the session to the
+ * stream it came from. This fetch keeps the key on every URL and header, and carries any cookie the
+ * stream response set (sticky routing) onto the follow-up posts, so "Could not find session" does
+ * not happen because the post landed somewhere the session does not exist.
+ */
+export function stickyFetch(apiKey: string, onEndpoint?: (path: string) => void, base: typeof fetch = fetch): typeof fetch {
+  const jar = new Map<string, string>();
+  return async (input, init) => {
+    const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url);
+    if (!url.searchParams.has('api_key')) url.searchParams.set('api_key', apiKey);
+    const headers = new Headers(init?.headers ?? (typeof input !== 'string' && !(input instanceof URL) ? input.headers : undefined));
+    headers.set('x-api-key', apiKey);
+    if (jar.size) headers.set('cookie', [...jar].map(([k, v]) => `${k}=${v}`).join('; '));
+    if (init?.method === 'POST') onEndpoint?.(url.pathname + (url.search ? '?' + [...url.searchParams.keys()].join(',') : ''));
+    const res = await base(url, { ...init, headers });
+    const set = (res.headers as Headers & { getSetCookie?: () => string[] }).getSetCookie?.() ?? (res.headers.get('set-cookie') ? [res.headers.get('set-cookie')!] : []);
+    for (const c of set) { const kv = c.split(';')[0]; const i = kv.indexOf('='); if (i > 0) jar.set(kv.slice(0, i).trim(), kv.slice(i + 1).trim()); }
+    return res;
+  };
 }
 
 export interface ListingRow {
