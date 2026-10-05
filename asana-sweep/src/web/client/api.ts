@@ -36,6 +36,14 @@ import type {
   GmvExplore,
   StockData,
   StockProjection,
+  FbtPlan,
+  FbtField,
+  FbtProfile,
+  FbtSkuSpec,
+  PnlData,
+  PnlForecastInputs,
+  PnlInputs,
+  PnlSummaryRow,
   IncidentsData,
   ReportsData,
   ClientReport,
@@ -210,6 +218,9 @@ export interface Status {
   build: string;
   started_at: string;
 }
+
+export type FbtRequested = Record<string, { units?: number; cartons?: number; pallets?: number }>;
+export type FbtPlanData = FbtPlan & { fields: { key: FbtField; label: string }[] };
 
 export const api = {
   me: () => call<{ authenticated: boolean; role: 'admin' | 'am' | null; am_login_enabled: boolean }>('GET', '/me'),
@@ -402,6 +413,18 @@ export const api = {
   stockProjection: (shopId: string, days: number, lead: number) => call<StockProjection>('GET', `/stock/${encodeURIComponent(shopId)}/projection?days=${days}&lead=${lead}`),
   stockCsvUrl: (shopId: string, days: number, lead: number, all = false) => `/api/stock/${encodeURIComponent(shopId)}/projection.csv?days=${days}&lead=${lead}${all ? '&all=1' : ''}`,
   stockOverride: (shopId: string, skuId: string, o: { velocity?: number | null; exclude?: boolean; note?: string | null }, days: number) => call<StockProjection>('PUT', `/stock/${encodeURIComponent(shopId)}/skus/${encodeURIComponent(skuId)}?days=${days}`, o),
+  // FBT paperwork
+  fbtPlan: (shopId: string, days: number, lead: number, requested: FbtRequested) => call<FbtPlanData>('GET', `/stock/${encodeURIComponent(shopId)}/fbt?days=${days}&lead=${lead}&req=${encodeURIComponent(JSON.stringify(requested))}`),
+  fbtFileUrl: (shopId: string, kind: 'template.csv' | 'manifest.csv' | 'summary.txt', days: number, lead: number, requested: FbtRequested) => `/api/stock/${encodeURIComponent(shopId)}/fbt/${kind}?days=${days}&lead=${lead}&req=${encodeURIComponent(JSON.stringify(requested))}`,
+  fbtProfile: (shopId: string, p: Partial<Pick<FbtProfile, 'warehouse_name' | 'warehouse_id' | 'ship_from' | 'contact' | 'delimiter' | 'columns' | 'market'>> & { header?: string; reset_columns?: boolean }, days: number, lead: number, requested: FbtRequested) => call<FbtPlanData>('PUT', `/stock/${encodeURIComponent(shopId)}/fbt/profile?days=${days}&lead=${lead}&req=${encodeURIComponent(JSON.stringify(requested))}`, p),
+  fbtSku: (shopId: string, skuId: string, spec: Partial<Omit<FbtSkuSpec, 'shop_id' | 'sku_id' | 'updated_at'>>, days: number, lead: number, requested: FbtRequested) => call<FbtPlanData>('PUT', `/stock/${encodeURIComponent(shopId)}/fbt/skus/${encodeURIComponent(skuId)}?days=${days}&lead=${lead}&req=${encodeURIComponent(JSON.stringify(requested))}`, spec),
+  // P&L
+  pnlSummary: (month: string) => call<{ month: string; current_month: string; rows: PnlSummaryRow[] }>('GET', `/pnl/summary?month=${month}`),
+  pnl: (accountId: number, month: string) => call<PnlData>('GET', `/pnl/${accountId}?month=${month}`),
+  pnlInputs: (accountId: number, month: string, inputs: Partial<PnlInputs>) => call<PnlData>('PUT', `/pnl/${accountId}/inputs?month=${month}`, inputs),
+  pnlSkuCogs: (accountId: number, month: string, row: { key: string; label: string; cogs: number | null; currency?: string }) => call<PnlData>('PUT', `/pnl/${accountId}/sku-cogs?month=${month}`, row),
+  pnlForecast: (accountId: number, month: string, f: Partial<PnlForecastInputs>) => call<PnlData>('PUT', `/pnl/${accountId}/forecast?month=${month}`, f),
+  pnlCsvUrl: (accountId: number, month: string) => `/api/pnl/${accountId}/pnl.csv?month=${month}`,
   // Incidents
   incidents: () => call<IncidentsData>('GET', '/incidents'),
   incidentsScan: () => call<IncidentsData & { opened: number; resolved: number; errors: string[] }>('POST', '/incidents/scan'),

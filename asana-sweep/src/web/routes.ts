@@ -48,6 +48,9 @@ import { generateLarkMessage, pickLarkRecipient, spreadDates } from '../bd/lark.
 import type { LarkMessage, PlaybookDraftStatus, TtsScope } from '../sweep/types.js';
 import { BLOCK_SCOPES } from '../health/tts-pull.js';
 import { projectionCsv } from '../stock/index.js';
+import { columnsFromHeader, FBT_FIELDS, fbtManifestCsv, fbtPlan, fbtProfile, fbtSummary, fbtTemplateCsv } from '../stock/fbt.js';
+import { currentMonth as pnlCurrentMonth, pnlCsv, pnlData, pnlSummary } from '../pnl/index.js';
+import type { FbtField, FbtProfile, PnlForecastInputs, PnlInputs } from '../sweep/types.js';
 import { periodBounds } from '../reports/client.js';
 import type { IngestPayload } from '../health/index.js';
 import { THRESHOLD_LABELS } from '../health/rules.js';
@@ -2666,6 +2669,126 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     liveEvents.emitUpdate({ kind: 'stock' });
     const days = req.query.days !== undefined ? Number(req.query.days) : undefined;
     res.json(stock.projection(String(req.params.shopId), days));
+  });
+
+  // ---- FBT (Fulfilled by TikTok) inbound paperwork ----
+  const fbtRequested = (raw: unknown): Record<string, { units?: number; cartons?: number; pallets?: number }> => {
+    if (!raw) return {};
+    let obj: unknown = raw;
+    if (typeof raw === 'string') { try { obj = JSON.parse(raw); } catch { throw new HttpError(400, 'req must be JSON.'); } }
+    if (!obj || typeof obj !== 'object') return {};
+    const out: Record<string, { units?: number; cartons?: number; pallets?: number }> = {};
+    for (const [k, v] of Object.entries(obj as Record<string, unknown>)) {
+      if (!v || typeof v !== 'object') continue;
+      const e = v as Record<string, unknown>;
+      const n = (x: unknown) => (x === undefined || x === null || x === '' ? undefined : Number(x));
+      const units = n(e.units), cartons = n(e.cartons), pallets = n(e.pallets);
+      for (const [name, val] of [['units', units], ['cartons', cartons], ['pallets', pallets]] as const) if (val !== undefined && (!Number.isFinite(val) || val < 0)) throw new HttpError(400, `${name} for ${k} must be a positive number.`);
+      out[k] = { units, cartons, pallets };
+    }
+    return out;
+  };
+  const fbtPlanFor = (req: Request) => {
+    const days = req.query.days !== undefined ? Number(req.query.days) : undefined;
+    const lead = req.query.lead !== undefined ? Number(req.query.lead) : undefined;
+    const proj = stock.projection(String(req.params.shopId), days, lead);
+    return fbtPlan(q, proj, fbtRequested(req.query.req ?? (req.body ?? {}).requested));
+  };
+  const fbtFile = (res: Response, plan: { shop_name: string }, kind: string, ext: string) => {
+    res.setHeader('Content-Type', ext === 'csv' ? 'text/csv; charset=utf-8' : 'text/plain; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${plan.shop_name.replace(/[^A-Za-z0-9_-]+/g, '_')}_FBT_${kind}_${new Date().toISOString().slice(0, 10)}.${ext}"`);
+  };
+  r.get('/stock/:shopId/fbt', (req, res) => res.json({ ...fbtPlanFor(req), fields: FBT_FIELDS }));
+  r.get('/stock/:shopId/fbt/template.csv', (req, res) => { const plan = fbtPlanFor(req); fbtFile(res, plan, 'inbound_template', 'csv'); res.send(fbtTemplateCsv(plan)); });
+  r.get('/stock/:shopId/fbt/manifest.csv', (req, res) => { const plan = fbtPlanFor(req); fbtFile(res, plan, 'carton_manifest', 'csv'); res.send(fbtManifestCsv(plan)); });
+  r.get('/stock/:shopId/fbt/summary.txt', (req, res) => { const plan = fbtPlanFor(req); fbtFile(res, plan, 'booking_summary', 'txt'); res.send(fbtSummary(plan)); });
+  r.put('/stock/:shopId/fbt/profile', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const proj = stock.projection(String(req.params.shopId));
+    if (!proj.account_id) throw new HttpError(400, 'Link this shop to an account first (Settings → Accounts).');
+    const market = optText(b.market) ?? fbtPlan(q, proj).market ?? '';
+    const cur = fbtProfile(q, proj.account_id, market);
+    const fields = new Set<string>(FBT_FIELDS.map((f) => f.key));
+    let columns: FbtProfile['columns'] | undefined;
+    if (typeof b.header === 'string') columns = columnsFromHeader(b.header);
+    else if (Array.isArray(b.columns)) {
+      columns = (b.columns as unknown[]).map((c) => {
+        const o = (c ?? {}) as Record<string, unknown>;
+        const header = String(o.header ?? '').trim();
+        const field = fields.has(String(o.field)) ? (String(o.field) as FbtField) : 'blank';
+        return { header, field };
+      }).filter((c) => c.header);
+      if (!columns.length) throw new HttpError(400, 'The template needs at least one column.');
+    }
+    const next: Partial<FbtProfile> = {
+      ...cur,
+      warehouse_name: b.warehouse_name === undefined ? cur.warehouse_name : optText(b.warehouse_name) ?? '',
+      warehouse_id: b.warehouse_id === undefined ? cur.warehouse_id : optText(b.warehouse_id) ?? '',
+      ship_from: b.ship_from === undefined ? cur.ship_from : optText(b.ship_from) ?? '',
+      contact: b.contact === undefined ? cur.contact : optText(b.contact) ?? '',
+      delimiter: b.delimiter === ';' ? ';' : b.delimiter === ',' ? ',' : cur.delimiter,
+      ...(columns ? { columns } : {}),
+    };
+    if (b.reset_columns === true) delete next.columns;
+    q.saveFbtProfile(proj.account_id, market, next);
+    liveEvents.emitUpdate({ kind: 'stock' });
+    res.json({ ...fbtPlanFor(req), fields: FBT_FIELDS });
+  });
+  r.put('/stock/:shopId/fbt/skus/:skuId', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const numOrNull = (k: string) => { const v = b[k]; if (v === undefined) return undefined; if (v === null || v === '') return null; const n = Number(v); if (!Number.isFinite(n) || n < 0) throw new HttpError(400, `${k} must be a positive number.`); return n; };
+    const textOrNull = (k: string) => (b[k] === undefined ? undefined : optText(b[k]));
+    const spec: Record<string, unknown> = {};
+    for (const k of ['units_per_carton', 'carton_length_cm', 'carton_width_cm', 'carton_height_cm', 'carton_weight_kg', 'cartons_per_pallet']) { const v = numOrNull(k); if (v !== undefined) spec[k] = v; }
+    for (const k of ['goods_id', 'barcode', 'expiry', 'lot']) { const v = textOrNull(k); if (v !== undefined) spec[k] = v; }
+    q.saveFbtSkuSpec(String(req.params.shopId), String(req.params.skuId), spec);
+    liveEvents.emitUpdate({ kind: 'stock' });
+    res.json({ ...fbtPlanFor(req), fields: FBT_FIELDS });
+  });
+
+  // ---- P&L per account ----
+  const pnlMonth = (v: unknown) => (typeof v === 'string' && /^\d{4}-\d{2}$/.test(v) ? v : pnlCurrentMonth(q));
+  r.get('/pnl/summary', (req, res) => {
+    const month = pnlMonth(req.query.month);
+    res.json({ month, current_month: pnlCurrentMonth(q), rows: pnlSummary(q, month) });
+  });
+  r.get('/pnl/:accountId', (req, res) => res.json(pnlData(q, accountParam(req), pnlMonth(req.query.month))));
+  r.get('/pnl/:accountId/pnl.csv', (req, res) => {
+    const d = pnlData(q, accountParam(req), pnlMonth(req.query.month));
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="Brightform_PnL_${d.account.name.replace(/[^A-Za-z0-9_-]+/g, '_')}_${d.month}.csv"`);
+    res.send(pnlCsv(d));
+  });
+  r.put('/pnl/:accountId/inputs', (req, res) => {
+    const account = accountParam(req);
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const month = pnlMonth(req.query.month ?? b.month);
+    const numKeys: (keyof PnlInputs)[] = ['platform_fee_pct', 'creator_commission_pct', 'agency_fee', 'agency_commission_pct', 'cogs_pct', 'shipping_pct', 'ad_spend', 'samples_sent', 'sample_unit_cost', 'other_costs'];
+    const patch: Partial<PnlInputs> = {};
+    for (const k of numKeys) if (b[k] !== undefined) { const n = Number(b[k]); if (!Number.isFinite(n) || n < 0) throw new HttpError(400, `${k} must be a positive number.`); (patch as Record<string, unknown>)[k] = n; }
+    if (b.cogs_mode !== undefined) { if (b.cogs_mode !== 'sku' && b.cogs_mode !== 'blended') throw new HttpError(400, 'cogs_mode must be sku or blended.'); patch.cogs_mode = b.cogs_mode; }
+    if (b.notes !== undefined) patch.notes = optText(b.notes) ?? '';
+    const cur = q.getPnlInputs(account.id, month) ?? q.latestPnlInputs(account.id, month) ?? {};
+    q.savePnlInputs(account.id, month, { ...cur, ...patch });
+    liveEvents.emitUpdate({ kind: 'reports' });
+    res.json(pnlData(q, account, month));
+  });
+  r.put('/pnl/:accountId/sku-cogs', (req, res) => {
+    const account = accountParam(req);
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const key = optText(b.key);
+    if (!key) throw new HttpError(400, 'key is required.');
+    const cogs = b.cogs === null || b.cogs === '' || b.cogs === undefined ? null : Number(b.cogs);
+    if (cogs !== null && (!Number.isFinite(cogs) || cogs < 0)) throw new HttpError(400, 'cogs must be a positive number.');
+    q.savePnlSkuCogs(account.id, key, optText(b.label) ?? key, cogs, (optText(b.currency) ?? q.getSetting('report_currency', 'EUR')).toUpperCase().slice(0, 3));
+    res.json(pnlData(q, account, pnlMonth(req.query.month ?? b.month)));
+  });
+  r.put('/pnl/:accountId/forecast', (req, res) => {
+    const account = accountParam(req);
+    const b = (req.body ?? {}) as Partial<PnlForecastInputs> & { month?: string };
+    const d = pnlData(q, account, pnlMonth(req.query.month ?? b.month), b);
+    q.setSetting(`pnl_forecast:${account.id}`, JSON.stringify(d.forecast_inputs));
+    res.json(d);
   });
 
   // ---- Incidents (instant issue alerts to Slack) ----

@@ -545,3 +545,11 @@ table.cruva td.shop { min-width: 170px; }
 
 table.cruva tr.acc-row td { background: var(--surface-2); cursor: pointer; border-top: 2px solid var(--border); }
 table.cruva tr.acc-row.red td { background: var(--crit-bg); } table.cruva tr.acc-row.amber td { background: var(--warn-bg); } table.cruva tr.acc-row.green td { background: var(--good-bg); }
+
+/* P&L and FBT tables */
+table.pnl tr.total td { border-top: 1px solid var(--border-strong); background: var(--surface-2); }
+table.pnl th.sub, table.pnl td.sub { color: var(--muted); }
+table.pnl td.crit, td.num.crit { color: var(--crit-ink); }
+table.fbt input[type=number], table.fbt input[type=text] { padding: 3px 6px; font-size: 12px; }
+table.fbt tr.warnrow td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
+.area > .head .light + b { min-width: 0; }

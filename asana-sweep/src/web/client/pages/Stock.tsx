@@ -4,6 +4,7 @@ import { api, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
 import { useAccountScope } from '../hubs';
 import { AccountGroup, GroupsHead, useOpenGroups, type GroupLight } from '../groups';
+import FbtPanel from './Fbt';
 
 const LEVEL: Record<StockProjectionRow['level'], { label: string; cls: string }> = { out: { label: 'Out', cls: 'crit' }, crit: { label: 'Critical', cls: 'crit' }, warn: { label: 'Low', cls: 'warn' }, ok: { label: 'OK', cls: 'good' }, idle: { label: 'No sales', cls: 'muted' } };
 
@@ -26,6 +27,8 @@ export default function StockPage() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [alertsOpen, setAlertsOpen] = useState(false);
+  const [fbtOpen, setFbtOpen] = useState(false);
   const isAdmin = useIsAdmin();
   const groups = useOpenGroups('stock');
   const load = useCallback(() => api.stock().then(setData).catch((e) => setError((e as Error).message)), []);
@@ -33,6 +36,7 @@ export default function StockPage() {
   const connected = useLiveUpdates((e) => { if (e.kind === 'stock') load(); });
   const cover = days ?? data?.settings.default_cover_days ?? 30;
   const leadDays = lead ?? data?.settings.default_lead_days ?? 0;
+  useEffect(() => { setFbtOpen(false); }, [shop]);
   useEffect(() => {
     if (!shop) { setProj(null); return; }
     const t = setTimeout(() => api.stockProjection(shop, cover, leadDays).then(setProj).catch((e) => setError((e as Error).message)), 150);
@@ -47,8 +51,8 @@ export default function StockPage() {
       if (ok) setNotice(ok);
     } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   };
-  if (!data) return <p>{error ?? 'Loading…'}</p>;
   const scope = useAccountScope();
+  if (!data) return <p>{error ?? 'Loading…'}</p>;
   const shops = data.shops.filter((sh) => scope === null || sh.account_id === scope);
   const alerts = data.alerts.filter((a) => scope === null || shops.some((sh) => sh.shop_id === a.shop_id));
   const rows = proj ? proj.rows.filter((r) => !onlyNeeded || r.send_in > 0) : [];
@@ -80,24 +84,35 @@ export default function StockPage() {
       </div>
 
       {data.alerts.length > 0 && !shop && (
-        <div className="card" style={{ marginBottom: 14 }}>
-          <h3 style={{ marginTop: 0 }}>Stock alerts</h3>
-          <div className="grid-wrap"><table><thead><tr><th>Level</th><th>Shop</th><th>Product</th><th className="num">On hand</th><th className="num">Per day</th><th>Countdown</th></tr></thead><tbody>
-            {alerts.slice(0, 40).map((r) => (
-              <tr key={`${r.shop_id}-${r.sku_id}`} className="clickable" onClick={() => setShop(r.shop_id)}>
-                <td>{badge(r.level)}</td>
-                <td><b>{r.shop_name}</b>{r.account_name ? <div className="sub">{r.account_name}</div> : null}</td>
-                <td>{r.product_title}{r.sku_name ? <div className="sub">{r.sku_name}{r.seller_sku ? ` · ${r.seller_sku}` : ''}</div> : r.seller_sku ? <div className="sub">{r.seller_sku}</div> : null}</td>
-                <td className="num">{r.on_hand}</td>
-                <td className="num">{r.velocity}</td>
-                <td>{countdown(r)}</td>
-              </tr>
-            ))}
-          </tbody></table></div>
+        <div className={`area ${alerts.some((a) => a.level === 'out') ? 'red' : alerts.length ? 'amber' : ''}`} style={{ marginBottom: 14 }}>
+          <div className="head" onClick={() => setAlertsOpen((v) => !v)} role="button" aria-expanded={alertsOpen}>
+            <span className={`light ${alerts.some((a) => a.level === 'out') ? 'crit' : alerts.length ? 'warn' : 'good'}`} />
+            <b>Stock alerts</b>
+            <span className="summary">{alerts.length} SKU{alerts.length === 1 ? '' : 's'} out or running low{alerts.length ? ` · ${alerts.filter((a) => a.level === 'out').length} out · ${alerts.filter((a) => a.level === 'crit').length} critical · ${alerts.filter((a) => a.level === 'warn').length} low` : ''}</span>
+            <span className="nums" />
+            <span className="actions" style={{ alignItems: 'center' }}>{alerts.filter((a) => a.level === 'out').length ? <span className="badge crit">{alerts.filter((a) => a.level === 'out').length}</span> : null}{alerts.filter((a) => a.level !== 'out').length ? <span className="badge warn">{alerts.filter((a) => a.level !== 'out').length}</span> : null}<span className="sub">{alertsOpen ? '▾' : '▸'}</span></span>
+          </div>
+          {alertsOpen && (
+            <div className="area-body">
+              <div className="grid-wrap"><table><thead><tr><th>Level</th><th>Shop</th><th>Product</th><th className="num">On hand</th><th className="num">Per day</th><th>Countdown</th></tr></thead><tbody>
+                {alerts.slice(0, 40).map((r) => (
+                  <tr key={`${r.shop_id}-${r.sku_id}`} className="clickable" onClick={() => setShop(r.shop_id)}>
+                    <td>{badge(r.level)}</td>
+                    <td><b>{r.shop_name}</b>{r.account_name ? <div className="sub">{r.account_name}</div> : null}</td>
+                    <td>{r.product_title}{r.sku_name ? <div className="sub">{r.sku_name}{r.seller_sku ? ` · ${r.seller_sku}` : ''}</div> : r.seller_sku ? <div className="sub">{r.seller_sku}</div> : null}</td>
+                    <td className="num">{r.on_hand}</td>
+                    <td className="num">{r.velocity}</td>
+                    <td>{countdown(r)}</td>
+                  </tr>
+                ))}
+              </tbody></table></div>
+            </div>
+          )}
         </div>
       )}
 
       <div className="toolbar">
+        {shop && <button className="small" onClick={() => setShop('')}>‹ All shops</button>}
         <select value={shop} onChange={(e) => setShop(e.target.value)}>
           <option value="">Pick a shop for the projection…</option>
           {data.shops.map((s) => <option key={s.shop_id} value={s.shop_id}>{s.account_name ? `${s.account_name} · ` : ''}{s.shop_name}{s.source === 'cruva' ? ' (Cruva)' : ''}{s.next_stockout_days !== null ? ` (next stock-out in ${Math.max(0, Math.round(s.next_stockout_days))}d)` : s.skus ? '' : ' (no snapshot)'}</option>)}
@@ -163,8 +178,10 @@ export default function StockPage() {
               <p className="sub" style={{ margin: 0 }}>{proj.totals.skus} SKUs · {proj.totals.out} out · {proj.totals.crit} critical · {proj.totals.warn} low · snapshot {proj.captured_at ? fmtRelative(proj.captured_at) : 'none yet'}</p>
             </div>
             <div className="actions">
+              <button onClick={() => setShop('')} title="Back to all shops">‹ Back</button>
               <a className="button primary" href={api.stockCsvUrl(proj.shop_id, proj.cover_days, proj.lead_days, false)} download title="Only the SKUs that need sending in">Download CSV ({proj.totals.send_in_skus} SKUs, {proj.totals.send_in_units} units)</a>
               <a className="button" href={api.stockCsvUrl(proj.shop_id, proj.cover_days, proj.lead_days, true)} download title="Every SKU with its countdown">Full CSV</a>
+              <button className={fbtOpen ? 'active' : ''} onClick={() => setFbtOpen((v) => !v)} title="Fulfilled by TikTok inbound template, carton manifest and booking summary">{fbtOpen ? 'Hide FBT paperwork' : 'FBT paperwork'}</button>
             </div>
           </div>
           <div className="inline-form" style={{ marginBottom: 10, alignItems: 'flex-end' }}>
@@ -194,6 +211,7 @@ export default function StockPage() {
               ))}
             </tbody></table></div>
           )}
+          {fbtOpen && <FbtPanel shopId={proj.shop_id} days={proj.cover_days} lead={proj.lead_days} isAdmin={isAdmin} onError={setError} />}
         </div>
       )}
     </>

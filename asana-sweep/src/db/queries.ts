@@ -46,6 +46,10 @@ import type {
   PlaybookDraft,
   PlaybookDraftStatus,
   ReplyPolicy,
+  FbtProfile,
+  FbtSkuSpec,
+  PnlInputs,
+  PnlSkuCogs,
   ReplyEvent,
   ReplyDecision,
   InboxChannel,
@@ -2319,6 +2323,58 @@ export class Queries {
   pendingDraft(conversationRef: number): InboxReply | null {
     const r = this.db.prepare(`SELECT * FROM inbox_replies WHERE conversation_ref = ? AND sent_at IS NULL AND error_message IS NULL AND mode = 'draft' ORDER BY id DESC LIMIT 1`).get(conversationRef) as Row | undefined;
     return r ? this.rowToReply(r) : null;
+  }
+
+  // ---- FBT paperwork ----
+
+  getFbtProfile(accountId: number, market: string): Partial<FbtProfile> & { updated_at: string | null } {
+    const r = this.db.prepare('SELECT json, updated_at FROM fbt_profiles WHERE account_id = ? AND market = ?').get(accountId, market.toUpperCase()) as Row | undefined;
+    return { ...parseJson<Partial<FbtProfile>>(r?.json, {}), updated_at: (r?.updated_at as string | null) ?? null };
+  }
+
+  saveFbtProfile(accountId: number, market: string, p: Partial<FbtProfile>): void {
+    const { account_id: _a, market: _m, updated_at: _u, ...rest } = p;
+    this.db.prepare(`INSERT INTO fbt_profiles (account_id, market, json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(account_id, market) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at`).run(accountId, market.toUpperCase(), JSON.stringify(rest), new Date().toISOString());
+  }
+
+  listFbtSkuSpecs(shopId: string): FbtSkuSpec[] {
+    return (this.db.prepare('SELECT * FROM fbt_sku_specs WHERE shop_id = ?').all(shopId) as Row[]).map((r) => ({ shop_id: r.shop_id as string, sku_id: r.sku_id as string, goods_id: null, barcode: null, units_per_carton: null, carton_length_cm: null, carton_width_cm: null, carton_height_cm: null, carton_weight_kg: null, cartons_per_pallet: null, expiry: null, lot: null, ...parseJson<Partial<FbtSkuSpec>>(r.json, {}), updated_at: (r.updated_at as string | null) ?? null }));
+  }
+
+  saveFbtSkuSpec(shopId: string, skuId: string, spec: Partial<FbtSkuSpec>): void {
+    const cur = this.listFbtSkuSpecs(shopId).find((x) => x.sku_id === skuId);
+    const { shop_id: _s, sku_id: _k, updated_at: _u, ...rest } = { ...(cur ?? {}), ...spec } as FbtSkuSpec;
+    this.db.prepare(`INSERT INTO fbt_sku_specs (shop_id, sku_id, json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(shop_id, sku_id) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at`).run(shopId, skuId, JSON.stringify(rest), new Date().toISOString());
+  }
+
+  // ---- P&L ----
+
+  getPnlInputs(accountId: number, month: string): Partial<PnlInputs> | null {
+    const r = this.db.prepare('SELECT json FROM pnl_inputs WHERE account_id = ? AND month = ?').get(accountId, month) as Row | undefined;
+    return r ? parseJson<Partial<PnlInputs>>(r.json, {}) : null;
+  }
+
+  /** The newest inputs on or before the month, so a new month starts from the last one entered. */
+  latestPnlInputs(accountId: number, month: string): Partial<PnlInputs> | null {
+    const r = this.db.prepare('SELECT json FROM pnl_inputs WHERE account_id = ? AND month <= ? ORDER BY month DESC LIMIT 1').get(accountId, month) as Row | undefined;
+    return r ? parseJson<Partial<PnlInputs>>(r.json, {}) : null;
+  }
+
+  listPnlMonths(accountId: number): string[] {
+    return (this.db.prepare('SELECT month FROM pnl_inputs WHERE account_id = ? ORDER BY month').all(accountId) as { month: string }[]).map((r) => r.month);
+  }
+
+  savePnlInputs(accountId: number, month: string, inputs: Partial<PnlInputs>): void {
+    this.db.prepare(`INSERT INTO pnl_inputs (account_id, month, json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(account_id, month) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at`).run(accountId, month, JSON.stringify(inputs), new Date().toISOString());
+  }
+
+  listPnlSkuCogs(accountId: number): PnlSkuCogs[] {
+    return (this.db.prepare('SELECT * FROM pnl_sku_cogs WHERE account_id = ? ORDER BY label').all(accountId) as Row[]).map((r) => ({ account_id: r.account_id as number, key: r.key as string, label: r.label as string, cogs: Number(r.cogs), currency: r.currency as string, updated_at: (r.updated_at as string | null) ?? null }));
+  }
+
+  savePnlSkuCogs(accountId: number, key: string, label: string, cogs: number | null, currency: string): void {
+    if (cogs === null) { this.db.prepare('DELETE FROM pnl_sku_cogs WHERE account_id = ? AND key = ?').run(accountId, key); return; }
+    this.db.prepare(`INSERT INTO pnl_sku_cogs (account_id, key, label, cogs, currency, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(account_id, key) DO UPDATE SET label = excluded.label, cogs = excluded.cogs, currency = excluded.currency, updated_at = excluded.updated_at`).run(accountId, key, label, cogs, currency, new Date().toISOString());
   }
 
   // ---- Client question copilot ----

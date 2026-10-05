@@ -15,7 +15,11 @@ const fmt = (n: number, kind: 'money' | 'count' | 'pct' | 'ratio', currency?: st
 };
 export const fmtValue = fmt;
 
-const shortDate = (iso: string) => { const d = new Date(`${iso}T00:00:00Z`); return `${d.getUTCDate()} ${d.toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' })}`; };
+const shortDate = (iso: string) => {
+  // A 7-character "YYYY-MM" point is a month (P&L charts): label it "Oct 26" rather than "1 Oct".
+  if (iso.length === 7) { const d = new Date(`${iso}-01T00:00:00Z`); return `${d.toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' })} ${String(d.getUTCFullYear()).slice(2)}`; }
+  const d = new Date(`${iso}T00:00:00Z`); return `${d.getUTCDate()} ${d.toLocaleString('en-GB', { month: 'short', timeZone: 'UTC' })}`;
+};
 
 /** Monotone cubic curve through the points (no overshoot), like the Seller Center analytics lines. */
 function smoothPath(pts: { x: number; y: number }[]): string {

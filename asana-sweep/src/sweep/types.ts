@@ -1570,6 +1570,98 @@ export interface SlackChannel { id: string; name: string; is_private: boolean; i
 
 export interface RepliesSummaryRow { account_id: number; account_name: string; am_name: string | null; channel: InboxChannel; mode: ReplyMode; waiting: number; escalated: number; auto_today: number; cap: number | null; ready: boolean; note: string | null; shops: { id: string; name: string; market: string | null; token_ok: boolean; off: boolean; language: string | null }[] }
 
+// ---- FBT paperwork ----
+
+/** How a shop ships into Fulfilled by TikTok: the warehouse and the template it uploads. */
+export interface FbtProfile {
+  account_id: number;
+  market: string;
+  warehouse_name: string;
+  warehouse_id: string;
+  ship_from: string;
+  contact: string;
+  /** The template's header row, in order, and which field each column takes. */
+  columns: { header: string; field: FbtField }[];
+  delimiter: ',' | ';';
+  updated_at: string | null;
+}
+export type FbtField = 'goods_id' | 'seller_sku' | 'sku_id' | 'product_id' | 'product_name' | 'sku_name' | 'barcode' | 'units_per_carton' | 'cartons' | 'total_units' | 'carton_length_cm' | 'carton_width_cm' | 'carton_height_cm' | 'carton_weight_kg' | 'pallets' | 'warehouse_id' | 'warehouse_name' | 'expiry' | 'lot' | 'blank';
+export interface FbtSkuSpec {
+  shop_id: string;
+  sku_id: string;
+  goods_id: string | null;
+  barcode: string | null;
+  units_per_carton: number | null;
+  carton_length_cm: number | null;
+  carton_width_cm: number | null;
+  carton_height_cm: number | null;
+  carton_weight_kg: number | null;
+  cartons_per_pallet: number | null;
+  expiry: string | null;
+  lot: string | null;
+  updated_at: string | null;
+}
+export interface FbtLine extends FbtSkuSpec {
+  product_id: string;
+  product_title: string;
+  sku_name: string | null;
+  seller_sku: string | null;
+  on_hand: number;
+  velocity: number;
+  /** What the projection says to send in for the chosen cover. */
+  suggested_units: number;
+  /** What the AM asks for (defaults to the suggestion, rounded up to full cartons). */
+  units: number;
+  cartons: number;
+  pallets: number;
+  /** Why this line cannot go on the template yet. */
+  blockers: string[];
+}
+export interface FbtPlan { shop_id: string; shop_name: string; market: string | null; account_id: number | null; account_name: string | null; profile: FbtProfile; lines: FbtLine[]; totals: { units: number; cartons: number; pallets: number; weight_kg: number; skus: number; ready: number }; cover_days: number }
+
+// ---- P&L per account ----
+
+export interface PnlInputs {
+  /** TikTok platform commission on GMV, percent. */
+  platform_fee_pct: number;
+  /** Creator (affiliate) commission on affiliate GMV, percent. */
+  creator_commission_pct: number;
+  /** Agency retainer for the month, in the report currency. */
+  agency_fee: number;
+  /** Agency commission, percent of the base (account.commission_basis). */
+  agency_commission_pct: number;
+  /** COGS as a percent of GMV (blended) or per SKU (needs the SKU table). */
+  cogs_mode: 'blended' | 'sku';
+  cogs_pct: number;
+  /** Shipping and fulfilment per order or as a percent of GMV. */
+  shipping_pct: number;
+  ad_spend: number;
+  samples_sent: number;
+  sample_unit_cost: number;
+  other_costs: number;
+  notes: string;
+}
+export interface PnlSkuCogs { account_id: number; key: string; label: string; cogs: number; currency: string; updated_at: string | null }
+export interface PnlLine { key: string; label: string; amount: number; pct_of_gmv: number | null; kind: 'revenue' | 'cost' | 'result'; note?: string | null }
+export interface PnlMonth { month: string; actual: boolean; gmv: number; affiliate_gmv: number; units: number; days_with_data: number; inputs: PnlInputs; lines: PnlLine[]; net: number; margin_pct: number | null; agency_billing: number; client_profit: number; cogs_source: 'sku' | 'blended' | 'none' }
+export interface PnlForecastInputs { months: number; gmv_growth_pct: number; ad_spend: number; ad_roi: number; samples_per_month: number; sample_gmv_each: number; keep_fees: boolean }
+export interface PnlData {
+  account: Account;
+  currency: string;
+  month: string;
+  inputs: PnlInputs;
+  defaults: PnlInputs;
+  sku_cogs: PnlSkuCogs[];
+  /** SKUs known for this account (from the stock snapshots), to price COGS per SKU. */
+  skus: { key: string; label: string; sold_30d: number; shop_name: string }[];
+  history: PnlMonth[];
+  current: PnlMonth;
+  forecast_inputs: PnlForecastInputs;
+  forecast: PnlMonth[];
+  light: 'red' | 'amber' | 'green' | 'grey';
+}
+export interface PnlSummaryRow { account_id: number; account_name: string; am_name: string | null; markets: string | null; currency: string; month: string; gmv: number; net: number; margin_pct: number | null; agency_billing: number; has_inputs: boolean; light: 'red' | 'amber' | 'green' | 'grey' }
+
 // ---- Stock ----
 
 export interface StockSku {

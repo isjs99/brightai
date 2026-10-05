@@ -1455,6 +1455,44 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 38,
+    name: 'FBT paperwork profiles and SKU specs; P&L inputs and SKU COGS per account',
+    up(db) {
+      db.exec(`
+        CREATE TABLE fbt_profiles (
+          account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          market TEXT NOT NULL,
+          json TEXT NOT NULL DEFAULT '{}',
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (account_id, market)
+        );
+        CREATE TABLE fbt_sku_specs (
+          shop_id TEXT NOT NULL,
+          sku_id TEXT NOT NULL,
+          json TEXT NOT NULL DEFAULT '{}',
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (shop_id, sku_id)
+        );
+        CREATE TABLE pnl_inputs (
+          account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          month TEXT NOT NULL,
+          json TEXT NOT NULL DEFAULT '{}',
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (account_id, month)
+        );
+        CREATE TABLE pnl_sku_cogs (
+          account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          key TEXT NOT NULL,
+          label TEXT NOT NULL DEFAULT '',
+          cogs REAL NOT NULL DEFAULT 0,
+          currency TEXT NOT NULL DEFAULT 'EUR',
+          updated_at TEXT NOT NULL,
+          PRIMARY KEY (account_id, key)
+        );
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

@@ -18,6 +18,7 @@ import OutreachPage from './pages/Outreach';
 import InquiriesPage from './pages/Inquiries';
 import MonitorPage from './pages/Monitor';
 import StockPage from './pages/Stock';
+import PnlPage from './pages/Pnl';
 import ReportsPage from './pages/Reports';
 import CruvaPage from './pages/Cruva';
 import CopilotPage from './pages/Copilot';
@@ -106,7 +107,7 @@ function Login({ onDone }: { onDone: (role: Role) => void }) {
 /** Six entries. Each hub owns several paths (its tabs), so the link is active on any of them. */
 const NAV: { to: string; label: string; paths: string[] }[] = [
   { to: '/today', label: 'Today', paths: ['/today'] },
-  { to: '/monitor', label: 'Accounts', paths: ['/monitor', '/checklists', '/calendar', '/promotions', '/gmv-max', '/stock', '/cruva', '/playbook', '/creators', '/customer-service', '/reports', '/copilot'] },
+  { to: '/monitor', label: 'Accounts', paths: ['/monitor', '/checklists', '/calendar', '/promotions', '/gmv-max', '/stock', '/pnl', '/cruva', '/playbook', '/creators', '/customer-service', '/reports', '/copilot'] },
   { to: '/inquiries', label: 'Enquiries', paths: ['/inquiries', '/inbox'] },
   { to: '/bd', label: 'Growth', paths: ['/bd', '/outreach', '/leads'] },
   { to: '/gmv', label: 'Performance', paths: ['/gmv', '/analytics'] },
@@ -186,6 +187,7 @@ export default function App() {
               <Route path="/promotions" element={<AccountHub><PromotionsPage /></AccountHub>} />
               <Route path="/gmv-max" element={<AccountHub><GmvMaxPage /></AccountHub>} />
               <Route path="/stock" element={<AccountHub><StockPage /></AccountHub>} />
+              <Route path="/pnl" element={<AccountHub><PnlPage /></AccountHub>} />
               <Route path="/reports" element={<AccountHub><ReportsPage /></AccountHub>} />
               <Route path="/copilot" element={<AccountHub><CopilotPage /></AccountHub>} />
               <Route path="/creators" element={<AccountHub><RepliesPage channel="affiliate" /></AccountHub>} />
