@@ -5,12 +5,26 @@ import { api, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
 import { useAccountScope } from '../hubs';
 
-const KIND_LABEL: Record<PlaybookKind, string> = { group: 'Groups', automation: 'Bots', workflow: 'Flows', email_campaign: 'Email', list: 'Lists', brief: 'Brief', sender: 'Sender', tag: 'Tags', manual: 'Hygiene' };
-const KIND_ORDER: PlaybookKind[] = ['group', 'automation', 'list', 'brief', 'email_campaign', 'workflow', 'sender', 'tag', 'manual'];
+/** The matrix reads left to right the way the rollout happens: groups, the bots on them, outreach, content, email, flows, hygiene. */
+const CATEGORIES = ['Groups', 'CRM bots', 'Outreach', 'Content', 'Email', 'Flows', 'Hygiene'] as const;
+type Category = (typeof CATEGORIES)[number];
+const COLUMN_META: Record<string, { cat: Category; short: string; order: number }> = {
+  'group:sample_sent': { cat: 'Groups', short: 'Ship’d', order: 1 }, 'group:content_pending': { cat: 'Groups', short: 'Pend.', order: 2 }, 'group:first_sale': { cat: 'Groups', short: '1st sale', order: 3 }, 'group:content_not_posted': { cat: 'Groups', short: 'Unful. 7d', order: 4 }, 'group:no_post_10d': { cat: 'Groups', short: 'No post 10d', order: 5 }, 'group:rejected': { cat: 'Groups', short: 'Reject.', order: 6 }, 'group:posted_no_gmv': { cat: 'Groups', short: 'No GMV', order: 7 }, 'group:top_creators': { cat: 'Groups', short: 'Top', order: 8 }, 'group:inactive_creators': { cat: 'Groups', short: 'Inact.', order: 9 }, 'group:existing_creators': { cat: 'Groups', short: 'Exist.', order: 10 },
+  'automation:sample_sent': { cat: 'CRM bots', short: 'Ship’d', order: 1 }, 'automation:delivered': { cat: 'CRM bots', short: 'Deliv.', order: 2 }, 'automation:first_sale': { cat: 'CRM bots', short: '1st sale', order: 3 }, 'automation:content_not_posted': { cat: 'CRM bots', short: 'Unful. 7d', order: 4 }, 'automation:no_post_10d': { cat: 'CRM bots', short: 'No post 10d', order: 5 }, 'automation:rejected': { cat: 'CRM bots', short: 'Reject.', order: 6 }, 'automation:push_more_videos': { cat: 'CRM bots', short: 'More vid.', order: 7 }, 'automation:retarget_bonus': { cat: 'CRM bots', short: 'Bonus', order: 8 }, 'automation:deals_info_existing': { cat: 'CRM bots', short: 'Deals', order: 9 },
+  'automation:first_outreach': { cat: 'Outreach', short: 'First', order: 1 }, 'automation:monthly_deals_outreach': { cat: 'Outreach', short: 'Deals', order: 2 }, 'automation:new_product_outreach': { cat: 'Outreach', short: 'New prod.', order: 3 }, 'automation:top_creators_collab': { cat: 'Outreach', short: 'Collab', order: 4 },
+  'brief:creator_brief': { cat: 'Content', short: 'Brief', order: 1 }, 'list:ai_search_list': { cat: 'Content', short: 'AI list', order: 2 },
+  'sender:sender_email': { cat: 'Email', short: 'Sender', order: 1 }, 'email_campaign:creator_newsletter': { cat: 'Email', short: 'News', order: 2 },
+  'workflow:sample_chase': { cat: 'Flows', short: 'Chase', order: 1 }, 'workflow:welcome_new': { cat: 'Flows', short: 'Welc.', order: 2 },
+  'manual:auto_review': { cat: 'Hygiene', short: 'Review', order: 1 }, 'manual:blacklist': { cat: 'Hygiene', short: 'Blackl.', order: 2 }, 'automation:ai_auto_replies': { cat: 'Hygiene', short: 'AI reply', order: 3 }, 'tag:do_not_contact': { cat: 'Hygiene', short: 'DNC', order: 4 }, 'tag:vip': { cat: 'Hygiene', short: 'VIP', order: 5 },
+};
+const KIND_CAT: Record<PlaybookKind, Category> = { group: 'Groups', automation: 'Outreach', workflow: 'Flows', email_campaign: 'Email', list: 'Content', brief: 'Content', sender: 'Email', tag: 'Hygiene', manual: 'Hygiene' };
+const metaOf = (c: { kind: PlaybookKind; key: string; name: string }) => COLUMN_META[`${c.kind}:${c.key}`] ?? { cat: KIND_CAT[c.kind], short: shortName(c.name), order: 99 };
+const shortName = (name: string) => name.replace(/\s*\(.*\)$/, '').replace(/^Target collab: /, 'Collab: ').replace(/ creators?/i, '').slice(0, 12);
 const LANG: Record<string, string> = { '*': 'Any', en: 'English', de: 'German', fr: 'French', it: 'Italian', es: 'Spanish' };
 const STATE: Record<PlaybookCellStatus, { glyph: string; label: string }> = { set: { glyph: '✓', label: 'set' }, paused: { glyph: '⏸', label: 'exists, paused' }, drift: { glyph: '≠', label: 'differs from the library' }, missing: { glyph: '✕', label: 'missing' }, manual: { glyph: '–', label: 'Cruva UI only' }, unknown: { glyph: '?', label: 'not checked' }, queued: { glyph: '…', label: 'in a rollout' }, error: { glyph: '!', label: 'error' } };
 const DRAFT_BADGE: Record<PlaybookDraftStatus, { cls: string; label: string }> = { ready: { cls: 'good', label: 'ready' }, needs_input: { cls: 'warn', label: 'needs input' }, blocked: { cls: 'crit', label: 'blocked' }, approved: { cls: 'good', label: 'approved' }, skipped: { cls: 'muted', label: 'skipped' }, done: { cls: 'good', label: 'done' }, error: { cls: 'crit', label: 'error' }, undone: { cls: 'muted', label: 'undone' } };
 const ACTION_LABEL: Record<PlaybookDraft['action'], string> = { create: 'create', update: 'update copy', start: 'start' };
+const KIND_ORDER: PlaybookKind[] = ['group', 'automation', 'list', 'brief', 'email_campaign', 'workflow', 'sender', 'tag', 'manual'];
 const KIND_ONE: Record<PlaybookKind, string> = { group: 'Group', automation: 'Bot', workflow: 'Workflow', email_campaign: 'Email', list: 'List', brief: 'Brief', sender: 'Sender', tag: 'Tag', manual: 'Hygiene' };
 
 function Modal({ title, onClose, wide, children }: { title: string; onClose: () => void; wide?: boolean; children: ReactNode }) {
@@ -55,7 +69,7 @@ export default function CruvaPage() {
       const k = `${i.kind}:${i.key}`;
       if (!seen.has(k)) seen.set(k, { kind: i.kind, key: i.key, name: i.name.replace(/\[month\]\s*/g, ''), description: i.description, core: Boolean(i.config.core), manual: Boolean(i.config.manual) || i.kind === 'manual' });
     }
-    return [...seen.values()].sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind) || a.name.localeCompare(b.name));
+    return [...seen.values()].sort((a, b) => { const ma = metaOf(a); const mb = metaOf(b); return CATEGORIES.indexOf(ma.cat) - CATEGORIES.indexOf(mb.cat) || ma.order - mb.order || a.name.localeCompare(b.name); });
   }, [data]);
   if (!data) return <p>{error ?? 'Loading…'}</p>;
 
@@ -65,7 +79,8 @@ export default function CruvaPage() {
   const toggle = (id: string) => { const n = new Set(sel); if (n.has(id)) n.delete(id); else n.add(id); setSel(n); };
   const ticked = shops.filter((s) => sel.has(s.shop_id));
   const totals = ticked.reduce((t, s) => { const c = coverage(s.shop_id); return { missing: t.missing + c.missing, paused: t.paused + c.paused, drift: t.drift + c.drift }; }, { missing: 0, paused: 0, drift: 0 });
-  const groups = KIND_ORDER.map((k) => ({ kind: k, cols: columns.filter((c) => c.kind === k) })).filter((g) => g.cols.length);
+  const groups = CATEGORIES.map((cat) => ({ cat, cols: columns.filter((c) => metaOf(c).cat === cat) })).filter((g) => g.cols.length);
+  const firstCols = new Set(groups.map((g) => `${g.cols[0].kind}:${g.cols[0].key}`));
   const openRollout = (id: number | null) => { const n = new URLSearchParams(params); if (id === null) n.delete('rollout'); else n.set('rollout', String(id)); setParams(n); };
 
   if (rolloutId !== null) return <RolloutView id={rolloutId} data={data} isAdmin={isAdmin} onBack={() => openRollout(null)} onError={setError} />;
@@ -111,11 +126,11 @@ export default function CruvaPage() {
         <div className="grid-wrap card" style={{ padding: '4px 10px 8px' }}>
           <table className="cruva" aria-label="Cruva setup per shop">
             <thead>
-              <tr><th colSpan={4} /> {groups.map((g) => <th key={g.kind} className="grp" colSpan={g.cols.length}>{KIND_LABEL[g.kind]}</th>)}</tr>
+              <tr><th colSpan={5} /> {groups.map((g) => <th key={g.cat} className="grp" colSpan={g.cols.length}>{g.cat}</th>)}</tr>
               <tr>
                 <th><input type="checkbox" aria-label="All shops" checked={shops.length > 0 && shops.every((s) => sel.has(s.shop_id))} onChange={() => setSel(shops.every((s) => sel.has(s.shop_id)) ? new Set() : new Set(shops.map((s) => s.shop_id)))} /></th>
-                <th>Shop</th><th>Lang</th><th>Coverage</th>
-                {columns.map((c) => <th key={`${c.kind}:${c.key}`} className="col" title={`${KIND_ONE[c.kind]} · ${c.name}${c.core ? ' · core' : ''}\n${c.description ?? ''}`}>{short(c.name)}{c.core ? <span title="core" style={{ color: 'var(--accent)' }}>·</span> : null}</th>)}
+                <th>Shop</th><th>Lang</th><th>Plan</th><th>Coverage</th>
+                {columns.map((c) => <th key={`${c.kind}:${c.key}`} className={`col ${firstCols.has(`${c.kind}:${c.key}`) ? 'first' : ''}`} title={`${KIND_ONE[c.kind]} · ${c.name}${c.core ? ' · core' : ''}\n${c.description ?? ''}`}>{metaOf(c).short}{c.core ? <span title="core" style={{ color: 'var(--accent)' }}>·</span> : null}</th>)}
               </tr>
             </thead>
             <tbody>
@@ -124,13 +139,14 @@ export default function CruvaPage() {
                 return (
                   <tr key={s.shop_id}>
                     <td><input type="checkbox" aria-label={s.shop_name} checked={sel.has(s.shop_id)} onChange={() => toggle(s.shop_id)} /></td>
-                    <td><b>{s.shop_name}</b><div className="sub">{s.account_name}{s.am_name ? ` · ${s.am_name}` : ''}{s.checked_at ? ` · checked ${fmtRelative(s.checked_at)}` : ' · not checked'}</div>{s.error && <div className="sub" style={{ color: 'var(--crit-ink)' }} title={s.error}>Check failed: {s.error.slice(0, 90)}{s.error.length > 90 ? '…' : ''}</div>}</td>
+                    <td className="shop"><b>{s.shop_name}</b><div className="sub">{s.account_name}{s.am_name ? ` · ${s.am_name}` : ''}{s.checked_at ? ` · ${fmtRelative(s.checked_at)}` : ''}</div>{s.error && <div className="sub check-err" title={s.error}>Check failed: {s.error.replace(/^Streamable HTTP error: Error POSTing to endpoint: /, '').replace(/^Cruva MCP refused every connection\. /, '')}</div>}</td>
                     <td>{isAdmin ? <select value={s.language} onChange={(e) => run(`l${s.shop_id}`, () => api.playbookShop(s.shop_id, { language: e.target.value }))} style={{ width: 'auto' }}>{['en', 'de', 'fr', 'it', 'es'].map((l) => <option key={l} value={l}>{l}</option>)}</select> : s.language}</td>
+                    <td className="sub">{s.plan ? s.plan.charAt(0).toUpperCase() + s.plan.slice(1) : '–'}</td>
                     <td>{cov.checked ? <><b>{cov.set}/{cov.total}</b><div className="pace" style={{ width: 80 }}><span className={cov.set === cov.total ? 'good' : cov.set >= cov.total / 2 ? 'warn' : 'crit'} style={{ width: `${cov.total ? (cov.set / cov.total) * 100 : 0}%` }} /></div></> : <span className="badge muted">not checked</span>}</td>
                     {columns.map((c) => {
                       const st = cell(s.shop_id, c);
                       const k: PlaybookCellStatus = st?.status ?? 'unknown';
-                      return <td key={`${c.kind}:${c.key}`} className="c"><button className={`cstate ${k}`} title={`${c.name}: ${STATE[k].label}${st?.remote_name ? ` (${st.remote_name})` : ''}${st?.note ? ` · ${st.note}` : ''}`} onClick={() => setCellOpen({ shop: s, col: c, cell: st })}>{STATE[k].glyph}</button></td>;
+                      return <td key={`${c.kind}:${c.key}`} className={`c ${firstCols.has(`${c.kind}:${c.key}`) ? 'first' : ''}`}><button className={`cstate ${k}`} title={`${c.name}: ${STATE[k].label}${st?.remote_name ? ` (${st.remote_name})` : ''}${st?.note ? ` · ${st.note}` : ''}`} onClick={() => setCellOpen({ shop: s, col: c, cell: st })}>{STATE[k].glyph}</button></td>;
                     })}
                   </tr>
                 );
@@ -164,7 +180,6 @@ export default function CruvaPage() {
   );
 }
 
-const short = (name: string) => name.replace(/\s*\(.*\)$/, '').replace(/^Target collab: /, 'Collab: ').replace(/ creators?/i, '').slice(0, 22);
 
 function CellDetail({ shop, col, cell, isAdmin, run, onClose }: { shop: PlaybookShop; col: Column; cell: PlaybookSetupCell | null; data: PlaybookData; isAdmin: boolean; run: <T>(k: string, fn: () => Promise<T>, after?: (r: T) => void) => Promise<void>; onClose: () => void }) {
   const [paste, setPaste] = useState('');

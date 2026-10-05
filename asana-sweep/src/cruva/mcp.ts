@@ -25,27 +25,58 @@ export class CruvaMcp implements McpCaller {
     return Boolean(this.apiKey);
   }
 
+  /** Which transport the live session came up on, for the Connections test. */
+  transport: string | null = null;
+
+  /**
+   * Cruva documents the API-key route as the SSE URL with ?api_key=. Some deployments only accept the
+   * key on the streamable HTTP endpoint, so every way is tried in turn and the error of each attempt is
+   * kept, so a failure says exactly what was refused instead of hiding behind the last fallback.
+   */
   private async connect(): Promise<Client> {
     if (this.client) return this.client;
     if (this.connecting) return this.connecting;
     this.connecting = (async () => {
-      const client = new Client({ name: 'brightform-am-ops', version: '1.0.0' });
-      const sse = new URL(`${this.baseUrl}/sse`);
-      sse.searchParams.set('api_key', this.apiKey);
-      try {
-        await client.connect(new SSEClientTransport(sse));
-      } catch (err) {
-        log.warn(`Cruva MCP over SSE failed (${(err as Error).message}); trying streamable HTTP`);
-        const http = new URL(`${this.baseUrl}/mcp`);
-        http.searchParams.set('api_key', this.apiKey);
-        await client.connect(new StreamableHTTPClientTransport(http));
+      const key = this.apiKey;
+      const headers = { 'x-api-key': key };
+      const withKey = (path: string) => { const u = new URL(`${this.baseUrl}${path}`); u.searchParams.set('api_key', key); return u; };
+      const attempts: { name: string; make: () => SSEClientTransport | StreamableHTTPClientTransport }[] = [
+        { name: 'SSE ?api_key', make: () => new SSEClientTransport(withKey('/sse'), { requestInit: { headers } }) },
+        { name: 'HTTP /mcp x-api-key', make: () => new StreamableHTTPClientTransport(new URL(`${this.baseUrl}/mcp`), { requestInit: { headers } }) },
+        { name: 'HTTP /mcp ?api_key', make: () => new StreamableHTTPClientTransport(withKey('/mcp'), { requestInit: { headers } }) },
+        { name: 'HTTP / x-api-key', make: () => new StreamableHTTPClientTransport(new URL(`${this.baseUrl}/`), { requestInit: { headers } }) },
+      ];
+      const errors: string[] = [];
+      for (const a of attempts) {
+        const client = new Client({ name: 'brightform-am-ops', version: '1.0.0' });
+        try {
+          await client.connect(a.make());
+          client.onclose = () => { this.client = null; this.transport = null; };
+          client.onerror = (e) => { log.warn(`Cruva MCP: ${e.message}`); };
+          this.client = client;
+          this.transport = a.name;
+          if (errors.length) log.warn(`Cruva MCP connected over ${a.name} after: ${errors.join(' · ')}`);
+          return client;
+        } catch (err) {
+          errors.push(`${a.name}: ${(err as Error).message.replace(/\s+/g, ' ').slice(0, 220)}`);
+          await client.close().catch(() => undefined);
+        }
       }
-      client.onclose = () => { this.client = null; };
-      client.onerror = (e) => { log.warn(`Cruva MCP: ${e.message}`); };
-      this.client = client;
-      return client;
+      throw new Error(`Cruva MCP refused every connection. ${errors.join(' · ')}`);
     })();
     try { return await this.connecting; } finally { this.connecting = null; }
+  }
+
+  /** Connect and list shops: what the Connections page's Test button runs. Never throws. */
+  async test(): Promise<{ ok: boolean; transport: string | null; shops: number; error: string | null }> {
+    if (!this.configured) return { ok: false, transport: null, shops: 0, error: 'CRUVA_API_KEY is not set.' };
+    try {
+      await this.close();
+      const text = await this.call('list_shops', {});
+      return { ok: true, transport: this.transport, shops: parseListing(text).length, error: null };
+    } catch (err) {
+      return { ok: false, transport: null, shops: 0, error: (err as Error).message };
+    }
   }
 
   /** Call a tool. A dropped SSE session or a transient transport error is retried once on a fresh connection; a tool error is not. */
@@ -68,7 +99,7 @@ export class CruvaMcp implements McpCaller {
   }
 
   async close(): Promise<void> {
-    const c = this.client; this.client = null;
+    const c = this.client; this.client = null; this.transport = null;
     if (c) await c.close().catch(() => undefined);
   }
 }

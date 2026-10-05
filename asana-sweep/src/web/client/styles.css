@@ -444,12 +444,19 @@ tr.dim td, .card.dim { opacity: .55; }
 .cstate.queued { background: var(--surface-2); color: var(--ink); border-color: var(--border-strong); }
 .cstate.error { background: var(--crit-bg); color: var(--crit-ink); border-color: var(--crit); }
 table.cruva th.grp { color: var(--ink); font-size: 10.5px; border-bottom: 0; padding-bottom: 2px; text-align: left; }
-table.cruva th.col { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 10px; white-space: nowrap; padding: 6px 2px; text-align: left; letter-spacing: .04em; height: 150px; vertical-align: top; }
+table.cruva { width: max-content; min-width: 100%; }
+table.cruva th.col { font-size: 9.5px; text-transform: none; letter-spacing: 0; white-space: normal; word-break: keep-all; overflow-wrap: normal; line-height: 1.15; padding: 4px 3px 6px; text-align: center; vertical-align: bottom; min-width: 40px; }
+table.cruva th:nth-child(1), table.cruva td:nth-child(1) { position: sticky; left: 0; background: var(--surface); z-index: 2; }
+table.cruva th:nth-child(2), table.cruva td:nth-child(2) { position: sticky; left: 34px; background: var(--surface); z-index: 2; box-shadow: 4px 0 6px -4px rgba(0,0,0,.12); }
+table.cruva thead tr:first-child th { position: static; }
 table.cruva th.grp { border-left: 1px solid var(--border-2); padding-left: 8px; }
-table.cruva td.c:first-of-type { border-left: 1px solid var(--border-2); }
+table.cruva th.col.first, table.cruva td.c.first { border-left: 1px solid var(--border-2); }
 table.cruva td b { white-space: nowrap; }
 table.cruva td .sub { max-width: 170px; }
-table.cruva td.c { text-align: center; padding: 4px 3px; }
+table.cruva td.c { text-align: center; padding: 4px 2px; }
+table.cruva td.c .cstate { width: 22px; height: 20px; font-size: 11px; }
+table.cruva td .check-err { color: var(--crit-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px; }
+table.cruva td.shop { min-width: 170px; }
 .rollout-grid { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 14px; align-items: start; }
 .draft-list { border: 1px solid var(--border); border-radius: var(--r-card); padding: 6px; max-height: 70vh; overflow: auto; }
 .draft-list .shop { font-size: 11px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); padding: 10px 10px 4px; display: flex; align-items: center; gap: 8px; }

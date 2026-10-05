@@ -19,6 +19,7 @@ export default function ConnectionsPage() {
     try {
       if (key === 'windsor') { const r = await api.windsorTest(); const dbg = r.shops === 0 && r.debug ? ` Shop query: HTTP ${r.debug.shops_call?.status ?? '?'} ${r.debug.shops_call?.url ?? ''} → ${r.debug.shops_call?.body ?? ''} | Orders (30d): ${r.debug.orders_30d_rows ?? '?'} rows${r.debug.orders_call ? ` (HTTP ${r.debug.orders_call.status ?? '?'}: ${r.debug.orders_call.body.slice(0, 300)})` : ''}` : ''; setNotice(`Windsor connected: ${r.shops} shop(s) on the connector, ${r.linked} linked to accounts${r.sample.length ? `, e.g. ${r.sample.join(', ')}` : ''}.${dbg} Unlinked shops: pick an account in the Windsor.ai shops panel below.`); }
       else if (key === 'apollo') { const r = await api.apolloTest(); setNotice(`Apollo: ${r.healthy ? `connected, ${r.apollo.remaining ?? '?'} credits left` : r.health_error ?? 'not ok'}.`); }
+      else if (key === 'cruva_mcp') { const r = await api.playbookTest(); if (r.ok) setNotice(`Cruva MCP: connected over ${r.transport}, ${r.shops} shop(s) on the account.`); else setError(`Cruva MCP: ${r.error}`); }
       else if (key === 'fastmoss') { const r = await api.fastmossTest(); setNotice(`FastMoss: ${r.ok ? `connected over ${r.transport}, ${r.tools} tools` : r.error ?? 'not ok'}.`); }
       load();
     } catch (e) { setError((e as Error).message); } finally { setBusy(null); }

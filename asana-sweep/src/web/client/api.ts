@@ -417,6 +417,7 @@ export const api = {
   reportExportUrl: (id: number) => `/api/reports/${id}/export.md`,
   // Cruva best practice (Accounts › Cruva)
   playbook: () => call<PlaybookData>('GET', '/playbook'),
+  playbookTest: () => call<{ ok: boolean; transport: string | null; shops: number; error: string | null }>('GET', '/playbook/test'),
   playbookSyncShops: () => call<PlaybookData & { linked: number; unlinked: number }>('POST', '/playbook/shops/sync'),
   playbookLinkShop: (b: { shop_id: string; shop_name: string; account_id: number }) => call<PlaybookData>('POST', '/playbook/shops/link', b),
   playbookCheck: (shop_id?: string, deep = true) => call<PlaybookData & { checked: number; errors: string[]; started: boolean }>('POST', '/playbook/check', { shop_id, deep }),
