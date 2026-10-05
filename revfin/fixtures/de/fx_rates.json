@@ -1,0 +1,9 @@
+[
+  {
+    "taken_at": "2026-09-10T08:00:00Z",
+    "from": "GBP",
+    "to": "EUR",
+    "rate": 1.174,
+    "source": "fixture"
+  }
+]

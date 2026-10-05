@@ -1,0 +1,122 @@
+[
+  {
+    "account_id": "acc-uk-gbp-main",
+    "taken_at": "2026-07-31T23:00:00Z",
+    "balance": 30840.01,
+    "currency": "GBP"
+  },
+  {
+    "account_id": "acc-uk-gbp-savings",
+    "taken_at": "2026-07-31T23:00:00Z",
+    "balance": 0.0,
+    "currency": "GBP"
+  },
+  {
+    "account_id": "acc-uk-eur",
+    "taken_at": "2026-07-31T23:00:00Z",
+    "balance": 9800.0,
+    "currency": "EUR"
+  },
+  {
+    "account_id": "acc-uk-usd",
+    "taken_at": "2026-07-31T23:00:00Z",
+    "balance": 1150.0,
+    "currency": "USD"
+  },
+  {
+    "account_id": "acc-uk-gbp-main",
+    "taken_at": "2026-08-11T08:00:00Z",
+    "balance": 46000.01,
+    "currency": "GBP"
+  },
+  {
+    "account_id": "acc-uk-gbp-savings",
+    "taken_at": "2026-08-11T08:00:00Z",
+    "balance": 0.0,
+    "currency": "GBP"
+  },
+  {
+    "account_id": "acc-uk-eur",
+    "taken_at": "2026-08-11T08:00:00Z",
+    "balance": 4800.0,
+    "currency": "EUR"
+  },
+  {
+    "account_id": "acc-uk-usd",
+    "taken_at": "2026-08-11T08:00:00Z",
+    "balance": 1150.0,
+    "currency": "USD"
+  },
+  {
+    "account_id": "acc-uk-gbp-main",
+    "taken_at": "2026-08-31T23:00:00Z",
+    "balance": 36995.01,
+    "currency": "GBP"
+  },
+  {
+    "account_id": "acc-uk-gbp-savings",
+    "taken_at": "2026-08-31T23:00:00Z",
+    "balance": 5000.0,
+    "currency": "GBP"
+  },
+  {
+    "account_id": "acc-uk-eur",
+    "taken_at": "2026-08-31T23:00:00Z",
+    "balance": 2800.0,
+    "currency": "EUR"
+  },
+  {
+    "account_id": "acc-uk-usd",
+    "taken_at": "2026-08-31T23:00:00Z",
+    "balance": 1150.0,
+    "currency": "USD"
+  },
+  {
+    "account_id": "acc-uk-gbp-main",
+    "taken_at": "2026-09-03T08:00:00Z",
+    "balance": 47795.01,
+    "currency": "GBP"
+  },
+  {
+    "account_id": "acc-uk-gbp-savings",
+    "taken_at": "2026-09-03T08:00:00Z",
+    "balance": 5000.0,
+    "currency": "GBP"
+  },
+  {
+    "account_id": "acc-uk-eur",
+    "taken_at": "2026-09-03T08:00:00Z",
+    "balance": 6240.1,
+    "currency": "EUR"
+  },
+  {
+    "account_id": "acc-uk-usd",
+    "taken_at": "2026-09-03T08:00:00Z",
+    "balance": 1150.0,
+    "currency": "USD"
+  },
+  {
+    "account_id": "acc-uk-gbp-main",
+    "taken_at": "2026-09-10T08:00:00Z",
+    "balance": 38420.55,
+    "currency": "GBP"
+  },
+  {
+    "account_id": "acc-uk-gbp-savings",
+    "taken_at": "2026-09-10T08:00:00Z",
+    "balance": 5000.0,
+    "currency": "GBP"
+  },
+  {
+    "account_id": "acc-uk-eur",
+    "taken_at": "2026-09-10T08:00:00Z",
+    "balance": 6240.1,
+    "currency": "EUR"
+  },
+  {
+    "account_id": "acc-uk-usd",
+    "taken_at": "2026-09-10T08:00:00Z",
+    "balance": 1150.0,
+    "currency": "USD"
+  }
+]

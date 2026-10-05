@@ -1,1 +1,18 @@
 design/brightform-ops-mockup.html
+
+# revfin: secrets and local data never go in git
+revfin/.env
+revfin/tokens.json
+revfin/data/
+revfin/secrets/
+*.pem
+*.cer
+*.key
+*.p12
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.egg-info/
+build/
+dist/

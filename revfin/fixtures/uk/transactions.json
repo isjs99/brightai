@@ -1,0 +1,1402 @@
+[
+  {
+    "id": "tx-uk-0052",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-09-03T11:15:00Z",
+    "updated_at": "2026-09-03T11:15:00Z",
+    "completed_at": "2026-09-03T11:15:00Z",
+    "reference": "INV-202609-01 retainer",
+    "legs": [
+      {
+        "leg_id": "leg-0052-423",
+        "account_id": "acc-uk-gbp-main",
+        "amount": 12000.0,
+        "currency": "GBP",
+        "balance": 47795.01,
+        "counterparty": {
+          "id": "cp-acme",
+          "account_id": "cpa-acme",
+          "account_type": "external"
+        },
+        "description": "Payment from Acme Beauty Ltd"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0051",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-09-01T09:02:11Z",
+    "updated_at": "2026-09-01T09:02:11Z",
+    "completed_at": "2026-09-01T09:02:11Z",
+    "reference": "Desk rent 2026-09",
+    "legs": [
+      {
+        "leg_id": "leg-0051-726",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -1200.0,
+        "currency": "GBP",
+        "balance": 35795.01,
+        "counterparty": {
+          "id": "cp-wework",
+          "account_id": "cpa-wework",
+          "account_type": "external"
+        },
+        "description": "Payment to WeWork Shoreditch"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0037",
+    "type": "card_payment",
+    "state": "pending",
+    "created_at": "2026-08-30T20:15:00Z",
+    "updated_at": "2026-08-30T20:15:00Z",
+    "completed_at": null,
+    "reference": null,
+    "merchant": {
+      "name": "Figma",
+      "city": "London",
+      "category_code": "5734",
+      "country": "GBR"
+    },
+    "card": {
+      "card_number": "****4321",
+      "first_name": "Isaac",
+      "last_name": "S",
+      "phone": null
+    },
+    "legs": [
+      {
+        "leg_id": "leg-0037-190",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -45.0,
+        "currency": "GBP",
+        "balance": 36995.01,
+        "description": "Payment to Figma"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0036",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-08-28T17:10:00Z",
+    "updated_at": "2026-08-28T17:10:00Z",
+    "completed_at": "2026-08-28T17:10:00Z",
+    "reference": "INV-202608-07 commission Jul",
+    "legs": [
+      {
+        "leg_id": "leg-0036-135",
+        "account_id": "acc-uk-gbp-main",
+        "amount": 3400.0,
+        "currency": "GBP",
+        "balance": 37040.01,
+        "counterparty": {
+          "id": "cp-acme",
+          "account_id": "cpa-acme",
+          "account_type": "external"
+        },
+        "description": "Payment from Acme Beauty Ltd"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0035",
+    "type": "transfer",
+    "state": "completed",
+    "created_at": "2026-08-28T12:00:00Z",
+    "updated_at": "2026-08-28T12:00:00Z",
+    "completed_at": "2026-08-28T12:00:00Z",
+    "reference": "Move to savings",
+    "legs": [
+      {
+        "leg_id": "leg-0035-628",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -5000.0,
+        "currency": "GBP",
+        "balance": 33640.01,
+        "description": "Transfer to Savings GBP"
+      },
+      {
+        "leg_id": "leg-0035-791",
+        "account_id": "acc-uk-gbp-savings",
+        "amount": 5000.0,
+        "currency": "GBP",
+        "balance": 5000.0,
+        "description": "Transfer from Main GBP"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0050",
+    "type": "fee",
+    "state": "completed",
+    "created_at": "2026-08-28T00:00:00Z",
+    "updated_at": "2026-08-28T00:00:00Z",
+    "completed_at": "2026-08-28T00:00:00Z",
+    "reference": "Monthly plan fee",
+    "legs": [
+      {
+        "leg_id": "leg-0050-794",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -20.0,
+        "currency": "GBP",
+        "balance": 30820.01,
+        "description": "Monthly plan fee"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0034",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-08-26T10:00:00Z",
+    "updated_at": "2026-08-26T10:00:00Z",
+    "completed_at": "2026-08-26T10:00:00Z",
+    "reference": "Deposit return",
+    "legs": [
+      {
+        "leg_id": "leg-0034-951",
+        "account_id": "acc-uk-gbp-main",
+        "amount": 350.0,
+        "currency": "GBP",
+        "balance": 39785.01,
+        "counterparty": {
+          "id": "cp-jpatel",
+          "account_id": "cpa-jpatel",
+          "account_type": "external"
+        },
+        "description": "Payment from J Patel"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0049",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-08-25T09:00:05Z",
+    "updated_at": "2026-08-25T09:00:05Z",
+    "completed_at": "2026-08-25T09:00:05Z",
+    "reference": "Salary 2026-08",
+    "legs": [
+      {
+        "leg_id": "leg-0049-95",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -2800.0,
+        "currency": "GBP",
+        "balance": 30840.01,
+        "counterparty": {
+          "id": "cp-payroll-jl",
+          "account_id": "cpa-jl",
+          "account_type": "external"
+        },
+        "description": "Payment to J Lee"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0048",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-08-25T09:00:00Z",
+    "updated_at": "2026-08-25T09:00:00Z",
+    "completed_at": "2026-08-25T09:00:00Z",
+    "reference": "Salary 2026-08",
+    "legs": [
+      {
+        "leg_id": "leg-0048-93",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -3200.0,
+        "currency": "GBP",
+        "balance": 33640.01,
+        "counterparty": {
+          "id": "cp-payroll-as",
+          "account_id": "cpa-as",
+          "account_type": "external"
+        },
+        "description": "Payment to A Smith"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0033",
+    "type": "card_payment",
+    "state": "completed",
+    "created_at": "2026-08-24T09:41:00Z",
+    "updated_at": "2026-08-24T09:41:00Z",
+    "completed_at": "2026-08-24T09:41:00Z",
+    "reference": null,
+    "merchant": {
+      "name": "Bloom & Wild",
+      "city": "London",
+      "category_code": "5992",
+      "country": "GBR"
+    },
+    "card": {
+      "card_number": "****4321",
+      "first_name": "Isaac",
+      "last_name": "S",
+      "phone": null
+    },
+    "legs": [
+      {
+        "leg_id": "leg-0033-569",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -65.0,
+        "currency": "GBP",
+        "balance": 39435.01,
+        "description": "Payment to Bloom & Wild"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0032",
+    "type": "transfer",
+    "request_id": null,
+    "state": "reverted",
+    "created_at": "2026-08-23T11:00:00Z",
+    "updated_at": "2026-08-23T11:00:00Z",
+    "completed_at": null,
+    "reference": "Refund overpayment",
+    "legs": [
+      {
+        "leg_id": "leg-0032-496",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -500.0,
+        "currency": "GBP",
+        "balance": 39500.01,
+        "counterparty": {
+          "id": "cp-jpatel",
+          "account_id": "cpa-jpatel",
+          "account_type": "external"
+        },
+        "description": "Payment to J Patel"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0031",
+    "type": "card_payment",
+    "state": "declined",
+    "created_at": "2026-08-22T18:02:00Z",
+    "updated_at": "2026-08-22T18:02:00Z",
+    "completed_at": null,
+    "reference": null,
+    "merchant": {
+      "name": "Amazon UK",
+      "city": "London",
+      "category_code": "5942",
+      "country": "GBR"
+    },
+    "card": {
+      "card_number": "****4321",
+      "first_name": "Isaac",
+      "last_name": "S",
+      "phone": null
+    },
+    "legs": [
+      {
+        "leg_id": "leg-0031-639",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -320.0,
+        "currency": "GBP",
+        "balance": 39500.01,
+        "description": "Payment to Amazon UK"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0047",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-08-22T16:00:00Z",
+    "updated_at": "2026-08-22T16:00:00Z",
+    "completed_at": "2026-08-22T16:00:00Z",
+    "reference": "PAYE 2026-08",
+    "legs": [
+      {
+        "leg_id": "leg-0047-173",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -1900.0,
+        "currency": "GBP",
+        "balance": 36840.01,
+        "counterparty": {
+          "id": "cp-hmrc",
+          "account_id": "cpa-hmrc",
+          "account_type": "external"
+        },
+        "description": "Payment to HMRC Cumbernauld"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0030",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-08-20T09:30:00Z",
+    "updated_at": "2026-08-20T09:30:00Z",
+    "completed_at": "2026-08-20T09:30:00Z",
+    "reference": "Intercompany funding Aug",
+    "legs": [
+      {
+        "leg_id": "leg-0030-472",
+        "account_id": "acc-uk-eur",
+        "amount": -2000.0,
+        "currency": "EUR",
+        "balance": 2800.0,
+        "counterparty": {
+          "id": "cp-de",
+          "account_id": "acc-de-eur-main",
+          "account_type": "revolut"
+        },
+        "description": "Payment to Brightform Social Media UG (haftungsbeschraenkt)"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0029",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-08-18T15:45:00Z",
+    "updated_at": "2026-08-18T15:45:00Z",
+    "completed_at": "2026-08-18T15:45:00Z",
+    "reference": "Studio build-out deposit",
+    "legs": [
+      {
+        "leg_id": "leg-0029-368",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -6500.0,
+        "currency": "GBP",
+        "balance": 39500.01,
+        "counterparty": {
+          "id": "cp-lightbox",
+          "account_id": "cpa-lightbox",
+          "account_type": "external"
+        },
+        "description": "Payment to Studio Lightbox Ltd"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0046",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-08-12T10:00:00Z",
+    "updated_at": "2026-08-12T10:00:00Z",
+    "completed_at": "2026-08-12T10:00:00Z",
+    "reference": "Contractor invoice 2026-08",
+    "legs": [
+      {
+        "leg_id": "leg-0046-571",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -1500.0,
+        "currency": "GBP",
+        "balance": 38740.01,
+        "counterparty": {
+          "id": "cp-mia",
+          "account_id": "cpa-mia",
+          "account_type": "external"
+        },
+        "description": "Payment to Mia Chen"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0028",
+    "type": "exchange",
+    "state": "completed",
+    "created_at": "2026-08-10T10:05:00Z",
+    "updated_at": "2026-08-10T10:05:00Z",
+    "completed_at": "2026-08-10T10:05:00Z",
+    "reference": "Exchange EUR to GBP",
+    "legs": [
+      {
+        "leg_id": "leg-0028-696",
+        "account_id": "acc-uk-eur",
+        "amount": -5000.0,
+        "currency": "EUR",
+        "balance": 4800.0,
+        "description": "Exchanged to GBP"
+      },
+      {
+        "leg_id": "leg-0028-65",
+        "account_id": "acc-uk-gbp-main",
+        "amount": 4260.0,
+        "currency": "GBP",
+        "balance": 46000.01,
+        "description": "Exchanged from EUR"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0045",
+    "type": "card_payment",
+    "state": "completed",
+    "created_at": "2026-08-09T12:30:00Z",
+    "updated_at": "2026-08-09T12:30:00Z",
+    "completed_at": "2026-08-09T12:30:00Z",
+    "reference": null,
+    "merchant": {
+      "name": "TikTok Ads",
+      "city": "London",
+      "category_code": "7311",
+      "country": "GBR"
+    },
+    "card": {
+      "card_number": "****4321",
+      "first_name": "Isaac",
+      "last_name": "S",
+      "phone": null
+    },
+    "legs": [
+      {
+        "leg_id": "leg-0045-468",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -2400.0,
+        "currency": "GBP",
+        "balance": 39340.01,
+        "description": "Payment to TikTok Ads"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0044",
+    "type": "card_payment",
+    "state": "completed",
+    "created_at": "2026-08-08T02:01:00Z",
+    "updated_at": "2026-08-08T02:01:00Z",
+    "completed_at": "2026-08-08T02:01:00Z",
+    "reference": null,
+    "merchant": {
+      "name": "Google Workspace",
+      "city": "London",
+      "category_code": "5734",
+      "country": "GBR"
+    },
+    "card": {
+      "card_number": "****4321",
+      "first_name": "Isaac",
+      "last_name": "S",
+      "phone": null
+    },
+    "legs": [
+      {
+        "leg_id": "leg-0044-639",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -84.0,
+        "currency": "GBP",
+        "balance": 41740.01,
+        "description": "Payment to Google Workspace"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0043",
+    "type": "card_payment",
+    "state": "completed",
+    "created_at": "2026-08-07T02:01:00Z",
+    "updated_at": "2026-08-07T02:01:00Z",
+    "completed_at": "2026-08-07T02:01:00Z",
+    "reference": null,
+    "merchant": {
+      "name": "Slack Technologies",
+      "city": "London",
+      "category_code": "5734",
+      "country": "GBR"
+    },
+    "card": {
+      "card_number": "****4321",
+      "first_name": "Isaac",
+      "last_name": "S",
+      "phone": null
+    },
+    "legs": [
+      {
+        "leg_id": "leg-0043-446",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -120.0,
+        "currency": "GBP",
+        "balance": 41824.01,
+        "description": "Payment to Slack Technologies"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0042",
+    "type": "card_payment",
+    "state": "completed",
+    "created_at": "2026-08-06T08:13:10Z",
+    "updated_at": "2026-08-06T08:13:10Z",
+    "completed_at": "2026-08-06T08:13:10Z",
+    "reference": null,
+    "merchant": {
+      "name": "Notion Labs",
+      "city": "London",
+      "category_code": "5734",
+      "country": "GBR"
+    },
+    "card": {
+      "card_number": "****4321",
+      "first_name": "Isaac",
+      "last_name": "S",
+      "phone": null
+    },
+    "legs": [
+      {
+        "leg_id": "leg-0042-43",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -96.0,
+        "currency": "GBP",
+        "balance": 41944.01,
+        "description": "Payment to Notion Labs"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0041",
+    "type": "card_payment",
+    "state": "completed",
+    "created_at": "2026-08-06T08:12:44Z",
+    "updated_at": "2026-08-06T08:12:44Z",
+    "completed_at": "2026-08-06T08:12:44Z",
+    "reference": null,
+    "merchant": {
+      "name": "Adobe Systems",
+      "city": "London",
+      "category_code": "5734",
+      "country": "GBR"
+    },
+    "card": {
+      "card_number": "****4321",
+      "first_name": "Isaac",
+      "last_name": "S",
+      "phone": null
+    },
+    "legs": [
+      {
+        "leg_id": "leg-0041-359",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -59.99,
+        "currency": "GBP",
+        "balance": 42040.01,
+        "description": "Payment to Adobe Systems"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0040",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-08-05T14:40:30Z",
+    "updated_at": "2026-08-05T14:40:30Z",
+    "completed_at": "2026-08-05T14:40:30Z",
+    "reference": "Invoice 2026-08-02 retainer",
+    "legs": [
+      {
+        "leg_id": "leg-0040-763",
+        "account_id": "acc-uk-eur",
+        "amount": 8500.0,
+        "currency": "EUR",
+        "balance": 9800.0,
+        "counterparty": {
+          "id": "cp-glow",
+          "account_id": "cpa-glow",
+          "account_type": "external"
+        },
+        "description": "Payment from Glow Skincare GmbH"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0039",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-08-03T11:15:00Z",
+    "updated_at": "2026-08-03T11:15:00Z",
+    "completed_at": "2026-08-03T11:15:00Z",
+    "reference": "INV-202608-01 retainer",
+    "legs": [
+      {
+        "leg_id": "leg-0039-423",
+        "account_id": "acc-uk-gbp-main",
+        "amount": 12000.0,
+        "currency": "GBP",
+        "balance": 42100.0,
+        "counterparty": {
+          "id": "cp-acme",
+          "account_id": "cpa-acme",
+          "account_type": "external"
+        },
+        "description": "Payment from Acme Beauty Ltd"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0038",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-08-01T09:02:11Z",
+    "updated_at": "2026-08-01T09:02:11Z",
+    "completed_at": "2026-08-01T09:02:11Z",
+    "reference": "Desk rent 2026-08",
+    "legs": [
+      {
+        "leg_id": "leg-0038-726",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -1200.0,
+        "currency": "GBP",
+        "balance": 30100.0,
+        "counterparty": {
+          "id": "cp-wework",
+          "account_id": "cpa-wework",
+          "account_type": "external"
+        },
+        "description": "Payment to WeWork Shoreditch"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0027",
+    "type": "fee",
+    "state": "completed",
+    "created_at": "2026-07-28T00:00:00Z",
+    "updated_at": "2026-07-28T00:00:00Z",
+    "completed_at": "2026-07-28T00:00:00Z",
+    "reference": "Monthly plan fee",
+    "legs": [
+      {
+        "leg_id": "leg-0027-794",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -20.0,
+        "currency": "GBP",
+        "balance": 30820.01,
+        "description": "Monthly plan fee"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0026",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-07-25T09:00:05Z",
+    "updated_at": "2026-07-25T09:00:05Z",
+    "completed_at": "2026-07-25T09:00:05Z",
+    "reference": "Salary 2026-07",
+    "legs": [
+      {
+        "leg_id": "leg-0026-95",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -2800.0,
+        "currency": "GBP",
+        "balance": 30840.01,
+        "counterparty": {
+          "id": "cp-payroll-jl",
+          "account_id": "cpa-jl",
+          "account_type": "external"
+        },
+        "description": "Payment to J Lee"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0025",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-07-25T09:00:00Z",
+    "updated_at": "2026-07-25T09:00:00Z",
+    "completed_at": "2026-07-25T09:00:00Z",
+    "reference": "Salary 2026-07",
+    "legs": [
+      {
+        "leg_id": "leg-0025-93",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -3200.0,
+        "currency": "GBP",
+        "balance": 33640.01,
+        "counterparty": {
+          "id": "cp-payroll-as",
+          "account_id": "cpa-as",
+          "account_type": "external"
+        },
+        "description": "Payment to A Smith"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0024",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-07-22T16:00:00Z",
+    "updated_at": "2026-07-22T16:00:00Z",
+    "completed_at": "2026-07-22T16:00:00Z",
+    "reference": "PAYE 2026-07",
+    "legs": [
+      {
+        "leg_id": "leg-0024-173",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -1900.0,
+        "currency": "GBP",
+        "balance": 36840.01,
+        "counterparty": {
+          "id": "cp-hmrc",
+          "account_id": "cpa-hmrc",
+          "account_type": "external"
+        },
+        "description": "Payment to HMRC Cumbernauld"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0014",
+    "type": "card_payment",
+    "state": "completed",
+    "created_at": "2026-07-15T13:20:00Z",
+    "updated_at": "2026-07-15T13:20:00Z",
+    "completed_at": "2026-07-15T13:20:00Z",
+    "reference": null,
+    "merchant": {
+      "name": "Trainline",
+      "city": "London",
+      "category_code": "4112",
+      "country": "GBR"
+    },
+    "card": {
+      "card_number": "****4321",
+      "first_name": "Isaac",
+      "last_name": "S",
+      "phone": null
+    },
+    "legs": [
+      {
+        "leg_id": "leg-0014-528",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -145.0,
+        "currency": "GBP",
+        "balance": 40000.0,
+        "description": "Payment to Trainline"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0023",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-07-12T10:00:00Z",
+    "updated_at": "2026-07-12T10:00:00Z",
+    "completed_at": "2026-07-12T10:00:00Z",
+    "reference": "Contractor invoice 2026-07",
+    "legs": [
+      {
+        "leg_id": "leg-0023-571",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -1500.0,
+        "currency": "GBP",
+        "balance": 38740.01,
+        "counterparty": {
+          "id": "cp-mia",
+          "account_id": "cpa-mia",
+          "account_type": "external"
+        },
+        "description": "Payment to Mia Chen"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0022",
+    "type": "card_payment",
+    "state": "completed",
+    "created_at": "2026-07-09T12:30:00Z",
+    "updated_at": "2026-07-09T12:30:00Z",
+    "completed_at": "2026-07-09T12:30:00Z",
+    "reference": null,
+    "merchant": {
+      "name": "TikTok Ads",
+      "city": "London",
+      "category_code": "7311",
+      "country": "GBR"
+    },
+    "card": {
+      "card_number": "****4321",
+      "first_name": "Isaac",
+      "last_name": "S",
+      "phone": null
+    },
+    "legs": [
+      {
+        "leg_id": "leg-0022-726",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -1200.0,
+        "currency": "GBP",
+        "balance": 40540.01,
+        "description": "Payment to TikTok Ads"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0021",
+    "type": "card_payment",
+    "state": "completed",
+    "created_at": "2026-07-08T02:01:00Z",
+    "updated_at": "2026-07-08T02:01:00Z",
+    "completed_at": "2026-07-08T02:01:00Z",
+    "reference": null,
+    "merchant": {
+      "name": "Google Workspace",
+      "city": "London",
+      "category_code": "5734",
+      "country": "GBR"
+    },
+    "card": {
+      "card_number": "****4321",
+      "first_name": "Isaac",
+      "last_name": "S",
+      "phone": null
+    },
+    "legs": [
+      {
+        "leg_id": "leg-0021-639",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -84.0,
+        "currency": "GBP",
+        "balance": 41740.01,
+        "description": "Payment to Google Workspace"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0020",
+    "type": "card_payment",
+    "state": "completed",
+    "created_at": "2026-07-07T02:01:00Z",
+    "updated_at": "2026-07-07T02:01:00Z",
+    "completed_at": "2026-07-07T02:01:00Z",
+    "reference": null,
+    "merchant": {
+      "name": "Slack Technologies",
+      "city": "London",
+      "category_code": "5734",
+      "country": "GBR"
+    },
+    "card": {
+      "card_number": "****4321",
+      "first_name": "Isaac",
+      "last_name": "S",
+      "phone": null
+    },
+    "legs": [
+      {
+        "leg_id": "leg-0020-446",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -120.0,
+        "currency": "GBP",
+        "balance": 41824.01,
+        "description": "Payment to Slack Technologies"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0019",
+    "type": "card_payment",
+    "state": "completed",
+    "created_at": "2026-07-06T08:13:10Z",
+    "updated_at": "2026-07-06T08:13:10Z",
+    "completed_at": "2026-07-06T08:13:10Z",
+    "reference": null,
+    "merchant": {
+      "name": "Notion Labs",
+      "city": "London",
+      "category_code": "5734",
+      "country": "GBR"
+    },
+    "card": {
+      "card_number": "****4321",
+      "first_name": "Isaac",
+      "last_name": "S",
+      "phone": null
+    },
+    "legs": [
+      {
+        "leg_id": "leg-0019-43",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -96.0,
+        "currency": "GBP",
+        "balance": 41944.01,
+        "description": "Payment to Notion Labs"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0018",
+    "type": "card_payment",
+    "state": "completed",
+    "created_at": "2026-07-06T08:12:44Z",
+    "updated_at": "2026-07-06T08:12:44Z",
+    "completed_at": "2026-07-06T08:12:44Z",
+    "reference": null,
+    "merchant": {
+      "name": "Adobe Systems",
+      "city": "London",
+      "category_code": "5734",
+      "country": "GBR"
+    },
+    "card": {
+      "card_number": "****4321",
+      "first_name": "Isaac",
+      "last_name": "S",
+      "phone": null
+    },
+    "legs": [
+      {
+        "leg_id": "leg-0018-359",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -59.99,
+        "currency": "GBP",
+        "balance": 42040.01,
+        "description": "Payment to Adobe Systems"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0017",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-07-05T14:40:30Z",
+    "updated_at": "2026-07-05T14:40:30Z",
+    "completed_at": "2026-07-05T14:40:30Z",
+    "reference": "Invoice 2026-07-02 retainer",
+    "legs": [
+      {
+        "leg_id": "leg-0017-763",
+        "account_id": "acc-uk-eur",
+        "amount": 8500.0,
+        "currency": "EUR",
+        "balance": 9800.0,
+        "counterparty": {
+          "id": "cp-glow",
+          "account_id": "cpa-glow",
+          "account_type": "external"
+        },
+        "description": "Payment from Glow Skincare GmbH"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0016",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-07-03T11:15:00Z",
+    "updated_at": "2026-07-03T11:15:00Z",
+    "completed_at": "2026-07-03T11:15:00Z",
+    "reference": "INV-202607-01 retainer",
+    "legs": [
+      {
+        "leg_id": "leg-0016-423",
+        "account_id": "acc-uk-gbp-main",
+        "amount": 12000.0,
+        "currency": "GBP",
+        "balance": 42100.0,
+        "counterparty": {
+          "id": "cp-acme",
+          "account_id": "cpa-acme",
+          "account_type": "external"
+        },
+        "description": "Payment from Acme Beauty Ltd"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0015",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-07-01T09:02:11Z",
+    "updated_at": "2026-07-01T09:02:11Z",
+    "completed_at": "2026-07-01T09:02:11Z",
+    "reference": "Desk rent 2026-07",
+    "legs": [
+      {
+        "leg_id": "leg-0015-726",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -1200.0,
+        "currency": "GBP",
+        "balance": 30100.0,
+        "counterparty": {
+          "id": "cp-wework",
+          "account_id": "cpa-wework",
+          "account_type": "external"
+        },
+        "description": "Payment to WeWork Shoreditch"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0013",
+    "type": "fee",
+    "state": "completed",
+    "created_at": "2026-06-28T00:00:00Z",
+    "updated_at": "2026-06-28T00:00:00Z",
+    "completed_at": "2026-06-28T00:00:00Z",
+    "reference": "Monthly plan fee",
+    "legs": [
+      {
+        "leg_id": "leg-0013-794",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -20.0,
+        "currency": "GBP",
+        "balance": 30820.01,
+        "description": "Monthly plan fee"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0012",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-06-25T09:00:05Z",
+    "updated_at": "2026-06-25T09:00:05Z",
+    "completed_at": "2026-06-25T09:00:05Z",
+    "reference": "Salary 2026-06",
+    "legs": [
+      {
+        "leg_id": "leg-0012-95",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -2800.0,
+        "currency": "GBP",
+        "balance": 30840.01,
+        "counterparty": {
+          "id": "cp-payroll-jl",
+          "account_id": "cpa-jl",
+          "account_type": "external"
+        },
+        "description": "Payment to J Lee"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0011",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-06-25T09:00:00Z",
+    "updated_at": "2026-06-25T09:00:00Z",
+    "completed_at": "2026-06-25T09:00:00Z",
+    "reference": "Salary 2026-06",
+    "legs": [
+      {
+        "leg_id": "leg-0011-93",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -3200.0,
+        "currency": "GBP",
+        "balance": 33640.01,
+        "counterparty": {
+          "id": "cp-payroll-as",
+          "account_id": "cpa-as",
+          "account_type": "external"
+        },
+        "description": "Payment to A Smith"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0010",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-06-22T16:00:00Z",
+    "updated_at": "2026-06-22T16:00:00Z",
+    "completed_at": "2026-06-22T16:00:00Z",
+    "reference": "PAYE 2026-06",
+    "legs": [
+      {
+        "leg_id": "leg-0010-173",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -1900.0,
+        "currency": "GBP",
+        "balance": 36840.01,
+        "counterparty": {
+          "id": "cp-hmrc",
+          "account_id": "cpa-hmrc",
+          "account_type": "external"
+        },
+        "description": "Payment to HMRC Cumbernauld"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0009",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-06-12T10:00:00Z",
+    "updated_at": "2026-06-12T10:00:00Z",
+    "completed_at": "2026-06-12T10:00:00Z",
+    "reference": "Contractor invoice 2026-06",
+    "legs": [
+      {
+        "leg_id": "leg-0009-571",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -1500.0,
+        "currency": "GBP",
+        "balance": 38740.01,
+        "counterparty": {
+          "id": "cp-mia",
+          "account_id": "cpa-mia",
+          "account_type": "external"
+        },
+        "description": "Payment to Mia Chen"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0008",
+    "type": "card_payment",
+    "state": "completed",
+    "created_at": "2026-06-09T12:30:00Z",
+    "updated_at": "2026-06-09T12:30:00Z",
+    "completed_at": "2026-06-09T12:30:00Z",
+    "reference": null,
+    "merchant": {
+      "name": "TikTok Ads",
+      "city": "London",
+      "category_code": "7311",
+      "country": "GBR"
+    },
+    "card": {
+      "card_number": "****4321",
+      "first_name": "Isaac",
+      "last_name": "S",
+      "phone": null
+    },
+    "legs": [
+      {
+        "leg_id": "leg-0008-571",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -1500.0,
+        "currency": "GBP",
+        "balance": 40240.01,
+        "description": "Payment to TikTok Ads"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0007",
+    "type": "card_payment",
+    "state": "completed",
+    "created_at": "2026-06-08T02:01:00Z",
+    "updated_at": "2026-06-08T02:01:00Z",
+    "completed_at": "2026-06-08T02:01:00Z",
+    "reference": null,
+    "merchant": {
+      "name": "Google Workspace",
+      "city": "London",
+      "category_code": "5734",
+      "country": "GBR"
+    },
+    "card": {
+      "card_number": "****4321",
+      "first_name": "Isaac",
+      "last_name": "S",
+      "phone": null
+    },
+    "legs": [
+      {
+        "leg_id": "leg-0007-639",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -84.0,
+        "currency": "GBP",
+        "balance": 41740.01,
+        "description": "Payment to Google Workspace"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0006",
+    "type": "card_payment",
+    "state": "completed",
+    "created_at": "2026-06-07T02:01:00Z",
+    "updated_at": "2026-06-07T02:01:00Z",
+    "completed_at": "2026-06-07T02:01:00Z",
+    "reference": null,
+    "merchant": {
+      "name": "Slack Technologies",
+      "city": "London",
+      "category_code": "5734",
+      "country": "GBR"
+    },
+    "card": {
+      "card_number": "****4321",
+      "first_name": "Isaac",
+      "last_name": "S",
+      "phone": null
+    },
+    "legs": [
+      {
+        "leg_id": "leg-0006-446",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -120.0,
+        "currency": "GBP",
+        "balance": 41824.01,
+        "description": "Payment to Slack Technologies"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0005",
+    "type": "card_payment",
+    "state": "completed",
+    "created_at": "2026-06-06T08:13:10Z",
+    "updated_at": "2026-06-06T08:13:10Z",
+    "completed_at": "2026-06-06T08:13:10Z",
+    "reference": null,
+    "merchant": {
+      "name": "Notion Labs",
+      "city": "London",
+      "category_code": "5734",
+      "country": "GBR"
+    },
+    "card": {
+      "card_number": "****4321",
+      "first_name": "Isaac",
+      "last_name": "S",
+      "phone": null
+    },
+    "legs": [
+      {
+        "leg_id": "leg-0005-43",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -96.0,
+        "currency": "GBP",
+        "balance": 41944.01,
+        "description": "Payment to Notion Labs"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0004",
+    "type": "card_payment",
+    "state": "completed",
+    "created_at": "2026-06-06T08:12:44Z",
+    "updated_at": "2026-06-06T08:12:44Z",
+    "completed_at": "2026-06-06T08:12:44Z",
+    "reference": null,
+    "merchant": {
+      "name": "Adobe Systems",
+      "city": "London",
+      "category_code": "5734",
+      "country": "GBR"
+    },
+    "card": {
+      "card_number": "****4321",
+      "first_name": "Isaac",
+      "last_name": "S",
+      "phone": null
+    },
+    "legs": [
+      {
+        "leg_id": "leg-0004-359",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -59.99,
+        "currency": "GBP",
+        "balance": 42040.01,
+        "description": "Payment to Adobe Systems"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0003",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-06-05T14:40:30Z",
+    "updated_at": "2026-06-05T14:40:30Z",
+    "completed_at": "2026-06-05T14:40:30Z",
+    "reference": "Invoice 2026-06-02 retainer",
+    "legs": [
+      {
+        "leg_id": "leg-0003-763",
+        "account_id": "acc-uk-eur",
+        "amount": 8500.0,
+        "currency": "EUR",
+        "balance": 9800.0,
+        "counterparty": {
+          "id": "cp-glow",
+          "account_id": "cpa-glow",
+          "account_type": "external"
+        },
+        "description": "Payment from Glow Skincare GmbH"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0002",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-06-03T11:15:00Z",
+    "updated_at": "2026-06-03T11:15:00Z",
+    "completed_at": "2026-06-03T11:15:00Z",
+    "reference": "INV-202606-01 retainer",
+    "legs": [
+      {
+        "leg_id": "leg-0002-423",
+        "account_id": "acc-uk-gbp-main",
+        "amount": 12000.0,
+        "currency": "GBP",
+        "balance": 42100.0,
+        "counterparty": {
+          "id": "cp-acme",
+          "account_id": "cpa-acme",
+          "account_type": "external"
+        },
+        "description": "Payment from Acme Beauty Ltd"
+      }
+    ]
+  },
+  {
+    "id": "tx-uk-0001",
+    "type": "transfer",
+    "request_id": null,
+    "state": "completed",
+    "created_at": "2026-06-01T09:02:11Z",
+    "updated_at": "2026-06-01T09:02:11Z",
+    "completed_at": "2026-06-01T09:02:11Z",
+    "reference": "Desk rent 2026-06",
+    "legs": [
+      {
+        "leg_id": "leg-0001-726",
+        "account_id": "acc-uk-gbp-main",
+        "amount": -1200.0,
+        "currency": "GBP",
+        "balance": 30100.0,
+        "counterparty": {
+          "id": "cp-wework",
+          "account_id": "cpa-wework",
+          "account_type": "external"
+        },
+        "description": "Payment to WeWork Shoreditch"
+      }
+    ]
+  }
+]

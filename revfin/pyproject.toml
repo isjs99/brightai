@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "revfin"
+version = "0.1.0"
+description = "Read-only Revolut Business finance reader for Brightform. Pulls accounts, balances and transactions into SQLite and exports summaries for Claude to report on."
+requires-python = ">=3.11"
+dependencies = [
+  "httpx>=0.27",
+  "pyjwt[crypto]>=2.8",
+  "pyyaml>=6",
+  "typer>=0.12",
+]
+
+[project.optional-dependencies]
+# P&L workbook export (.xlsx) and Google Sheets push
+pnl = ["openpyxl>=3.1", "google-api-python-client>=2.100", "google-auth>=2.20"]
+# MCP server for Claude Desktop / Cowork / Code
+mcp = ["mcp>=2"]
+dev = ["pytest>=8", "pytest-asyncio>=0.23", "openpyxl>=3.1", "google-api-python-client>=2.100", "google-auth>=2.20", "mcp>=2"]
+
+[project.scripts]
+revfin = "revfin.cli:app"
+
+[tool.setuptools]
+packages = ["revfin"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

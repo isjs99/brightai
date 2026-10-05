@@ -1,0 +1,50 @@
+[
+  {
+    "id": "cp-berlin",
+    "name": "Berlin Cosmetics GmbH",
+    "state": "created",
+    "accounts": [
+      {
+        "id": "cpa-berlin",
+        "currency": "EUR",
+        "type": "external"
+      }
+    ]
+  },
+  {
+    "id": "cp-finanzamt",
+    "name": "Finanzamt Berlin Mitte",
+    "state": "created",
+    "accounts": [
+      {
+        "id": "cpa-fa",
+        "currency": "EUR",
+        "type": "external"
+      }
+    ]
+  },
+  {
+    "id": "cp-lw",
+    "name": "L Weber",
+    "state": "created",
+    "accounts": [
+      {
+        "id": "cpa-lw",
+        "currency": "EUR",
+        "type": "external"
+      }
+    ]
+  },
+  {
+    "id": "cp-uk",
+    "name": "Brightform Social Media Limited",
+    "state": "created",
+    "accounts": [
+      {
+        "id": "acc-uk-eur",
+        "currency": "EUR",
+        "type": "revolut"
+      }
+    ]
+  }
+]

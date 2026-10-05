@@ -1,0 +1,16 @@
+[
+  {
+    "taken_at": "2026-09-10T08:00:00Z",
+    "from": "EUR",
+    "to": "GBP",
+    "rate": 0.852,
+    "source": "fixture"
+  },
+  {
+    "taken_at": "2026-09-10T08:00:00Z",
+    "from": "USD",
+    "to": "GBP",
+    "rate": 0.781,
+    "source": "fixture"
+  }
+]
