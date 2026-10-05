@@ -79,9 +79,9 @@ export default function CruvaPage() {
         </div>
         <div className="actions">
           <span className={`badge ${data.mcp_configured ? (data.last_error ? 'warn' : 'good') : 'muted'}`} title={data.last_error ?? ''}>{data.mcp_configured ? `Cruva MCP · ${data.shops.length} shop${data.shops.length === 1 ? '' : 's'}` : 'Cruva MCP not configured'}</span>
-          {data.checking ? <span className="badge warn">Checking…</span> : data.last_check_at ? <span className="badge muted">Checked {fmtRelative(data.last_check_at)}</span> : null}
+          {data.checking ? <span className="badge warn">Checking{data.progress ? ` ${data.progress.done}/${data.progress.total}` : ''}…</span> : data.last_check_at ? <span className="badge muted">Checked {fmtRelative(data.last_check_at)}</span> : null}
           {isAdmin && <button className="small" disabled={busy !== null} onClick={() => run('sync', api.playbookSyncShops, (r) => setNotice(`${r.linked} shop(s) linked to accounts, ${r.unlinked} waiting to be linked.`))}>{busy === 'sync' ? 'Syncing…' : 'Sync shops'}</button>}
-          {isAdmin && <button className="primary" disabled={busy !== null || data.checking} onClick={() => run('check', () => api.playbookCheck(undefined, true), (r) => setNotice(`Checked ${r.shops} shop(s)${r.errors.length ? `; ${r.errors.slice(0, 2).join(' · ')}` : ''}.`))}>{busy === 'check' ? 'Checking…' : scope === null ? 'Check all now' : 'Check now'}</button>}
+          {isAdmin && <button className="primary" disabled={busy !== null || data.checking} onClick={() => run('check', async () => { if (scope === null) return api.playbookCheck(undefined, true); let last: Awaited<ReturnType<typeof api.playbookCheck>> | null = null; const errors: string[] = []; let checked = 0; for (const s of shops) { last = await api.playbookCheck(s.shop_id, true); checked += last.checked; errors.push(...last.errors); } return { ...(last ?? (await api.playbook())), checked, errors, started: false }; }, (r) => setNotice(r.started ? `Checking ${r.checked} shop(s) in the background; rows fill in as each shop comes back.` : `Checked ${r.checked} shop(s)${r.errors.length ? `; ${r.errors.slice(0, 2).join(' · ')}` : ''}.`))}>{busy === 'check' ? 'Checking…' : scope === null ? 'Check all now' : 'Check now'}</button>}
           <div className="menu">
             <button onClick={() => setMenu(!menu)}>More ▾</button>
             {menu && (
@@ -96,6 +96,7 @@ export default function CruvaPage() {
       </div>
       {error && <div className="banner crit">{error}</div>}
       {notice && <div className="banner info">{notice}</div>}
+      {data.last_error && !data.checking && <div className="banner warn"><b>Last check:</b> {data.last_error}</div>}
       {!data.mcp_configured && <div className="banner warn"><b>Cruva MCP not configured.</b> Generate an API key under Cruva › Dashboard › API, set it as <code>CRUVA_API_KEY</code> on the server and restart. Until then you can paste a shop's listing by hand from a cell.</div>}
       {data.mcp_configured && data.shops.length === 0 && <div className="banner info">No Cruva shops linked yet. Press <b>Sync shops</b>: every shop whose name matches an account links itself, the rest wait under More › Link shops.</div>}
       {data.unlinked.length > 0 && <div className="banner info">{data.unlinked.length} Cruva shop{data.unlinked.length === 1 ? '' : 's'} not linked to an account yet. <a href="#link" onClick={(e) => { e.preventDefault(); setDialog('link'); }}>Link them</a>.</div>}
@@ -123,7 +124,7 @@ export default function CruvaPage() {
                 return (
                   <tr key={s.shop_id}>
                     <td><input type="checkbox" aria-label={s.shop_name} checked={sel.has(s.shop_id)} onChange={() => toggle(s.shop_id)} /></td>
-                    <td><b>{s.shop_name}</b><div className="sub">{s.account_name}{s.am_name ? ` · ${s.am_name}` : ''}{s.checked_at ? ` · checked ${fmtRelative(s.checked_at)}` : ' · not checked'}</div></td>
+                    <td><b>{s.shop_name}</b><div className="sub">{s.account_name}{s.am_name ? ` · ${s.am_name}` : ''}{s.checked_at ? ` · checked ${fmtRelative(s.checked_at)}` : ' · not checked'}</div>{s.error && <div className="sub" style={{ color: 'var(--crit-ink)' }} title={s.error}>Check failed: {s.error.slice(0, 90)}{s.error.length > 90 ? '…' : ''}</div>}</td>
                     <td>{isAdmin ? <select value={s.language} onChange={(e) => run(`l${s.shop_id}`, () => api.playbookShop(s.shop_id, { language: e.target.value }))} style={{ width: 'auto' }}>{['en', 'de', 'fr', 'it', 'es'].map((l) => <option key={l} value={l}>{l}</option>)}</select> : s.language}</td>
                     <td>{cov.checked ? <><b>{cov.set}/{cov.total}</b><div className="pace" style={{ width: 80 }}><span className={cov.set === cov.total ? 'good' : cov.set >= cov.total / 2 ? 'warn' : 'crit'} style={{ width: `${cov.total ? (cov.set / cov.total) * 100 : 0}%` }} /></div></> : <span className="badge muted">not checked</span>}</td>
                     {columns.map((c) => {

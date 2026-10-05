@@ -2803,9 +2803,19 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     playbook.linkShop(String(b.shop_id ?? ''), String(b.shop_name ?? b.shop_id ?? ''), accountId);
     res.json(playbook.data());
   });
+  /** One shop: checked now. Every shop: started in the background (hundreds of MCP calls), the matrix fills live. */
   r.post('/playbook/check', async (req, res) => {
     const b = (req.body ?? {}) as Record<string, unknown>;
-    try { const result = await playbook.check(optText(b.shop_id) ?? undefined, b.deep === undefined ? true : bool(b.deep, true)); res.json({ ...result, ...playbook.data() }); } catch (err) { bad(err); }
+    const shopId = optText(b.shop_id) ?? undefined;
+    const deep = b.deep === undefined ? true : bool(b.deep, true);
+    try {
+      if (shopId) { const result = await playbook.check(shopId, deep); return res.json({ ...playbook.data(), checked: result.shops, errors: result.errors, started: false }); }
+      if (!playbook.data().mcp_configured) throw new HttpError(409, 'CRUVA_API_KEY is not set: generate one under Cruva › Dashboard › API and add it to the server secrets.');
+      if (playbook.data().checking) return res.json({ ...playbook.data(), checked: 0, errors: ['A check is already running'], started: false });
+      const p = playbook.check(undefined, deep).catch((err) => log.warn(`Cruva check: ${(err as Error).message}`));
+      await Promise.race([p, new Promise((r) => setTimeout(r, 300))]);
+      res.json({ ...playbook.data(), checked: playbook.shops().length, errors: [], started: true });
+    } catch (err) { bad(err); }
   });
   r.post('/playbook/shops/:shopId/import', (req, res) => {
     try { const result = playbook.importListing(String(req.params.shopId), String((req.body ?? {}).text ?? '')); res.json({ ...result, ...playbook.data() }); } catch (err) { bad(err); }

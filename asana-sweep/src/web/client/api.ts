@@ -419,7 +419,7 @@ export const api = {
   playbook: () => call<PlaybookData>('GET', '/playbook'),
   playbookSyncShops: () => call<PlaybookData & { linked: number; unlinked: number }>('POST', '/playbook/shops/sync'),
   playbookLinkShop: (b: { shop_id: string; shop_name: string; account_id: number }) => call<PlaybookData>('POST', '/playbook/shops/link', b),
-  playbookCheck: (shop_id?: string, deep = true) => call<PlaybookData & { shops: number; errors: string[] }>('POST', '/playbook/check', { shop_id, deep }),
+  playbookCheck: (shop_id?: string, deep = true) => call<PlaybookData & { checked: number; errors: string[]; started: boolean }>('POST', '/playbook/check', { shop_id, deep }),
   playbookImport: (shopId: string, text: string) => call<PlaybookData & { imported: number }>('POST', `/playbook/shops/${encodeURIComponent(shopId)}/import`, { text }),
   playbookShop: (shopId: string, b: { language?: string }) => call<PlaybookData>('PUT', `/playbook/shops/${encodeURIComponent(shopId)}`, b),
   playbookPrepare: (b: { shop_ids: string[]; keys?: string[] }) => call<{ rollout: PlaybookRollout; drafts: PlaybookDraft[] }>('POST', '/playbook/prepare', b),

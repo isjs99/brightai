@@ -1856,10 +1856,12 @@ export interface PlaybookData {
   last_error: string | null;
   last_check_at: string | null;
   checking: boolean;
+  /** Progress of the running check: shops done of total. */
+  progress: { done: number; total: number } | null;
   rollouts: PlaybookRollout[];
 }
 
-export interface PlaybookShop { shop_id: string; shop_name: string; account_id: number; account_name: string; am_name: string | null; language: string; market: string | null; plan: string | null; remote_counts: Record<string, number>; checked_at: string | null; learned: PlaybookLearned | null }
+export interface PlaybookShop { shop_id: string; shop_name: string; account_id: number; account_name: string; am_name: string | null; language: string; market: string | null; plan: string | null; remote_counts: Record<string, number>; checked_at: string | null; learned: PlaybookLearned | null; /** Why the last check of this shop failed, or null. */ error: string | null }
 
 // ---- Client question copilot ----
 

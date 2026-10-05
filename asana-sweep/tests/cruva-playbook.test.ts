@@ -232,3 +232,28 @@ describe('Cruva rollout engine', () => {
     expect(state.created.filter((c) => c.tool === 'toggle_automation' && c.args.status === 'stopped')).toHaveLength(1);
   });
 });
+
+describe('Cruva check resilience', () => {
+  it('records why a shop failed, keeps checking the others and clears the error on the next good check', async () => {
+    const q = new Queries(openTestDb());
+    const state = { autos: AUTOMATIONS, created: [] as { tool: string; args: Record<string, unknown> }[] };
+    const inner = fakeMcp(state);
+    let failFor: string | null = '6a57569b37ac6b1106c48355';
+    const mcp: McpCaller = { configured: true, call: async (tool, args) => { if (tool === 'list_groups' && args.shop_id === failFor) throw new Error('SSE stream disconnected'); return inner.call(tool, args); } };
+    const engine = new PlaybookEngine(q, mcp, null);
+    engine.seed();
+    const r = await engine.check(undefined, false);
+    expect(r.errors).toHaveLength(1);
+    expect(r.errors[0]).toMatch(/Bears With Benefits IT: SSE stream disconnected/);
+    expect(r.shops).toBe(engine.shops().length - 1);
+    const d = engine.data();
+    expect(d.last_error).toMatch(/1 of \d+ shop\(s\) failed/);
+    expect(d.shops.find((s) => s.shop_id === '6a57569b37ac6b1106c48355')!.error).toBe('SSE stream disconnected');
+    expect(d.shops.find((s) => s.shop_id === '69f1ffa88fa9bee8204e773d')!.error).toBeNull();
+    expect(d.cells.filter((c) => c.shop_id === '69f1ffa88fa9bee8204e773d').length).toBeGreaterThan(10);
+    failFor = null;
+    await engine.check('6a57569b37ac6b1106c48355', false);
+    expect(engine.data().shops.find((s) => s.shop_id === '6a57569b37ac6b1106c48355')!.error).toBeNull();
+    expect(engine.data().last_error).toBeNull();
+  });
+});

@@ -13,6 +13,8 @@ export interface McpCaller {
   call(tool: string, args: Record<string, unknown>): Promise<string>;
 }
 
+class ToolError extends Error {}
+
 export class CruvaMcp implements McpCaller {
   private client: Client | null = null;
   private connecting: Promise<Client> | null = null;
@@ -46,13 +48,23 @@ export class CruvaMcp implements McpCaller {
     try { return await this.connecting; } finally { this.connecting = null; }
   }
 
+  /** Call a tool. A dropped SSE session or a transient transport error is retried once on a fresh connection; a tool error is not. */
   async call(tool: string, args: Record<string, unknown>): Promise<string> {
     if (!this.configured) throw new Error('CRUVA_API_KEY is not set (Cruva › Dashboard › API › Generate API key).');
-    const c = await this.connect();
-    const r = (await c.callTool({ name: tool, arguments: args })) as { content?: { type: string; text?: string }[]; isError?: boolean };
-    const text = unwrap((r.content ?? []).filter((x) => x.type === 'text').map((x) => x.text ?? '').join('\n'));
-    if (r.isError) throw new Error(`Cruva ${tool}: ${text.slice(0, 400) || 'failed'}`);
-    return text;
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const c = await this.connect();
+        const r = (await c.callTool({ name: tool, arguments: args }, undefined, { timeout: 120000 })) as { content?: { type: string; text?: string }[]; isError?: boolean };
+        const text = unwrap((r.content ?? []).filter((x) => x.type === 'text').map((x) => x.text ?? '').join('\n'));
+        if (r.isError) throw new ToolError(`Cruva ${tool}: ${text.slice(0, 400) || 'failed'}`);
+        return text;
+      } catch (err) {
+        if (err instanceof ToolError || attempt >= 3) throw err;
+        log.warn(`Cruva MCP ${tool} failed (${(err as Error).message}); reconnecting (attempt ${attempt + 1})`);
+        await this.close();
+        await new Promise((r) => setTimeout(r, 1500 * attempt));
+      }
+    }
   }
 
   async close(): Promise<void> {

@@ -123,6 +123,7 @@ const copyKey = (s: string) => norm(s.replace(/\[[a-z_ ]+\]/gi, ' ').replace(/ht
 
 export class PlaybookEngine {
   private checking = false;
+  private progress: { done: number; total: number } | null = null;
   constructor(private q: Queries, private mcp: McpCaller = cruvaMcp, private llm: ((system: string, user: string) => Promise<string>) | null | undefined = undefined) {}
 
   /** Seed the library on first run, and add any seed item a later version introduced (edited items are never overwritten). */
@@ -151,7 +152,7 @@ export class PlaybookEngine {
       const fromName = s.shop_name.match(MARKET_RE)?.[1]?.toUpperCase() ?? null;
       const market = fromName ?? tts.find((t) => t.account_id === s.account_id)?.market ?? (a?.markets ?? '').split(/[,\s/]+/)[0] ?? null;
       const override = this.q.getSetting(`playbook_lang_${s.shop_id}`, '');
-      return { shop_id: s.shop_id, shop_name: s.shop_name, account_id: s.account_id, account_name: a?.name ?? '', am_name: a?.am_name ?? null, market: market || null, language: override || shopLanguage(market), plan: this.q.getSetting(`playbook_plan_${s.shop_id}`, '') || null, remote_counts: {}, checked_at: null, learned: this.learnedFor(s.shop_id) };
+      return { shop_id: s.shop_id, shop_name: s.shop_name, account_id: s.account_id, account_name: a?.name ?? '', am_name: a?.am_name ?? null, market: market || null, language: override || shopLanguage(market), plan: this.q.getSetting(`playbook_plan_${s.shop_id}`, '') || null, remote_counts: {}, checked_at: null, learned: this.learnedFor(s.shop_id), error: this.q.getSetting(`playbook_shop_error_${s.shop_id}`, '') || null };
     }).filter((s) => accounts.get(s.account_id)?.enabled !== false);
   }
 
@@ -166,7 +167,7 @@ export class PlaybookEngine {
     const items = this.q.listPlaybook();
     let unlinked: PlaybookData['unlinked'] = [];
     try { unlinked = JSON.parse(this.q.getSetting('playbook_unlinked_json', '[]')) as PlaybookData['unlinked']; } catch { unlinked = []; }
-    return { items, shops, unlinked, cells: this.q.listPlaybookCells(), languages: [...new Set(items.map((i) => i.language))].sort(), mcp_configured: this.mcp.configured, cruva_configured: cruvaCrm.configured, endpoints: this.endpoints(), last_error: this.q.getSetting('playbook_last_error', '') || null, last_check_at: this.q.getSetting('playbook_last_check_at', '') || null, checking: this.checking, rollouts: this.q.listRollouts() };
+    return { items, shops, unlinked, cells: this.q.listPlaybookCells(), languages: [...new Set(items.map((i) => i.language))].sort(), mcp_configured: this.mcp.configured, cruva_configured: cruvaCrm.configured, endpoints: this.endpoints(), last_error: this.q.getSetting('playbook_last_error', '') || null, last_check_at: this.q.getSetting('playbook_last_check_at', '') || null, checking: this.checking, progress: this.progress, rollouts: this.q.listRollouts() };
   }
 
   // ---- Shops ----
@@ -332,13 +333,26 @@ export class PlaybookEngine {
       liveEvents.emitUpdate({ kind: 'playbook' });
       const targets = this.shops().filter((s) => !shopId || s.shop_id === shopId);
       if (!targets.length) errors.push(shopId ? 'Shop not linked to an account' : 'No Cruva shops linked yet: press Sync shops');
+      this.progress = { done: 0, total: targets.length };
       for (const s of targets) {
-        try { await this.checkShop(s, deep); shops += 1; } catch (err) { errors.push(`${s.shop_name}: ${(err as Error).message}`); log.warn(`Cruva check failed for ${s.shop_name}: ${(err as Error).message}`); }
+        try {
+          await this.checkShop(s, deep);
+          shops += 1;
+          this.q.setSetting(`playbook_shop_error_${s.shop_id}`, '');
+        } catch (err) {
+          const message = (err as Error).message;
+          errors.push(`${s.shop_name}: ${message}`);
+          this.q.setSetting(`playbook_shop_error_${s.shop_id}`, message.slice(0, 300));
+          log.warn(`Cruva check failed for ${s.shop_name}: ${message}`);
+        }
+        this.progress = { done: this.progress.done + 1, total: targets.length };
+        liveEvents.emitUpdate({ kind: 'playbook' });
       }
-      this.q.setSetting('playbook_last_error', errors.join(' · ').slice(0, 500));
+      this.q.setSetting('playbook_last_error', errors.length ? `${errors.length} of ${targets.length} shop(s) failed: ${errors.slice(0, 3).join(' · ')}`.slice(0, 600) : '');
       this.q.setSetting('playbook_last_check_at', new Date().toISOString());
     } finally {
       this.checking = false;
+      this.progress = null;
       liveEvents.emitUpdate({ kind: 'playbook' });
     }
     return { shops, errors };
