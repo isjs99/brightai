@@ -4,6 +4,7 @@ import type { PlaybookCellStatus, PlaybookData, PlaybookDraft, PlaybookDraftStat
 import { api, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
 import { useAccountScope } from '../hubs';
+import { GroupsHead, useOpenGroups, type GroupLight } from '../groups';
 
 /** The matrix reads left to right the way the rollout happens: groups, the bots on them, outreach, content, email, flows, hygiene. */
 const CATEGORIES = ['Groups', 'CRM bots', 'Outreach', 'Content', 'Email', 'Flows', 'Hygiene'] as const;
@@ -54,6 +55,7 @@ export default function CruvaPage() {
   const [dialog, setDialog] = useState<'library' | 'rollouts' | 'link' | null>(null);
   const [cellOpen, setCellOpen] = useState<{ shop: PlaybookShop; col: Column; cell: PlaybookSetupCell | null } | null>(null);
   const isAdmin = useIsAdmin();
+  const groups = useOpenGroups('cruva');
   const rolloutId = params.get('rollout') ? Number(params.get('rollout')) : null;
   const load = useCallback(() => api.playbook().then(setData).catch((e) => setError((e as Error).message)), []);
   useEffect(() => { load(); }, [load]);
@@ -79,8 +81,22 @@ export default function CruvaPage() {
   const toggle = (id: string) => { const n = new Set(sel); if (n.has(id)) n.delete(id); else n.add(id); setSel(n); };
   const ticked = shops.filter((s) => sel.has(s.shop_id));
   const totals = ticked.reduce((t, s) => { const c = coverage(s.shop_id); return { missing: t.missing + c.missing, paused: t.paused + c.paused, drift: t.drift + c.drift }; }, { missing: 0, paused: 0, drift: 0 });
-  const groups = CATEGORIES.map((cat) => ({ cat, cols: columns.filter((c) => metaOf(c).cat === cat) })).filter((g) => g.cols.length);
-  const firstCols = new Set(groups.map((g) => `${g.cols[0].kind}:${g.cols[0].key}`));
+  const colGroups = CATEGORIES.map((cat) => ({ cat, cols: columns.filter((c) => metaOf(c).cat === cat) })).filter((g) => g.cols.length);
+  const firstCols = new Set(colGroups.map((g) => `${g.cols[0].kind}:${g.cols[0].key}`));
+  const accountBlocks = (() => {
+    const by = new Map<number, typeof shops>();
+    for (const s of shops) by.set(s.account_id, [...(by.get(s.account_id) ?? []), s]);
+    const order = ['red', 'amber', 'green', 'grey'];
+    return [...by.entries()].map(([account_id, list]) => {
+      const covs = list.map((s) => coverage(s.shop_id));
+      const checked = covs.some((c) => c.checked);
+      const set = covs.reduce((n, c) => n + c.set, 0); const total = covs.reduce((n, c) => n + c.total, 0);
+      const missing = covs.reduce((n, c) => n + c.missing, 0); const paused = covs.reduce((n, c) => n + c.paused, 0); const drift = covs.reduce((n, c) => n + c.drift, 0);
+      const errors = list.filter((s) => s.error).length;
+      const light: GroupLight = !checked ? 'grey' : total && set / total >= 1 && !errors ? 'green' : total && set / total >= 0.5 ? 'amber' : 'red';
+      return { account_id, account_name: list[0].account_name, am_name: list[0].am_name, shops: list, checked, set, total, missing, paused, drift, errors, light };
+    }).sort((a, b) => order.indexOf(a.light) - order.indexOf(b.light) || a.account_name.localeCompare(b.account_name));
+  })();
   const openRollout = (id: number | null) => { const n = new URLSearchParams(params); if (id === null) n.delete('rollout'); else n.set('rollout', String(id)); setParams(n); };
 
   if (rolloutId !== null) return <RolloutView id={rolloutId} data={data} isAdmin={isAdmin} onBack={() => openRollout(null)} onError={setError} />;
@@ -116,8 +132,9 @@ export default function CruvaPage() {
       {data.mcp_configured && data.shops.length === 0 && <div className="banner info">No Cruva shops linked yet. Press <b>Sync shops</b>: every shop whose name matches an account links itself, the rest wait under More › Link shops.</div>}
       {data.unlinked.length > 0 && <div className="banner info">{data.unlinked.length} Cruva shop{data.unlinked.length === 1 ? '' : 's'} not linked to an account yet. <a href="#link" onClick={(e) => { e.preventDefault(); setDialog('link'); }}>Link them</a>.</div>}
 
+      {shops.length > 0 && <GroupsHead items={accountBlocks.length} lights={accountBlocks.map((b) => b.light)} open={accountBlocks.every((b) => groups.isOpen(b.account_id))} onAll={(o) => groups.setAll(accountBlocks.map((b) => b.account_id), o)} />}
       <div className="cruva-legend" style={{ marginBottom: 8 }}>
-        <span>Click a cell for the detail. Tick shops and press Prepare to draft what is missing.</span>
+        <span>Click an account to open its shops, a cell for the detail. Tick shops and press Prepare to draft what is missing.</span>
         <span style={{ flex: 1 }} />
         {(['set', 'paused', 'drift', 'missing', 'manual', 'unknown'] as PlaybookCellStatus[]).map((s) => <span key={s} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><span className={`cstate ${s}`}>{STATE[s].glyph}</span>{STATE[s].label}</span>)}
       </div>
@@ -126,7 +143,7 @@ export default function CruvaPage() {
         <div className="grid-wrap card" style={{ padding: '4px 10px 8px' }}>
           <table className="cruva" aria-label="Cruva setup per shop">
             <thead>
-              <tr><th colSpan={5} /> {groups.map((g) => <th key={g.cat} className="grp" colSpan={g.cols.length}>{g.cat}</th>)}</tr>
+              <tr><th colSpan={5} /> {colGroups.map((g) => <th key={g.cat} className="grp" colSpan={g.cols.length}>{g.cat}</th>)}</tr>
               <tr>
                 <th><input type="checkbox" aria-label="All shops" checked={shops.length > 0 && shops.every((s) => sel.has(s.shop_id))} onChange={() => setSel(shops.every((s) => sel.has(s.shop_id)) ? new Set() : new Set(shops.map((s) => s.shop_id)))} /></th>
                 <th>Shop</th><th>Lang</th><th>Plan</th><th>Coverage</th>
@@ -134,7 +151,15 @@ export default function CruvaPage() {
               </tr>
             </thead>
             <tbody>
-              {shops.map((s) => {
+              {accountBlocks.map((blk) => [
+                <tr key={`acc-${blk.account_id}`} className={`acc-row ${blk.light}`} onClick={() => groups.toggle(blk.account_id)}>
+                  <td onClick={(e) => e.stopPropagation()}><input type="checkbox" aria-label={`All ${blk.account_name} shops`} checked={blk.shops.every((s) => sel.has(s.shop_id))} onChange={() => { const n = new Set(sel); const all = blk.shops.every((s) => n.has(s.shop_id)); for (const s of blk.shops) { if (all) n.delete(s.shop_id); else n.add(s.shop_id); } setSel(n); }} /></td>
+                  <td className="shop" colSpan={2}><span className={`light ${blk.light === 'red' ? 'crit' : blk.light === 'amber' ? 'warn' : blk.light === 'green' ? 'good' : 'muted'}`} style={{ marginRight: 8 }} /><b>{blk.account_name}</b> <span className="sub">{blk.am_name ? `${blk.am_name} · ` : ''}{blk.shops.length} shop{blk.shops.length === 1 ? '' : 's'} · {blk.shops.map((s) => s.market ?? '?').join(' ')}</span></td>
+                  <td className="sub">{blk.checked ? `${blk.set}/${blk.total}` : 'not checked'}</td>
+                  <td>{blk.checked ? <div className="pace" style={{ width: 80 }}><span className={blk.light === 'green' ? 'good' : blk.light === 'amber' ? 'warn' : 'crit'} style={{ width: `${blk.total ? (blk.set / blk.total) * 100 : 0}%` }} /></div> : null}</td>
+                  <td colSpan={columns.length} className="sub">{blk.missing ? `${blk.missing} missing` : ''}{blk.paused ? ` · ${blk.paused} paused` : ''}{blk.drift ? ` · ${blk.drift} differ` : ''}{blk.errors ? ` · ${blk.errors} check failed` : ''} <span style={{ float: 'right' }}>{groups.isOpen(blk.account_id) ? '▾' : '▸'}</span></td>
+                </tr>,
+                ...(groups.isOpen(blk.account_id) ? blk.shops : []).map((s) => {
                 const cov = coverage(s.shop_id);
                 return (
                   <tr key={s.shop_id}>
@@ -150,7 +175,7 @@ export default function CruvaPage() {
                     })}
                   </tr>
                 );
-              })}
+              })])}
             </tbody>
           </table>
         </div>

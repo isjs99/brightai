@@ -10,7 +10,7 @@ import type { CruvaMetrics } from '../health/rules.js';
  * account key. It writes the same tables the TikTok pull feeds, so the Overview, the GMV page, the
  * Stock page and the monitor rules read Cruva wherever the TikTok app cannot (or is not) connected:
  *
- * - /shop/stats       daily GMV, affiliate GMV, units, videos, views, DMs, samples (28 days) → gmv_daily + health_pulls(cruva)
+ * - /shop/stats       daily GMV, affiliate GMV, units, videos, views, DMs, samples (60 days) → gmv_daily + health_pulls(cruva)
  * - /shop/sps         performance score                                                   → health_pulls(cruva).metrics.sps
  * - /affiliate/samples/funnel   requests waiting on review, content pending, ageing        → metrics
  * - /automations/list  active / total automations                                          → metrics
@@ -110,8 +110,9 @@ export class CruvaPuller {
 
   async pullShop(shopId: string, accountId: number | null, now = Date.now()): Promise<void> {
     const today = iso(now);
-    const from28 = iso(now - 28 * 86400000);
-    const stats = await this.rest.stats(shopId, from28, today);
+    // 60 days: the Performance page compares any range up to 28 days with the same length before it.
+    const from60 = iso(now - 60 * 86400000);
+    const stats = await this.rest.stats(shopId, from60, today);
     const days = daysFromStats(stats);
     // Daily GMV for the Performance page (today is written too; the page excludes it while the month runs).
     this.q.upsertGmv(days.map((d) => ({ shop_id: shopId, date: d.date, total_gmv: d.total_gmv, affiliate_gmv: d.affiliate_gmv, units: d.units, source: 'cruva' })));

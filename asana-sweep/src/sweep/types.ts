@@ -956,6 +956,12 @@ export interface MonitorAccountRow {
   risk: HealthRisk | null;
   /** Authorised TikTok shops linked to this account. */
   shops: number;
+  /** Cruva shops linked to this account (fill in where the TikTok app is not connected). */
+  cruva_shops: number;
+  /** Where the numbers come from: the TikTok app, Cruva, or nothing connected. */
+  source: 'tts' | 'cruva' | 'none';
+  /** TikTok scopes that are not live for this account, so the related checks cannot run (orders, returns, products, customer service…). */
+  missing_scopes: string[];
   gmv_7d: number | null;
   gmv_prev_7d: number | null;
   currency: string;
@@ -1562,7 +1568,7 @@ export interface AlertCalendar { month: string; today: string; days: AlertDay[];
 
 export interface SlackChannel { id: string; name: string; is_private: boolean; is_member: boolean; num_members: number | null }
 
-export interface RepliesSummaryRow { account_id: number; account_name: string; am_name: string | null; channel: InboxChannel; mode: ReplyMode; waiting: number; auto_today: number; cap: number | null; ready: boolean }
+export interface RepliesSummaryRow { account_id: number; account_name: string; am_name: string | null; channel: InboxChannel; mode: ReplyMode; waiting: number; escalated: number; auto_today: number; cap: number | null; ready: boolean; note: string | null; shops: { id: string; name: string; market: string | null; token_ok: boolean; off: boolean; language: string | null }[] }
 
 // ---- Stock ----
 

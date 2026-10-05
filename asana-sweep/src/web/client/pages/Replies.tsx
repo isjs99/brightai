@@ -5,6 +5,7 @@ import { api, fmtRelative, useLiveUpdates } from '../api';
 import { useAccountScope } from '../hubs';
 import { useIsAdmin } from '../session';
 import { Library } from './Library';
+import { AccountGroup, GroupsHead, useOpenGroups, type GroupLight } from '../groups';
 
 /**
  * Creators and Customer service tabs under Accounts: one policy per account and channel (off, draft,
@@ -34,6 +35,8 @@ function Summary({ channel }: { channel: InboxChannel }) {
   const [rows, setRows] = useState<RepliesSummaryRow[] | null>(null);
   const [meta, setMeta] = useState<{ master_on: boolean; llm_configured: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const groups = useOpenGroups(`replies:${channel}`);
+  const languagesOf = (code: string) => ({ en: 'English', de: 'German', fr: 'French', it: 'Italian', es: 'Spanish', nl: 'Dutch', pl: 'Polish', pt: 'Portuguese', sv: 'Swedish' } as Record<string, string>)[code] ?? code;
   const load = useCallback(() => api.repliesSummary().then((r) => { setRows(r.rows); setMeta({ master_on: r.master_on, llm_configured: r.llm_configured }); }).catch((e) => setError((e as Error).message)), []);
   useEffect(() => { load(); }, [load]);
   useLiveUpdates((e) => { if (e.kind === 'inbox' || e.kind === 'settings') load(); });
@@ -53,26 +56,35 @@ function Summary({ channel }: { channel: InboxChannel }) {
         </div>
       </div>
       {error && <div className="banner crit">{error}</div>}
-      <div className="grid-wrap"><table>
-        <thead><tr><th>Account</th><th>AM</th><th>{label(channel)}</th><th>Waiting for a human</th><th>Sent automatically today</th><th>Channel</th><th>{label(other)}</th></tr></thead>
-        <tbody>
-          {mine.map((r) => {
-            const o = rows.find((x) => x.account_id === r.account_id && x.channel === other);
-            return (
-              <tr key={r.account_id}>
-                <td><Link to={`${channel === 'cs' ? '/customer-service' : '/creators'}?account=${r.account_id}`}><b>{r.account_name}</b></Link></td>
-                <td className="sub">{r.am_name ?? ''}</td>
-                <td><span className={`badge ${r.mode === 'auto' ? 'good' : r.mode === 'draft' ? 'accent' : 'muted'}`}>{MODE_LABEL[r.mode]}</span></td>
-                <td>{r.waiting ? <span className="badge warn">{r.waiting}</span> : <span className="sub">0</span>}</td>
-                <td>{r.auto_today}{r.cap !== null ? <span className="sub"> / {r.cap}</span> : <span className="sub"> · unlimited</span>}</td>
-                <td>{r.ready ? <span className="badge good">ready</span> : <span className="badge muted">{channel === 'cs' ? 'scope pending' : 'not connected'}</span>}</td>
-                <td className="sub">{o ? `${MODE_LABEL[o.mode]}${o.waiting ? ` · ${o.waiting} waiting` : ''}` : ''}</td>
-              </tr>
-            );
-          })}
-          {mine.length === 0 && <tr><td colSpan={7} className="sub">No enabled accounts.</td></tr>}
-        </tbody>
-      </table></div>
+      {(() => {
+        const lightOf = (r: RepliesSummaryRow): GroupLight => r.mode === 'off' ? 'grey' : r.escalated ? 'red' : r.waiting ? 'amber' : r.ready ? 'green' : 'amber';
+        const order = ['red', 'amber', 'green', 'grey'];
+        const sorted = [...mine].sort((a, b) => order.indexOf(lightOf(a)) - order.indexOf(lightOf(b)) || a.account_name.localeCompare(b.account_name));
+        return (
+          <>
+            <GroupsHead items={sorted.length} lights={sorted.map(lightOf)} open={sorted.every((r) => groups.isOpen(r.account_id))} onAll={(o) => groups.setAll(sorted.map((r) => r.account_id), o)} />
+            <div className="areas">
+              {sorted.map((r) => {
+                const o = rows.find((x) => x.account_id === r.account_id && x.channel === other);
+                return (
+                  <AccountGroup key={r.account_id} light={lightOf(r)} name={r.account_name} sub={`${r.am_name ?? ''}${r.shops.length ? ` · ${r.shops.map((s) => s.market ?? '?').join(' ')}` : ''}`} open={groups.isOpen(r.account_id)} onToggle={() => groups.toggle(r.account_id)}
+                    summary={r.mode === 'off' ? `Off${r.note ? ` · ${r.note}` : ''}` : r.escalated ? `${r.escalated} thread${r.escalated === 1 ? '' : 's'} need a human` : r.waiting ? `${r.waiting} draft${r.waiting === 1 ? '' : 's'} waiting for approval` : r.ready ? `${MODE_LABEL[r.mode]} · running` : (r.note ?? 'Channel not connected')}
+                    nums={<><span className="num"><span className="k">Waiting</span><span className="v">{r.waiting}</span></span><span className="num"><span className="k">Sent today</span><span className="v">{r.auto_today}{r.cap !== null ? ` / ${r.cap}` : ''}</span></span></>}
+                    right={<><span className={`badge ${r.mode === 'auto' ? 'good' : r.mode === 'draft' ? 'accent' : 'muted'}`}>{MODE_LABEL[r.mode]}</span><span className={`badge ${r.ready ? 'good' : 'muted'}`}>{r.ready ? 'connected' : channel === 'cs' ? 'scope pending' : 'not connected'}</span><Link to={`${channel === 'cs' ? '/customer-service' : '/creators'}?account=${r.account_id}`} className="button small" onClick={(e) => e.stopPropagation()}>Open ▸</Link></>}>
+                    <div className="sub" style={{ marginBottom: 6 }}>{label(other)}: {o ? `${MODE_LABEL[o.mode]}${o.waiting ? ` · ${o.waiting} waiting` : ''}` : '–'}</div>
+                    {r.shops.length === 0 ? <div className="sub">No TikTok shop linked to this account.</div> : (
+                      <div className="grid-wrap"><table><thead><tr><th>Country</th><th>Shop</th><th>Replies</th><th>Language</th><th>Authorised</th></tr></thead><tbody>
+                        {r.shops.map((s) => <tr key={s.id}><td><b>{s.market ?? '–'}</b></td><td>{s.name}</td><td><span className={`badge ${r.mode === 'off' || s.off ? 'muted' : 'good'}`}>{r.mode === 'off' ? 'off (account)' : s.off ? 'off' : 'on'}</span></td><td className="sub">{s.language ? (languagesOf(s.language)) : 'detect, then market'}</td><td>{s.token_ok ? <span className="badge good">yes</span> : <span className="badge warn">no</span>}</td></tr>)}
+                      </tbody></table></div>
+                    )}
+                  </AccountGroup>
+                );
+              })}
+              {sorted.length === 0 && <div className="empty">No enabled accounts.</div>}
+            </div>
+          </>
+        );
+      })()}
     </>
   );
 }

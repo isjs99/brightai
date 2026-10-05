@@ -3,6 +3,7 @@ import type { StockData, StockProjection, StockProjectionRow } from '../../../sw
 import { api, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
 import { useAccountScope } from '../hubs';
+import { AccountGroup, GroupsHead, useOpenGroups, type GroupLight } from '../groups';
 
 const LEVEL: Record<StockProjectionRow['level'], { label: string; cls: string }> = { out: { label: 'Out', cls: 'crit' }, crit: { label: 'Critical', cls: 'crit' }, warn: { label: 'Low', cls: 'warn' }, ok: { label: 'OK', cls: 'good' }, idle: { label: 'No sales', cls: 'muted' } };
 
@@ -26,6 +27,7 @@ export default function StockPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const isAdmin = useIsAdmin();
+  const groups = useOpenGroups('stock');
   const load = useCallback(() => api.stock().then(setData).catch((e) => setError((e as Error).message)), []);
   useEffect(() => { load(); }, [load]);
   const connected = useLiveUpdates((e) => { if (e.kind === 'stock') load(); });
@@ -114,22 +116,45 @@ export default function StockPage() {
       </div>
 
       {!shop ? (
-        data.shops.length === 0 ? <div className="empty">No TikTok shop authorised and no Cruva shop linked yet. Authorise shops under Promotions (TikTok Shop) or set CRUVA_API_KEY and link shops under Cruva; the stock snapshot follows.</div> : (
-          <div className="grid-wrap"><table><thead><tr><th>Shop</th><th>Account</th><th className="num">SKUs</th><th className="num">Out</th><th className="num">Critical</th><th className="num">Low</th><th>Next stock-out</th><th>Snapshot</th></tr></thead><tbody>
-            {data.shops.map((s) => (
-              <tr key={s.shop_id} className="clickable" onClick={() => setShop(s.shop_id)}>
-                <td><b>{s.shop_name}</b>{s.market ? <span className="badge muted" style={{ marginLeft: 6 }}>{s.market}</span> : null}{s.source === 'cruva' ? <span className="badge accent" style={{ marginLeft: 6 }} title="Stock and sales read through Cruva: the TikTok app is not connected for this shop">via Cruva</span> : !s.token_ok && <span className="badge crit" style={{ marginLeft: 6 }}>auth</span>}</td>
-                <td className="sub">{s.account_name ?? '–'}</td>
-                <td className="num">{s.skus}</td>
-                <td className="num">{s.out || ''}</td>
-                <td className="num">{s.crit || ''}</td>
-                <td className="num">{s.warn || ''}</td>
-                <td>{s.next_stockout_days === null ? <span className="sub">–</span> : countdown({ days_left: s.next_stockout_days, level: s.next_stockout_days < data.settings.crit_days ? 'crit' : 'ok', stockout_at: null })}</td>
-                <td className="sub">{s.captured_at ? fmtRelative(s.captured_at) : 'none'}</td>
-              </tr>
-            ))}
-          </tbody></table></div>
-        )
+        data.shops.length === 0 ? <div className="empty">No TikTok shop authorised and no Cruva shop linked yet. Authorise shops under Promotions (TikTok Shop) or set CRUVA_API_KEY and link shops under Cruva; the stock snapshot follows.</div> : (() => {
+          const byAccount = new Map<string, typeof shops>();
+          for (const s of shops) { const k = s.account_name ?? 'No account'; byAccount.set(k, [...(byAccount.get(k) ?? []), s]); }
+          const lightOf = (rows: typeof shops): GroupLight => rows.some((r) => r.out) ? 'red' : rows.some((r) => r.crit || r.warn) ? 'amber' : rows.some((r) => r.skus) ? 'green' : 'grey';
+          const order = ['red', 'amber', 'green', 'grey'];
+          const entries = [...byAccount.entries()].sort((a, b) => order.indexOf(lightOf(a[1])) - order.indexOf(lightOf(b[1])) || a[0].localeCompare(b[0]));
+          return (
+            <>
+              <GroupsHead items={entries.length} lights={entries.map((e) => lightOf(e[1]))} open={entries.every((e) => groups.isOpen(e[0]))} onAll={(o) => groups.setAll(entries.map((e) => e[0]), o)} />
+              <div className="areas">
+                {entries.map(([name, rows]) => {
+                  const out = rows.reduce((n, r) => n + r.out, 0); const crit = rows.reduce((n, r) => n + r.crit, 0); const warn = rows.reduce((n, r) => n + r.warn, 0);
+                  const soonest = rows.map((r) => r.next_stockout_days).filter((d): d is number => d !== null).sort((a, b) => a - b)[0];
+                  return (
+                    <AccountGroup key={name} light={lightOf(rows)} name={name} sub={`${rows.length} shop${rows.length === 1 ? '' : 's'} · ${rows.map((r) => r.market ?? '?').join(' ')}`} open={groups.isOpen(name)} onToggle={() => groups.toggle(name)}
+                      summary={out ? `${out} SKU${out === 1 ? '' : 's'} out of stock` : crit ? `${crit} SKU${crit === 1 ? '' : 's'} under ${data.settings.crit_days} days` : warn ? `${warn} SKU${warn === 1 ? '' : 's'} under ${data.settings.warn_days} days` : rows.some((r) => r.skus) ? 'Stock covered' : 'No snapshot yet'}
+                      nums={<>{soonest !== undefined && <span className={`num ${soonest < data.settings.crit_days ? 'crit' : soonest < data.settings.warn_days ? 'warn' : ''}`}><span className="k">Next stock-out</span><span className="v">{Math.max(0, Math.round(soonest))} days</span></span>}<span className="num"><span className="k">SKUs</span><span className="v">{rows.reduce((n, r) => n + r.skus, 0)}</span></span></>}
+                      right={<>{rows.some((r) => r.source === 'cruva') && <span className="badge accent">via Cruva</span>}{out ? <span className="badge crit">{out}</span> : null}{crit + warn ? <span className="badge warn">{crit + warn}</span> : null}</>}>
+                      <div className="grid-wrap"><table><thead><tr><th>Shop</th><th className="num">SKUs</th><th className="num">Out</th><th className="num">Critical</th><th className="num">Low</th><th>Next stock-out</th><th>Snapshot</th><th></th></tr></thead><tbody>
+                        {rows.map((s) => (
+                          <tr key={s.shop_id} className="clickable" onClick={() => setShop(s.shop_id)}>
+                            <td><b>{s.shop_name}</b>{s.market ? <span className="badge muted" style={{ marginLeft: 6 }}>{s.market}</span> : null}{s.source === 'cruva' ? <span className="badge accent" style={{ marginLeft: 6 }} title="Stock and sales read through Cruva: the TikTok app is not connected for this shop">via Cruva</span> : !s.token_ok && <span className="badge crit" style={{ marginLeft: 6 }}>auth</span>}</td>
+                            <td className="num">{s.skus}</td>
+                            <td className="num">{s.out || ''}</td>
+                            <td className="num">{s.crit || ''}</td>
+                            <td className="num">{s.warn || ''}</td>
+                            <td>{s.next_stockout_days === null ? <span className="sub">–</span> : countdown({ days_left: s.next_stockout_days, level: s.next_stockout_days < data.settings.crit_days ? 'crit' : 'ok', stockout_at: null })}</td>
+                            <td className="sub">{s.captured_at ? fmtRelative(s.captured_at) : 'none'}</td>
+                            <td><button className="small" onClick={(e) => { e.stopPropagation(); setShop(s.shop_id); }}>Projection ▸</button></td>
+                          </tr>
+                        ))}
+                      </tbody></table></div>
+                    </AccountGroup>
+                  );
+                })}
+              </div>
+            </>
+          );
+        })()
       ) : !proj ? <p>Loading projection…</p> : (
         <div className="card">
           <div className="page-head" style={{ marginBottom: 8 }}>

@@ -334,11 +334,20 @@ export class HealthEngine {
     const ttsShops = this.q.listTtsShops();
     const assessments = new Map(this.q.latestAssessments().map((a) => [a.account_id, a]));
     const t = this.thresholds();
+    const cruvaShops = this.q.listShops('cruva');
+    const cPulls = this.q.latestHealthPulls('cruva').filter((p) => p.ok);
+    const scopeChecks: TtsScope[] = ['analytics', 'order', 'product', 'return_refund', 'affiliate_seller', 'customer_service', 'finance'];
     return this.q.listAccounts().filter((a) => a.enabled).map((a) => {
       const mine = flags.filter((f) => f.account_id === a.id);
       const shops = ttsShops.filter((sh) => sh.account_id === a.id);
       const myPulls = pulls.filter((p) => shops.some((sh) => sh.id === p.shop_id));
-      const sumMetric = (k: string) => { let any = false; let n = 0; for (const p of myPulls) { const v = p.metrics[k]; if (typeof v === 'number') { any = true; n += v; } } return any ? n : null; };
+      const myCruva = cruvaShops.filter((s) => s.account_id === a.id);
+      const myCPulls = cPulls.filter((p) => myCruva.some((s) => s.shop_id === p.shop_id));
+      const sumTts = (k: string) => { let any = false; let n = 0; for (const p of myPulls) { const v = p.metrics[k]; if (typeof v === 'number') { any = true; n += v; } } return any ? n : null; };
+      const sumCruva = (k: string) => { let any = false; let n = 0; for (const p of myCPulls) { const v = p.metrics[k]; if (typeof v === 'number') { any = true; n += v; } } return any ? n : null; };
+      const sumMetric = (k: string) => sumTts(k);
+      const liveScope = (scope: TtsScope) => myPulls.some((p) => (p.rows as unknown as Partial<TtsRows>).scopes?.[scope]?.ok);
+      const missing = scopeChecks.filter((sc) => !liveScope(sc)).map((sc) => SCOPE_LABELS[sc]);
       const markets = (a.markets ?? '').toUpperCase().split(/[\/,\s]+/).filter((m) => /^[A-Z]{2}$/.test(m));
       const targets = this.q.listAccountTargets(a.id);
       const gmvTarget = targetValue(targets, 'gmv_target_month');
@@ -353,7 +362,10 @@ export class HealthEngine {
         open: mine.length, crit: sev('crit'), warn: sev('warn'), info: sev('info'),
         risk: assessments.get(a.id)?.risk ?? null,
         shops: shops.length,
-        gmv_7d: sumMetric('gmv_7d'), gmv_prev_7d: sumMetric('gmv_prev_7d'), currency: currencyForMarket(shops[0]?.market ?? markets[0] ?? ''),
+        cruva_shops: myCruva.length,
+        source: shops.some((sh) => sh.token_ok) && myPulls.length ? 'tts' : myCPulls.length ? 'cruva' : 'none',
+        missing_scopes: shops.some((sh) => sh.token_ok) && myPulls.length ? missing : scopeChecks.map((sc) => SCOPE_LABELS[sc]),
+        gmv_7d: sumTts('gmv_7d') ?? sumCruva('total_gmv_7d'), gmv_prev_7d: sumTts('gmv_7d') !== null ? sumMetric('gmv_prev_7d') : sumCruva('total_gmv_prev_7d'), currency: currencyForMarket(shops[0]?.market ?? markets[0] ?? ''),
         gmv_pace: gmvTarget && mtd !== null ? mtd / ((gmvTarget * day) / days) : null,
         samples_pace: samplesTarget && samplesWeek !== null ? samplesWeek / ((samplesTarget * elapsed) / 7) : null,
         roi_pace: minRoi && spend && gmvMaxGmv !== null ? (gmvMaxGmv / spend) / minRoi : null,

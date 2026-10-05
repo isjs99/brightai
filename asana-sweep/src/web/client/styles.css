@@ -542,3 +542,6 @@ table.cruva td.shop { min-width: 170px; }
 @media (max-width: 1000px) { .alert-split { grid-template-columns: 1fr; } }
 .alert-acc { border: 1px solid var(--border); border-radius: var(--r-card); padding: 8px 10px; margin-bottom: 8px; border-left-width: 4px; }
 .alert-acc.crit { border-left-color: var(--crit); } .alert-acc.warn { border-left-color: var(--warn); } .alert-acc.good { border-left-color: var(--good-ink); }
+
+table.cruva tr.acc-row td { background: var(--surface-2); cursor: pointer; border-top: 2px solid var(--border); }
+table.cruva tr.acc-row.red td { background: var(--crit-bg); } table.cruva tr.acc-row.amber td { background: var(--warn-bg); } table.cruva tr.acc-row.green td { background: var(--good-bg); }

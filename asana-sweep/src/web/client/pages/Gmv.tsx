@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import type { Account, BonusStatus, GmvData, GmvExplore, WindsorStatus } from '../../../sweep/types';
+import type { GmvAccountRow, GmvExploreRow, Account, BonusStatus, GmvData, GmvExplore, WindsorStatus } from '../../../sweep/types';
+import { AccountGroup, GroupsHead, marketOf, useOpenGroups, type GroupLight } from '../groups';
 import { api, currentMonth, fmtDate, fmtMoney, fmtPct, fmtRelative, monthLabel, shiftMonth } from '../api';
 
 function Attain({ value }: { value: number | null }) {
@@ -45,13 +46,16 @@ function Spark({ points }: { points: { date: string; gmv: number }[] }) {
 
 export default function GmvPage() {
   const [month, setMonth] = useState(currentMonth());
+  const [preset, setPreset] = useState<'this' | 'last' | 'month' | '7' | '14' | '28' | 'custom'>('this');
+  const [range, setRange] = useState(() => presetRange(PRESETS[2]));
+  const [explore, setExplore] = useState<GmvExplore | null>(null);
+  const groups = useOpenGroups('gmv');
   const [data, setData] = useState<GmvData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [targets, setTargets] = useState<Record<number, string>>({});
   const [busy, setBusy] = useState<string | null>(null);
-  const [open, setOpen] = useState<number | null>(null);
   const [showImport, setShowImport] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [importText, setImportText] = useState('');
@@ -172,6 +176,9 @@ export default function GmvPage() {
     } catch (err) { setError(`Import failed: ${(err as Error).message}`); } finally { setBusy(null); }
   };
 
+  const mode: 'month' | 'range' = preset === 'this' || preset === 'last' || preset === 'month' ? 'month' : 'range';
+  useEffect(() => { if (mode !== 'range' || !range.from || !range.to || range.from > range.to) return; api.gmvExplore(range.from, range.to, null).then((d) => { setExplore(d); setError(null); }).catch((e) => setError((e as Error).message)); }, [mode, range]);
+  const pickPreset = (key: typeof preset) => { setPreset(key); if (key === 'this') setMonth(currentMonth()); if (key === 'last') setMonth(shiftMonth(currentMonth(), -1)); const p = PRESETS.find((x) => x.key === key); if (p) setRange(presetRange(p)); };
   const cur = data?.currency ?? 'EUR';
   const running = data ? !data.month_closed && data.month === currentMonth() : true;
   const [showWindsor, setShowWindsor] = useState(false);
@@ -186,10 +193,13 @@ export default function GmvPage() {
             <a href="#" onClick={(e) => { e.preventDefault(); setShowSettings((s) => !s); }}>{showSettings ? 'Hide rates' : 'Rates & rule'}</a>
           </p>
         </div>
-        <div className="toolbar" style={{ margin: 0 }}>
-          <button className="small" onClick={() => setMonth(shiftMonth(month, -1))}>‹</button>
-          <b>{monthLabel(month)}</b>
-          <button className="small" onClick={() => setMonth(shiftMonth(month, 1))} disabled={month >= currentMonth()}>›</button>
+        <div className="actions toolbar" style={{ margin: 0 }}>
+          <select value={preset} onChange={(e) => pickPreset(e.target.value as typeof preset)} aria-label="Period">
+            <option value="this">This month</option><option value="last">Last month</option>{preset === 'month' && <option value="month">{monthLabel(month)}</option>}<option value="7">Last 7 days</option><option value="14">Last 14 days</option><option value="28">Last 28 days</option><option value="custom">Custom dates</option>
+          </select>
+          {mode === 'month' && <><button className="small" onClick={() => { setMonth(shiftMonth(month, -1)); setPreset('month'); }}>‹</button><b>{monthLabel(month)}</b><button className="small" onClick={() => { setMonth(shiftMonth(month, 1)); setPreset(shiftMonth(month, 1) === currentMonth() ? 'this' : 'month'); }} disabled={month >= currentMonth()}>›</button></>}
+          {preset === 'custom' && <><input type="date" value={range.from} max={range.to} onChange={(e) => setRange({ ...range, from: e.target.value })} aria-label="From" /><span className="sub">to</span><input type="date" value={range.to} min={range.from} onChange={(e) => setRange({ ...range, to: e.target.value })} aria-label="To" /></>}
+          {mode === 'range' && preset !== 'custom' && <span className="sub">{range.from} to {range.to}</span>}
           <button className="admin-only" onClick={sync} disabled={busy === 'sync' || !(data?.cruva_configured || data?.windsor_configured)} title={data?.cruva_configured || data?.windsor_configured ? '' : 'Set CRUVA_API_KEY or WINDSOR_API_KEY in .env'}>{busy === 'sync' ? 'Syncing…' : data?.windsor_configured && !data?.cruva_configured ? 'Sync from Windsor' : 'Sync'}</button>
           <button className="admin-only" onClick={() => setShowWindsor((s) => !s)}>{showWindsor ? 'Hide Windsor' : 'Windsor.ai shops'}</button>
           <button className="admin-only" onClick={() => setShowImport((s) => !s)}>Import</button>
@@ -224,7 +234,41 @@ export default function GmvPage() {
           <div className="form-foot"><button className="primary" onClick={doImport} disabled={busy === 'import' || !importText.trim()}>Import</button><button onClick={() => setShowImport(false)}>Cancel</button></div>
         </div>
       )}
-      {data === null ? <p>Loading…</p> : (
+      {mode === 'range' && (
+        !explore ? <p>Loading…</p> : (() => {
+          const lightOf = (r: GmvExploreRow): GroupLight => r.gmv === 0 && r.prev_gmv === 0 ? 'grey' : r.change_pct === null ? 'green' : r.change_pct >= 0 ? 'green' : r.change_pct > -15 ? 'amber' : 'red';
+          const order = ['red', 'amber', 'green', 'grey'];
+          const rows = [...explore.rows].sort((a, b) => order.indexOf(lightOf(a)) - order.indexOf(lightOf(b)) || b.gmv - a.gmv);
+          const ecur = explore.currency;
+          return (
+            <>
+              <div className="kpis">
+                <div className="kpi"><div className="v">{fmtMoney(explore.totals.gmv, ecur)}</div><div className="k">GMV {explore.from} to {explore.to}</div><div className="d">{explore.days} day{explore.days === 1 ? '' : 's'}</div></div>
+                <div className="kpi"><div className="v">{fmtMoney(explore.totals.prev_gmv, ecur)}</div><div className="k">the {explore.days} days before</div><div className="d">{explore.prev_from} to {explore.prev_to}</div></div>
+                <div className="kpi"><div className="v"><UpDown value={explore.totals.change_pct} /></div><div className="k">change</div></div>
+                <div className="kpi"><div className="v">{explore.totals.units.toLocaleString()}</div><div className="k">units</div><div className="d">{explore.last_synced ? `synced ${fmtRelative(explore.last_synced)}` : 'never synced'}</div></div>
+              </div>
+              <DailyBars daily={explore.totals.daily} currency={ecur} />
+              <GroupsHead items={rows.length} lights={rows.map(lightOf)} open={rows.every((r) => groups.isOpen(r.account_id ?? r.account_name))} onAll={(o) => groups.setAll(rows.map((r) => r.account_id ?? r.account_name), o)} />
+              <div className="areas">
+                {rows.map((r) => (
+                  <AccountGroup key={r.account_id ?? r.account_name} light={lightOf(r)} name={r.account_name} sub={r.shops.map((x) => marketOf(x.shop_name, '?')).join(' ')} open={groups.isOpen(r.account_id ?? r.account_name)} onToggle={() => groups.toggle(r.account_id ?? r.account_name)}
+                    summary={r.gmv === 0 && r.prev_gmv === 0 ? 'No GMV rows in this range' : r.change_pct === null ? 'No GMV in the period before to compare with' : `${r.change_pct >= 0 ? 'Up' : 'Down'} ${Math.abs(Math.round(r.change_pct))}% on the ${explore.days} days before`}
+                    nums={<><span className="num"><span className="k">GMV</span><span className="v">{fmtMoney(r.gmv, ecur)}</span></span><span className="num"><span className="k">Before</span><span className="v">{fmtMoney(r.prev_gmv, ecur)}</span></span><span className="num"><span className="k">Affiliate</span><span className="v">{fmtMoney(r.affiliate_gmv, ecur)}</span></span><span className="num"><span className="k">Units</span><span className="v">{r.units.toLocaleString()}</span></span></>}
+                    right={<>{r.shops.some((x) => x.source === 'cruva') && <span className="badge accent">via Cruva</span>}<UpDown value={r.change_pct} /></>}>
+                    <div className="inline-form" style={{ marginBottom: 8 }}><Spark points={r.daily} /></div>
+                    <div className="grid-wrap"><table><thead><tr><th>Country · shop</th><th>Source</th><th className="num">GMV ({ecur})</th><th className="num">Before</th><th className="num">Change</th><th className="num">Units</th></tr></thead><tbody>
+                      {r.shops.map((x) => <tr key={x.shop_id}><td><span className="badge muted">{marketOf(x.shop_name, '–')}</span> {x.shop_name}</td><td><span className={`badge ${x.source === 'cruva' ? 'accent' : 'muted'}`}>{x.source === 'cruva' ? 'via Cruva' : 'Windsor'}</span></td><td className="num">{fmtMoney(x.gmv, ecur)}</td><td className="num sub">{fmtMoney(x.prev_gmv, ecur)}</td><td className="num"><UpDown value={x.prev_gmv > 0 ? Math.round(((x.gmv - x.prev_gmv) / x.prev_gmv) * 100) : null} /></td><td className="num">{x.units.toLocaleString()}</td></tr>)}
+                    </tbody></table></div>
+                  </AccountGroup>
+                ))}
+                {rows.length === 0 && <div className="empty">No GMV rows in this range. Run the Cruva pull or the Windsor sync.</div>}
+              </div>
+            </>
+          );
+        })()
+      )}
+      {mode === 'month' && (data === null ? <p>Loading…</p> : (
         <>
           <div className="kpis">
             <div className="kpi"><div className="v">{fmtMoney(data.totals.gmv, cur)}</div><div className="k">{data.month_closed ? 'GMV for the month' : 'GMV to date (excl. today)'}</div><div className="d">{data.days_elapsed}/{data.days_in_month} days</div></div>
@@ -266,60 +310,51 @@ export default function GmvPage() {
               )}
             </div>
           </div>
-          <table>
-            <thead><tr><th>Account</th><th>AM</th><th className="hide-sm">Trend</th><th className="num hide-sm">Last month</th><th className="num hide-sm">Needs</th><th className="num">Target</th><th className="num">GMV</th><th className="num" title="Month to date against the same days last month">vs same days</th><th className="num" title="Projected month end against last month, or actual once the month is closed">Growth</th><th className="num hide-sm">Proj.</th><th>Bonus</th></tr></thead>
-            <tbody>
-              {data.accounts.map((a) => (
-                <>
-                  <tr key={a.account.id} className="clickable" onClick={() => setOpen(open === a.account.id ? null : a.account.id)}>
-                    <td><b>{a.account.name}</b><div className="sub">{a.shops.length} shop{a.shops.length === 1 ? '' : 's'}{a.shops.some((s) => s.shop.currency !== cur) ? ` · ${[...new Set(a.shops.map((s) => s.shop.currency))].join(', ')}` : ''}</div></td>
-                    <td>{a.account.am_name ?? <span className="sub">–</span>}</td>
-                    <td className="hide-sm"><Spark points={a.daily} /></td>
-                    <td className="num hide-sm sub">{fmtMoney(a.prev_gmv, cur)}</td>
-                    <td className="num hide-sm sub">{a.required_growth_pct === null ? '–' : `+${Math.round(a.required_growth_pct)}%`}</td>
-                    <td className="num" onClick={(e) => editing && e.stopPropagation()}>
-                      {editing ? (
-                        <input type="text" inputMode="decimal" style={{ width: 110, textAlign: 'right' }} value={targets[a.account.id] ?? ''} onChange={(e) => setTargets({ ...targets, [a.account.id]: e.target.value })} placeholder={a.target_source === 'rule' && a.target !== null ? String(a.target) : 'rule'} />
-                      ) : (
-                        <>{fmtMoney(a.target, cur)}{a.target_source === 'manual' && <div className="sub">manual</div>}</>
-                      )}
-                    </td>
-                    <td className="num">{fmtMoney(a.gmv, cur)}</td>
-                    <td className="num"><UpDown value={a.pace_pct} />{a.prev_same_days !== null && <div className="sub" title="Same days last month">{fmtMoney(a.prev_same_days, cur)}</div>}</td>
-                    <td className="num"><Growth value={a.growth_pct} needed={a.required_growth_pct} /></td>
-                    <td className="num hide-sm">{fmtMoney(a.projected, cur)}</td>
-                    <td><Bonus status={a.bonus} /></td>
-                  </tr>
-                  {open === a.account.id && (
-                    <tr key={`${a.account.id}-shops`} className="expand">
-                      <td colSpan={11}>
-                        <table>
-                          <thead><tr><th>Shop</th><th className="mono">Source id</th><th>Currency</th><th className="num">GMV (local)</th><th className="num">GMV ({cur})</th><th className="num">Last month ({cur})</th><th className="num">Affiliate (local)</th><th className="num">Units</th><th>Last synced</th></tr></thead>
-                          <tbody>
-                            {a.shops.map((s) => (
-                              <tr key={s.shop.id}>
-                                <td>{s.shop.shop_name} <span className={`badge ${s.shop.source === 'cruva' ? 'accent' : 'muted'}`} title={s.shop.source === 'cruva' ? 'Daily GMV from the Cruva pull (TikTok app not connected for this shop)' : 'Daily GMV from Windsor.ai (TikTok Shop orders)'}>{s.shop.source === 'cruva' ? 'via Cruva' : 'Windsor'}</span></td>
-                                <td className="mono sub">{s.shop.shop_id}</td>
-                                <td>{s.shop.currency}</td>
-                                <td className="num">{fmtMoney(s.gmv, s.shop.currency)}</td>
-                                <td className="num">{fmtMoney(s.gmv_report, cur)}</td>
-                                <td className="num sub">{fmtMoney(s.prev_gmv, cur)}</td>
-                                <td className="num sub">{fmtMoney(s.affiliate_gmv, s.shop.currency)}</td>
-                                <td className="num">{s.units.toLocaleString()}</td>
-                                <td className="sub">{s.last_synced ? fmtDate(s.last_synced) : 'no data'}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </td>
-                    </tr>
-                  )}
-                </>
-              ))}
-            </tbody>
-          </table>
+          {(() => {
+            const lightOf = (a: GmvAccountRow): GroupLight => a.bonus === 'eligible' || a.bonus === 'on_track' ? 'green' : a.bonus === 'behind' ? ((a.projected_attainment ?? 1) < 0.8 ? 'red' : 'amber') : 'grey';
+            const order = ['red', 'amber', 'green', 'grey'];
+            const rows = [...data.accounts].sort((a, b) => order.indexOf(lightOf(a)) - order.indexOf(lightOf(b)) || b.gmv - a.gmv);
+            return (
+              <>
+                <GroupsHead items={rows.length} lights={rows.map(lightOf)} open={rows.every((a) => groups.isOpen(a.account.id))} onAll={(o) => groups.setAll(rows.map((a) => a.account.id), o)} />
+                <div className="areas">
+                  {rows.map((a) => (
+                    <AccountGroup key={a.account.id} light={lightOf(a)} name={a.account.name} sub={`${a.account.am_name ?? ''}${a.shops.length ? ` · ${a.shops.map((s) => marketOf(s.shop.shop_name, '?')).join(' ')}` : ' · no shop linked'}`} open={groups.isOpen(a.account.id)} onToggle={() => groups.toggle(a.account.id)}
+                      summary={a.shops.length === 0 ? 'No Windsor or Cruva shop linked to this account: link one under Cruva › More › Link shops or Connections › Windsor' : a.bonus === 'no_data' ? 'No GMV rows yet for this month' : a.bonus === 'no_base' ? 'No GMV last month, so no growth base for the bonus' : `${a.bonus === 'eligible' ? 'Bonus eligible' : a.bonus === 'on_track' ? 'On track for the bonus' : 'Behind the bonus target'}${a.required_growth_pct !== null ? ` · needs +${Math.round(a.required_growth_pct)}% on last month` : ''}`}
+                      nums={<><span className="num"><span className="k">GMV</span><span className="v">{fmtMoney(a.gmv, cur)}</span></span><span className="num"><span className="k">Target</span><span className="v">{fmtMoney(a.target, cur)}</span></span><span className="num"><span className="k">Projected</span><span className="v">{fmtMoney(a.projected, cur)}</span></span><span className="num"><span className="k">Growth</span><span className="v"><Growth value={a.growth_pct} needed={a.required_growth_pct} /></span></span></>}
+                      right={<>{a.shops.some((s) => s.shop.source === 'cruva') && <span className="badge accent">via Cruva</span>}<Bonus status={a.bonus} /></>}>
+                      <div className="inline-form" style={{ marginBottom: 8 }}>
+                        <span className="sub">Last month {fmtMoney(a.prev_gmv, cur)}{a.prev_same_days !== null ? ` · same days last month ${fmtMoney(a.prev_same_days, cur)}` : ''} · month to date vs same days <UpDown value={a.pace_pct} /></span>
+                        {editing && <label className="field" style={{ minWidth: 200 }}><span className="lbl">Target override ({cur})</span><input type="text" inputMode="decimal" value={targets[a.account.id] ?? ''} onChange={(e) => setTargets({ ...targets, [a.account.id]: e.target.value })} placeholder={a.target_source === 'rule' && a.target !== null ? String(a.target) : 'rule'} /></label>}
+                        {!editing && a.target_source === 'manual' && <span className="badge muted">manual target</span>}
+                        <Spark points={a.daily} />
+                      </div>
+                      <div className="grid-wrap"><table>
+                        <thead><tr><th>Country · shop</th><th>Source</th><th>Currency</th><th className="num">GMV (local)</th><th className="num">GMV ({cur})</th><th className="num">Last month ({cur})</th><th className="num">Affiliate (local)</th><th className="num">Units</th><th>Last synced</th></tr></thead>
+                        <tbody>
+                          {a.shops.map((s) => (
+                            <tr key={s.shop.id}>
+                              <td><span className="badge muted">{marketOf(s.shop.shop_name, '–')}</span> {s.shop.shop_name}</td>
+                              <td><span className={`badge ${s.shop.source === 'cruva' ? 'accent' : 'muted'}`} title={s.shop.source === 'cruva' ? 'Daily GMV from the Cruva pull' : 'Daily GMV from Windsor.ai (TikTok Shop orders)'}>{s.shop.source === 'cruva' ? 'via Cruva' : 'Windsor'}</span></td>
+                              <td>{s.shop.currency}</td>
+                              <td className="num">{fmtMoney(s.gmv, s.shop.currency)}</td>
+                              <td className="num">{fmtMoney(s.gmv_report, cur)}</td>
+                              <td className="num sub">{fmtMoney(s.prev_gmv, cur)}</td>
+                              <td className="num sub">{fmtMoney(s.affiliate_gmv, s.shop.currency)}</td>
+                              <td className="num">{s.units.toLocaleString()}</td>
+                              <td className="sub">{s.last_synced ? fmtDate(s.last_synced) : 'no data'}</td>
+                            </tr>
+                          ))}
+                          {a.shops.length === 0 && <tr><td colSpan={9} className="sub">No shop linked.</td></tr>}
+                        </tbody>
+                      </table></div>
+                    </AccountGroup>
+                  ))}
+                </div>
+              </>
+            );
+          })()}
 
-          <Explorer accounts={data.accounts.map((a) => a.account)} currency={cur} />
 
           <div className="page-head" style={{ marginTop: 28 }}>
             <div>
@@ -420,7 +455,7 @@ export default function GmvPage() {
             </tbody>
           </table>
         </>
-      )}
+      ))}
     </>
   );
 }
@@ -440,79 +475,6 @@ function presetRange(p: (typeof PRESETS)[number]): { from: string; to: string } 
   return { from: iso(start), to: iso(new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0))) };
 }
 
-/** Date explorer: any range, per account and shop, against the same-length period before it. */
-function Explorer({ accounts, currency }: { accounts: Account[]; currency: string }) {
-  const [range, setRange] = useState(() => presetRange(PRESETS[2]));
-  const [preset, setPreset] = useState('30');
-  const [accountId, setAccountId] = useState('');
-  const [data, setData] = useState<GmvExplore | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [open, setOpen] = useState<number | null>(null);
-  useEffect(() => {
-    if (!range.from || !range.to || range.from > range.to) return;
-    api.gmvExplore(range.from, range.to, accountId ? Number(accountId) : null).then((d) => { setData(d); setError(null); }).catch((e) => setError((e as Error).message));
-  }, [range, accountId]);
-  const pick = (key: string) => { setPreset(key); const p = PRESETS.find((x) => x.key === key); if (p) setRange(presetRange(p)); };
-  const cur = data?.currency ?? currency;
-  return (
-    <>
-      <div className="page-head" style={{ marginTop: 28 }}>
-        <div>
-          <h2 style={{ margin: 0 }}>Explore by date</h2>
-          <p className="hint" style={{ margin: 0 }}>Any range, per account and shop, against the same number of days just before it. Daily rows come from the Windsor and Cruva syncs (45 days back every morning, so last month is always complete).</p>
-        </div>
-      </div>
-      <div className="toolbar">
-        <select value={preset} onChange={(e) => pick(e.target.value)}>{PRESETS.map((p) => <option key={p.key} value={p.key}>{p.label}</option>)}<option value="custom">Custom</option></select>
-        <input type="date" value={range.from} max={range.to} onChange={(e) => { setPreset('custom'); setRange({ ...range, from: e.target.value }); }} />
-        <span className="sub">to</span>
-        <input type="date" value={range.to} min={range.from} onChange={(e) => { setPreset('custom'); setRange({ ...range, to: e.target.value }); }} />
-        <select value={accountId} onChange={(e) => setAccountId(e.target.value)}><option value="">All accounts</option>{accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
-        {data && <span className="sub">{data.days} day{data.days === 1 ? '' : 's'} vs {data.prev_from} to {data.prev_to}{data.last_synced ? ` · synced ${fmtRelative(data.last_synced)}` : ''}</span>}
-      </div>
-      {error && <div className="banner crit">{error}</div>}
-      {data && (
-        <>
-          <div className="kpis">
-            <div className="kpi"><div className="v">{fmtMoney(data.totals.gmv, cur)}</div><div className="k">GMV {data.from} to {data.to}</div></div>
-            <div className="kpi"><div className="v">{fmtMoney(data.totals.prev_gmv, cur)}</div><div className="k">the {data.days} days before</div><div className="d">{data.prev_from} to {data.prev_to}</div></div>
-            <div className="kpi"><div className="v"><UpDown value={data.totals.change_pct} /></div><div className="k">change</div></div>
-            <div className="kpi"><div className="v">{data.totals.units.toLocaleString()}</div><div className="k">units</div><div className="d">{data.days ? fmtMoney(data.totals.gmv / data.days, cur) : ''} per day</div></div>
-          </div>
-          <DailyBars daily={data.totals.daily} currency={cur} />
-          <table>
-            <thead><tr><th>Account</th><th className="hide-sm">Daily</th><th className="num">GMV</th><th className="num hide-sm">Affiliate</th><th className="num hide-sm">Units</th><th className="num">Before</th><th className="num">Change</th></tr></thead>
-            <tbody>
-              {data.rows.map((r) => (
-                <>
-                  <tr key={r.account_id ?? r.account_name} className="clickable" onClick={() => setOpen(open === r.account_id ? null : r.account_id)}>
-                    <td><b>{r.account_name}</b><div className="sub">{r.shops.length} shop{r.shops.length === 1 ? '' : 's'}</div></td>
-                    <td className="hide-sm"><Spark points={r.daily} /></td>
-                    <td className="num">{fmtMoney(r.gmv, cur)}</td>
-                    <td className="num hide-sm sub">{fmtMoney(r.affiliate_gmv, cur)}</td>
-                    <td className="num hide-sm">{r.units.toLocaleString()}</td>
-                    <td className="num sub">{fmtMoney(r.prev_gmv, cur)}</td>
-                    <td className="num"><UpDown value={r.change_pct} /></td>
-                  </tr>
-                  {open === r.account_id && (
-                    <tr key={`${r.account_id}-shops`} className="expand"><td colSpan={7}>
-                      <table><thead><tr><th>Shop</th><th>Source</th><th className="num">GMV ({cur})</th><th className="num">Before</th><th className="num">Change</th><th className="num">Units</th></tr></thead><tbody>
-                        {r.shops.map((s) => <tr key={s.shop_id}><td>{s.shop_name}</td><td><span className={`badge ${s.source === 'cruva' ? 'accent' : 'muted'}`}>{s.source === 'cruva' ? 'via Cruva' : 'Windsor'}</span></td><td className="num">{fmtMoney(s.gmv, cur)}</td><td className="num sub">{fmtMoney(s.prev_gmv, cur)}</td><td className="num"><UpDown value={s.prev_gmv > 0 ? Math.round(((s.gmv - s.prev_gmv) / s.prev_gmv) * 100) : null} /></td><td className="num">{s.units.toLocaleString()}</td></tr>)}
-                      </tbody></table>
-                    </td></tr>
-                  )}
-                </>
-              ))}
-              {data.rows.length === 0 && <tr><td colSpan={7} className="sub">No GMV rows in this range. Sync GMV (Windsor or Cruva) or import rows.</td></tr>}
-            </tbody>
-          </table>
-        </>
-      )}
-    </>
-  );
-}
-
-/** Daily GMV for the range with the period before as a faint line behind it. */
 function DailyBars({ daily, currency }: { daily: { date: string; gmv: number; prev_gmv: number }[]; currency: string }) {
   const [hover, setHover] = useState<number | null>(null);
   if (daily.length < 2) return null;

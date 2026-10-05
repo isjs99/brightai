@@ -392,7 +392,9 @@ export function summary(q: Queries, scopeLive: (scope: 'customer_service' | 'aff
     for (const channel of ['affiliate', 'cs'] as InboxChannel[]) {
       const policy = getPolicy(q, a.id, channel);
       const tz = tzFor(q, (a.markets ?? '').split(/[,\s]+/)[0] || null);
-      rows.push({ account_id: a.id, account_name: a.name, am_name: a.am_name, channel, mode: policy.mode, waiting: waitingFor(q, a.id, channel, policy, now).length, auto_today: q.countReplyEvents(a.id, channel, 'auto_sent', startOfDay(tz, now)), cap: policy.daily_cap, ready: channelReadiness(q, a.id, channel, scopeLive).ready });
+      const waiting = waitingFor(q, a.id, channel, policy, now);
+      const readiness = channelReadiness(q, a.id, channel, scopeLive);
+      rows.push({ account_id: a.id, account_name: a.name, am_name: a.am_name, channel, mode: policy.mode, waiting: waiting.length, escalated: waiting.filter((w) => w.event?.decision === 'escalated' || w.event?.decision === 'error').length, auto_today: q.countReplyEvents(a.id, channel, 'auto_sent', startOfDay(tz, now)), cap: policy.daily_cap, ready: readiness.ready, note: readiness.note, shops: readiness.shops });
     }
   }
   return rows;

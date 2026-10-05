@@ -89,8 +89,8 @@ export default function MonitorPage() {
   const live = data.scopes.filter((s) => s.state === 'ok').length;
   const offered = data.scopes.filter((s) => s.state !== 'unavailable').length;
   const rank = (a: MonitorAccountRow) => a.crit * 100 + a.warn * 10 + a.info + (a.risk === 'red' ? 50 : a.risk === 'amber' ? 20 : 0);
-  const connectedAccounts = data.accounts.filter((a) => a.shops > 0).sort((a, b) => rank(b) - rank(a) || a.name.localeCompare(b.name));
-  const unconnected = data.accounts.filter((a) => a.shops === 0);
+  const connectedAccounts = data.accounts.filter((a) => a.shops > 0 || a.cruva_shops > 0).sort((a, b) => rank(b) - rank(a) || a.name.localeCompare(b.name));
+  const unconnected = data.accounts.filter((a) => a.shops === 0 && a.cruva_shops === 0);
   const selected = selectedParam !== null && data.accounts.some((a) => a.id === selectedParam) ? selectedParam : connectedAccounts[0]?.id ?? null;
   const pullLabel = h.pulling_tts ? 'Pulling TikTok…' : h.tts_last_pull_at ? `Pulled ${fmtRelative(h.tts_last_pull_at)}` : data.tts_configured ? (data.tts_shops ? 'No pull yet' : 'No shop authorised') : 'TikTok app not configured';
   const scoped = { ...data, accounts: connectedAccounts };
@@ -131,13 +131,13 @@ export default function MonitorPage() {
 
       <div className="account-pick" style={{ marginBottom: 14 }}>
         <select value={selected ?? ''} onChange={(e) => select(e.target.value ? Number(e.target.value) : null)}>
-          {connectedAccounts.length === 0 && <option value="">No account has a TikTok shop connected yet</option>}
+          {connectedAccounts.length === 0 && <option value="">No account has a TikTok shop or a Cruva shop connected yet</option>}
           {connectedAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}{a.markets ? ` · ${a.markets}` : ''}{a.crit ? ` · ${a.crit} critical` : a.warn ? ` · ${a.warn} warning${a.warn === 1 ? '' : 's'}` : ' · clean'}</option>)}
         </select>
         {connectedAccounts.length > 1 && <span className="actions">{connectedAccounts.slice(0, 8).map((a) => <button key={a.id} className={`small ${a.id === selected ? 'primary' : ''}`} onClick={() => select(a.id)}>{a.name}{a.crit ? <span className="badge crit" style={{ marginLeft: 6 }}>{a.crit}</span> : a.warn ? <span className="badge warn" style={{ marginLeft: 6 }}>{a.warn}</span> : null}</button>)}</span>}
-        {unconnected.length > 0 && <span className="sub">{unconnected.length} account{unconnected.length === 1 ? ' has' : 's have'} no TikTok shop yet · <Link to="/promotions">connect</Link></span>}
+        {unconnected.length > 0 && <span className="sub">{unconnected.length} account{unconnected.length === 1 ? ' has' : 's have'} neither a TikTok shop nor a Cruva shop yet · <Link to="/promotions?connection=1">connect TikTok</Link> · <Link to="/cruva">link Cruva</Link></span>}
       </div>
-      {selected === null ? <div className="empty">Authorise a shop under <Link to="/promotions?connection=1">Promotions › Connection</Link> and link it to its account; it then shows up here.</div>
+      {selected === null ? <div className="empty">Authorise a shop under <Link to="/promotions?connection=1">Promotions › Connection</Link>, or link a Cruva shop under <Link to="/cruva">Cruva › More › Link shops</Link>; the account then shows up here.</div>
         : selectedParam === null ? <AllAccounts accounts={connectedAccounts} data={data} isAdmin={isAdmin} onError={setError} onNotice={setNotice} reload={load} onSelect={select} />
         : <AccountDetail key={selected} id={selected} data={data} isAdmin={isAdmin} onError={setError} onNotice={setNotice} reload={load} dialog={dialog} setDialog={setDialog} />}
 
@@ -181,13 +181,13 @@ type DetailProps = { data: MonitorData; isAdmin: boolean; onError: (e: string | 
 /** Every connected brand as a collapsible block, worst first, with expand / collapse all. */
 function AllAccounts({ accounts, onSelect, ...rest }: DetailProps & { accounts: MonitorAccountRow[]; onSelect: (id: number) => void }) {
   const [open, setOpen] = useState<Record<number, boolean>>({});
-  const lightOf = (a: MonitorAccountRow): AreaLight => a.crit ? 'red' : a.warn ? 'amber' : a.shops ? 'green' : 'grey';
+  const lightOf = (a: MonitorAccountRow): AreaLight => a.crit ? 'red' : a.warn ? 'amber' : a.source !== 'none' ? 'green' : 'grey';
   const count = (l: AreaLight) => accounts.filter((a) => lightOf(a) === l).length;
   const allOpen = accounts.every((a) => open[a.id]);
   return (
     <>
       <div className="page-head" style={{ marginBottom: 8 }}>
-        <span className="sub">{accounts.length} connected accounts · <span className="light crit" /> {count('red')} · <span className="light warn" /> {count('amber')} · <span className="light good" /> {count('green')}</span>
+        <span className="sub">{accounts.length} connected accounts · <span className="light crit" /> {count('red')} · <span className="light warn" /> {count('amber')} · <span className="light good" /> {count('green')} · {accounts.filter((a) => a.source === 'tts').length} on the TikTok app · {accounts.filter((a) => a.source === 'cruva').length} via Cruva only</span>
         <div className="actions">
           <button className="small" onClick={() => setOpen(allOpen ? {} : Object.fromEntries(accounts.map((a) => [a.id, true])))}>{allOpen ? 'Collapse all' : 'Expand all'}</button>
         </div>
@@ -203,7 +203,7 @@ function BrandBlock({ a, light, open, onToggle, onSelect, data, ...rest }: Detai
   const [dialog, setDialog] = useState<Dialog>(null);
   const order = { crit: 0, warn: 1, info: 2 } as const;
   const worst = data.flags.filter((f) => f.account_id === a.id && !f.acknowledged_at).sort((x, y) => order[x.severity] - order[y.severity])[0];
-  const summary = worst ? `${data.rules.find((r) => r.code === worst.code)?.title ?? worst.code}: ${worst.message.replace(/^[^:]+:\s*/, '')}` : a.shops ? 'All clear' : 'No TikTok shop connected';
+  const summary = worst ? `${data.rules.find((r) => r.code === worst.code)?.title ?? worst.code}: ${worst.message.replace(/^[^:]+:\s*/, '')}` : a.source === 'tts' ? 'All clear' : a.source === 'cruva' ? 'All clear on what Cruva can see' : 'Nothing connected';
   return (
     <div className={`area brand ${light}`}>
       <div className="head" onClick={onToggle} role="button" aria-expanded={open}>
@@ -215,6 +215,8 @@ function BrandBlock({ a, light, open, onToggle, onSelect, data, ...rest }: Detai
           {a.gmv_pace !== null && <span className={`num ${a.gmv_pace >= 1 ? 'good' : a.gmv_pace >= 0.85 ? 'warn' : 'crit'}`}><span className="k">GMV pace</span><span className="v">{Math.round(a.gmv_pace * 100)}%</span></span>}
         </span>
         <span className="actions" style={{ alignItems: 'center' }}>
+          {a.source === 'cruva' && <span className="badge accent" title={`Figures from Cruva. Connect the TikTok app to check: ${a.missing_scopes.join(', ')}`}>via Cruva</span>}
+          {a.source === 'tts' && a.missing_scopes.length > 0 && <span className="badge muted" title={`Scopes not live: ${a.missing_scopes.join(', ')}`}>{a.missing_scopes.length} scope{a.missing_scopes.length === 1 ? '' : 's'} missing</span>}
           {a.crit ? <span className="badge crit">{a.crit}</span> : null}{a.warn ? <span className="badge warn">{a.warn}</span> : null}
           <button className="small" onClick={(e) => { e.stopPropagation(); onSelect(); }} title="Open this account on its own">Open ▸</button>
           <span className="sub">{open ? '▾' : '▸'}</span>
