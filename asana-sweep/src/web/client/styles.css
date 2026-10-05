@@ -386,9 +386,20 @@ tr.dim td, .card.dim { opacity: .55; }
 .hub-tabs a.tab.active, .tab.active { background: #0f0f10; color: #fff; border-color: #0f0f10; }
 :root[data-theme="dark"] .hub-tabs a.tab.active, :root[data-theme="dark"] .tab.active { background: #fff; color: #0f0f10; border-color: #fff; }
 /* Traffic lights on the account overview. */
-.chart-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 4px; }
-.chart-head h4 { margin: 0; }
-.chart-head .headline { font-size: 18px; font-weight: 800; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+/* Metric cards in the Seller Center style: name, big value, change pill, note, then the curve. */
+.chart { padding: 14px 16px 10px; }
+.metric-head { margin-bottom: 8px; }
+.metric-title { font-size: 12.5px; font-weight: 600; color: var(--muted); }
+.metric-value { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-top: 2px; }
+.metric-value .v { font-size: 24px; font-weight: 800; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.metric-note { font-size: 12px; margin-top: 2px; }
+.delta { font-size: 12px; font-weight: 700; padding: 2px 7px; border-radius: 999px; font-variant-numeric: tabular-nums; }
+.delta.up { background: var(--good-bg); color: var(--good-ink); } .delta.down { background: var(--crit-bg); color: var(--crit-ink); } .delta.flat { background: var(--surface-2); color: var(--muted); }
+.chart .legend { margin: 6px 0 0; font-size: 11.5px; }
+.chart .legend i.dashed { width: 14px; height: 0; border-top: 2px dashed var(--muted); border-radius: 0; vertical-align: 2px; }
+.chart .tip i.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; }
+.chart .tip i.dot.cur { background: var(--s1); } .chart .tip i.dot.prev { background: transparent; border: 1.5px dashed var(--muted); }
+.chart-foot { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-2); }
 .charts.four { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
 .areas { display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px; }
 .area { border: 1px solid var(--border); border-radius: var(--r-card); background: var(--surface); }

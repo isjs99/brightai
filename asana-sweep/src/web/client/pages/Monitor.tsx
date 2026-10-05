@@ -138,7 +138,7 @@ export default function MonitorPage() {
         {unconnected.length > 0 && <span className="sub">{unconnected.length} account{unconnected.length === 1 ? ' has' : 's have'} no TikTok shop yet · <Link to="/promotions">connect</Link></span>}
       </div>
       {selected === null ? <div className="empty">Authorise a shop under <Link to="/promotions?connection=1">Promotions › Connection</Link> and link it to its account; it then shows up here.</div>
-        : selectedParam === null && connectedAccounts.length > 1 ? <AllAccounts accounts={connectedAccounts} data={data} isAdmin={isAdmin} onError={setError} onNotice={setNotice} reload={load} onSelect={select} />
+        : selectedParam === null ? <AllAccounts accounts={connectedAccounts} data={data} isAdmin={isAdmin} onError={setError} onNotice={setNotice} reload={load} onSelect={select} />
         : <AccountDetail key={selected} id={selected} data={data} isAdmin={isAdmin} onError={setError} onNotice={setNotice} reload={load} dialog={dialog} setDialog={setDialog} />}
 
       {dialog === 'flags' && <Modal title="All open flags" wide onClose={() => setDialog(null)}><Flags data={scoped} isAdmin={isAdmin} run={run} onSelect={(id) => { setDialog(null); select(id); }} /></Modal>}
@@ -300,9 +300,9 @@ function AccountDetail({ id, data, isAdmin, onError, onNotice, reload, dialog, s
   const conv = (arr: AccountSeriesPoint[]) => { const v = sum(arr, 'visitors'); const w = arr.reduce((n, p) => n + (p.conversion ?? 0) * Math.max(1, p.visitors), 0); return v > 0 ? w / v : null; };
   const vs = (key: 'gmv' | 'orders' | 'visitors', avg = false) => { const a = avg ? (points.length ? sum(points, key) / points.length : null) : sum(points, key); const b = prevPoints.length ? (avg ? sum(prevPoints, key) / prevPoints.length : sum(prevPoints, key)) : null; return { a, b }; };
   const rangeLabel = preset === 'custom' ? `${shortDay(range.from)} – ${shortDay(range.to)}` : PRESETS.find((p) => p.key === preset)!.label.toLowerCase();
-  const headline = (key: 'gmv' | 'orders' | 'visitors', avg = false) => { const { a, b } = vs(key, avg); return a !== null && points.length ? <>{fmtValue(a, key === 'gmv' ? 'money' : 'count', cur)} {arrow(a, b, 'higher')}</> : <span className="sub">no data</span>; };
+  const headline = (key: 'gmv' | 'orders' | 'visitors', avg = false): { value: ReactNode; change: number | null } => { const { a, b } = vs(key, avg); return { value: a !== null && points.length ? fmtValue(a, key === 'gmv' ? 'money' : 'count', cur) : <span className="sub">no data</span>, change: a !== null && b !== null && b > 0 ? ((a - b) / b) * 100 : null }; };
   const conversion = conv(points);
-  const isOpen = (a: AccountArea) => (open ? Boolean(open[a.key]) : a.light === 'red');
+  const isOpen = (a: AccountArea) => Boolean(open?.[a.key]);
   const needsAffiliate = o.shops.some((sh) => sh.pull_error && /affiliate app/i.test(sh.pull_error));
   const needsReauth = o.shops.some((sh) => sh.pull_error && /no permission|scope|unauthori|403/i.test(sh.pull_error.replace(/affiliate_seller:[^;]*/i, '')));
   const gmvMtd = k('gmv_mtd');
@@ -348,16 +348,16 @@ function AccountDetail({ id, data, isAdmin, onError, onNotice, reload, dialog, s
       </div>
       {points.length ? (
         <div className="charts four">
-          <LineChart title="GMV per day" headline={<>{headline('gmv')}<span className="sub"> {rangeLabel}</span></>} points={points.map((d) => ({ date: d.date, value: d.gmv }))} kind="money" currency={cur} height={120} footer={gmvMtd && gmvMtd.value !== null ? <div className="sub">Month to date {fmtValue(gmvMtd.value, 'money', cur)}{gmvMtd.target !== null ? <> · target so far {fmtValue(gmvMtd.target, 'money', cur)} · {gmvMtd.state === 'good' ? 'on track' : 'behind'}</> : ' · no monthly target set'}<PaceBar value={gmvMtd.value} target={gmvMtd.target} direction="higher" state={gmvMtd.state} /></div> : null} />
-          <StackedBars title="GMV by channel" headline={<span className="sub">{rangeLabel}</span>} days={points.map((d) => ({ date: d.date, values: [d.video_gmv, d.live_gmv, d.card_gmv] }))} series={[{ label: 'Video', color: 'var(--s1)' }, { label: 'LIVE', color: 'var(--s2)' }, { label: 'Product card', color: 'var(--s3)' }]} currency={cur} height={120} />
-          <LineChart title="Orders per day" headline={<>{headline('orders')}<span className="sub"> {rangeLabel}</span></>} points={points.map((d) => ({ date: d.date, value: d.orders }))} kind="count" height={120} />
-          <LineChart title="Visitors per day" headline={<>{headline('visitors', true)}<span className="sub"> a day · conversion {conversion !== null ? fmtValue(conversion, 'pct') : '–'}</span></>} points={points.map((d) => ({ date: d.date, value: d.visitors }))} kind="count" height={120} />
+          <LineChart title="GMV" value={headline('gmv').value} change={headline('gmv').change} note={rangeLabel} points={points.map((d) => ({ date: d.date, value: d.gmv }))} previous={prevPoints.map((d) => ({ date: d.date, value: d.gmv }))} kind="money" currency={cur} height={120} footer={gmvMtd && gmvMtd.value !== null ? <div className="sub chart-foot">Month to date {fmtValue(gmvMtd.value, 'money', cur)}{gmvMtd.target !== null ? <> · target so far {fmtValue(gmvMtd.target, 'money', cur)} · {gmvMtd.state === 'good' ? 'on track' : 'behind'}</> : ' · no monthly target set'}<PaceBar value={gmvMtd.value} target={gmvMtd.target} direction="higher" state={gmvMtd.state} /></div> : null} />
+          <StackedBars title="GMV by channel" value={fmtValue(points.reduce((n, d) => n + d.video_gmv + d.live_gmv + d.card_gmv, 0), 'money', cur)} note={rangeLabel} days={points.map((d) => ({ date: d.date, values: [d.video_gmv, d.live_gmv, d.card_gmv] }))} series={[{ label: 'Video', color: 'var(--s1)' }, { label: 'LIVE', color: 'var(--s2)' }, { label: 'Product card', color: 'var(--s3)' }]} currency={cur} height={120} />
+          <LineChart title="Orders" value={headline('orders').value} change={headline('orders').change} note={rangeLabel} points={points.map((d) => ({ date: d.date, value: d.orders }))} previous={prevPoints.map((d) => ({ date: d.date, value: d.orders }))} kind="count" height={120} />
+          <LineChart title="Visitors a day" value={headline('visitors', true).value} change={headline('visitors', true).change} note={<>{rangeLabel} · conversion {conversion !== null ? fmtValue(conversion, 'pct') : '–'}</>} points={points.map((d) => ({ date: d.date, value: d.visitors }))} previous={prevPoints.map((d) => ({ date: d.date, value: d.visitors }))} kind="count" height={120} />
         </div>
       ) : seriesBusy ? <div className="empty" style={{ marginBottom: 14 }}>Reading the Analytics API…</div>
         : <div className="empty" style={{ marginBottom: 14 }}>{stored ? 'No analytics pulled yet. Press "Pull this account".' : `No analytics for ${shortDay(range.from)} – ${shortDay(range.to)}.${fetched?.errors.length ? ` ${fetched.errors.join(' · ')}` : ''}`}</div>}
 
       <div className="areas">
-        {o.areas.map((a) => <AreaRow key={a.key} area={a} currency={cur} rules={data.rules} open={isOpen(a)} onToggle={() => setOpen({ ...(open ?? Object.fromEntries(o.areas.map((x) => [x.key, x.light === 'red']))), [a.key]: !isOpen(a) })} />)}
+        {o.areas.map((a) => <AreaRow key={a.key} area={a} currency={cur} rules={data.rules} open={isOpen(a)} onToggle={() => setOpen({ ...(open ?? {}), [a.key]: !isOpen(a) })} />)}
       </div>
 
       {o.resolved_14d.length > 0 && (
