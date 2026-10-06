@@ -21,6 +21,8 @@ export interface ApolloPerson {
   seniority?: string | null;
 }
 
+export interface ApolloOrgPerson extends ApolloPerson { departments: string[]; started_at: string | null }
+
 export interface ApolloOrganization {
   id: string;
   name: string;
@@ -212,6 +214,36 @@ export class ApolloClient {
     ].filter((o) => o.id && o.name);
     if (opts.domainHint) return rows[0] ?? null;
     return rows.find((o) => organizationMatches(name, o)) ?? null;
+  }
+
+  /**
+   * Everyone Apollo lists at one organisation (no title or seniority filter), one page of up to 100, with the
+   * department and the start date of the current role when Apollo has them. No credits.
+   */
+  async peopleAtOrganization(opts: { organizationId?: string | null; domain?: string | null; page?: number; perPage?: number }): Promise<{ people: ApolloOrgPerson[]; total: number }> {
+    const body: Record<string, unknown> = { per_page: Math.min(opts.perPage ?? 100, 100), page: opts.page ?? 1 };
+    if (opts.organizationId) body.organization_ids = [opts.organizationId];
+    else if (opts.domain) body.q_organization_domains_list = [opts.domain];
+    else throw new Error('Need an organisation id or a domain.');
+    const data = await this.post<{ people?: Record<string, unknown>[]; contacts?: Record<string, unknown>[]; pagination?: { total_entries?: number } }>('/mixed_people/api_search', body);
+    const rows = [...(data.people ?? []), ...(data.contacts ?? [])];
+    const seen = new Set<string>();
+    const people = rows.map(ApolloClient.toOrgPerson).filter((p) => p.name && (seen.has(p.id) ? false : (seen.add(p.id), true)));
+    return { people, total: Number(data.pagination?.total_entries ?? people.length) };
+  }
+
+  static toOrgPerson(p: Record<string, unknown>): ApolloOrgPerson {
+    const base = ApolloClient.toPerson(p);
+    const hist = (p.employment_history as { start_date?: string | null; current?: boolean; organization_name?: string | null }[] | undefined) ?? [];
+    const cur = hist.find((h) => h.current) ?? hist[0];
+    const departments = (p.departments as string[] | undefined) ?? [];
+    return { ...base, departments, started_at: cur?.start_date ? String(cur.start_date).slice(0, 10) : null };
+  }
+
+  /** The open roles Apollo tracks for an organisation. One credit per call. */
+  async jobPostings(organizationId: string): Promise<{ id: string; title: string; url: string | null; location: string | null; posted_at: string | null }[]> {
+    const d = await this.get<{ organization_job_postings?: Record<string, unknown>[] }>(`/organizations/${organizationId}/job_postings`, { per_page: '100' });
+    return (d.organization_job_postings ?? []).map((j) => ({ id: String(j.id), title: String(j.title ?? ''), url: (j.url as string | null) ?? null, location: [j.city, j.country].filter(Boolean).join(', ') || null, posted_at: j.posted_at ? String(j.posted_at).slice(0, 10) : null })).filter((j) => j.title);
   }
 
   /** Decision makers at a company: by organisation id when known, else domain, else name keyword. No credits. */

@@ -19,11 +19,11 @@ export function useOpenGroups(storageKey: string): { isOpen: (id: string | numbe
   };
 }
 
-export function GroupsHead({ items, lights, open, onAll, children }: { items: number; lights: GroupLight[]; open: boolean; onAll: (open: boolean) => void; children?: ReactNode }) {
+export function GroupsHead({ items, lights, open, onAll, children, noun = 'account' }: { items: number; lights: GroupLight[]; open: boolean; onAll: (open: boolean) => void; children?: ReactNode; noun?: string }) {
   const n = (l: GroupLight) => lights.filter((x) => x === l).length;
   return (
     <div className="page-head" style={{ marginBottom: 8 }}>
-      <span className="sub">{items} account{items === 1 ? '' : 's'} · <span className="light crit" /> {n('red')} · <span className="light warn" /> {n('amber')} · <span className="light good" /> {n('green')}{n('grey') ? <> · <span className="light muted" /> {n('grey')}</> : null}</span>
+      <span className="sub">{items} {noun}{items === 1 ? '' : 's'} · <span className="light crit" /> {n('red')} · <span className="light warn" /> {n('amber')} · <span className="light good" /> {n('green')}{n('grey') ? <> · <span className="light muted" /> {n('grey')}</> : null}</span>
       <div className="actions">{children}<button className="small" onClick={() => onAll(!open)}>{open ? 'Collapse all' : 'Expand all'}</button></div>
     </div>
   );

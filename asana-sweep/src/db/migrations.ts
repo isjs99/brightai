@@ -1628,6 +1628,108 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 43,
+    name: 'competitor intelligence: registry, people, jobs, snapshots, clients, signals, digests',
+    up(db) {
+      db.exec(`
+        CREATE TABLE competitors (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          name TEXT NOT NULL,
+          domain TEXT,
+          linkedin_url TEXT,
+          tiktok_handle TEXT,
+          markets TEXT NOT NULL DEFAULT '',
+          apollo_org_id TEXT,
+          watch_urls_json TEXT NOT NULL DEFAULT '[]',
+          ats_json TEXT NOT NULL DEFAULT '[]',
+          notes TEXT,
+          enabled INTEGER NOT NULL DEFAULT 1,
+          last_checked_at TEXT,
+          last_error TEXT,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+        CREATE TABLE competitor_people (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          competitor_id INTEGER NOT NULL REFERENCES competitors(id) ON DELETE CASCADE,
+          apollo_id TEXT NOT NULL,
+          name TEXT NOT NULL,
+          title TEXT,
+          prev_title TEXT,
+          seniority TEXT,
+          department TEXT,
+          location TEXT,
+          linkedin_url TEXT,
+          started_at TEXT,
+          first_seen_at TEXT NOT NULL,
+          last_seen_at TEXT NOT NULL,
+          miss_count INTEGER NOT NULL DEFAULT 0,
+          left_at TEXT,
+          UNIQUE(competitor_id, apollo_id)
+        );
+        CREATE TABLE competitor_jobs (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          competitor_id INTEGER NOT NULL REFERENCES competitors(id) ON DELETE CASCADE,
+          source TEXT NOT NULL,
+          ext_id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          location TEXT,
+          url TEXT,
+          posted_at TEXT,
+          first_seen_at TEXT NOT NULL,
+          last_seen_at TEXT NOT NULL,
+          closed_at TEXT,
+          UNIQUE(competitor_id, source, ext_id)
+        );
+        CREATE TABLE competitor_snapshots (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          competitor_id INTEGER NOT NULL REFERENCES competitors(id) ON DELETE CASCADE,
+          url TEXT NOT NULL,
+          fetched_at TEXT NOT NULL,
+          hash TEXT NOT NULL,
+          text TEXT NOT NULL,
+          error TEXT
+        );
+        CREATE INDEX idx_competitor_snapshots_url ON competitor_snapshots(competitor_id, url, fetched_at);
+        CREATE TABLE competitor_clients (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          competitor_id INTEGER NOT NULL REFERENCES competitors(id) ON DELETE CASCADE,
+          brand TEXT NOT NULL,
+          brand_key TEXT NOT NULL,
+          market TEXT,
+          confidence TEXT NOT NULL DEFAULT 'medium',
+          sources_json TEXT NOT NULL DEFAULT '[]',
+          prospect_id INTEGER REFERENCES bd_prospects(id) ON DELETE SET NULL,
+          lead_id INTEGER REFERENCES leads(id) ON DELETE SET NULL,
+          status TEXT NOT NULL DEFAULT 'active',
+          first_seen_at TEXT NOT NULL,
+          last_seen_at TEXT NOT NULL,
+          UNIQUE(competitor_id, brand_key)
+        );
+        CREATE TABLE competitor_signals (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          competitor_id INTEGER NOT NULL REFERENCES competitors(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL,
+          summary TEXT NOT NULL,
+          evidence TEXT,
+          url TEXT,
+          observed_at TEXT NOT NULL,
+          dedupe_key TEXT NOT NULL UNIQUE,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          seen_at TEXT
+        );
+        CREATE INDEX idx_competitor_signals_time ON competitor_signals(competitor_id, observed_at);
+        CREATE TABLE competitor_digests (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          week TEXT NOT NULL,
+          sent_at TEXT NOT NULL,
+          channel TEXT,
+          text TEXT NOT NULL
+        );
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

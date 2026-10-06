@@ -31,6 +31,7 @@ import { Copilot } from '../copilot/index.js';
 import { ClientTasks } from '../tasks/client-tasks.js';
 import { CruvaInboxWatcher } from '../inbox/cruva-inbox.js';
 import { Targets } from '../onboarding/targets.js';
+import { Competitors } from '../intel/competitors.js';
 import { Onboardings } from '../onboarding/steps.js';
 import { slackBot } from '../notify/slackbot.js';
 import { apollo } from '../bd/apollo.js';
@@ -72,6 +73,7 @@ export class Scheduler {
   readonly clientTasks: ClientTasks;
   readonly cruvaInbox: CruvaInboxWatcher;
   readonly targets: Targets;
+  readonly competitors: Competitors;
   readonly onboardings: Onboardings;
   private targetsTask: ScheduledTask | null = null;
   private reportsTask: ScheduledTask | null = null;
@@ -100,6 +102,7 @@ export class Scheduler {
     this.clientTasks = new ClientTasks(q);
     this.cruvaInbox = new CruvaInboxWatcher(q);
     this.targets = new Targets(q);
+    this.competitors = new Competitors(q);
     this.onboardings = new Onboardings(q);
     this.monitor.afterScan = async () => { await this.incidents.scan(); };
   }
@@ -156,6 +159,8 @@ export class Scheduler {
     // Targets: every open lead re-read daily at 06:40 (after the evidence index and the lead sheet sync).
     this.targetsTask = cron.schedule('40 6 * * *', () => void this.targets.refresh().catch((err) => log.warn(`Targets refresh: ${(err as Error).message}`)), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     setTimeout(() => void this.targets.refresh({ useLlm: false }).catch(() => undefined), 60000);
+    // Competitor intelligence: weekly sweep and digest on the day and time in settings (Monday by default).
+    this.competitors.start();
     // Report queue: scheduled reports and approved autosends, every 10 minutes.
     this.reportsTask = cron.schedule('*/10 * * * *', () => void this.reports.tick().catch((err) => log.warn(`Report queue: ${(err as Error).message}`)));
     // tl;dv: every 30 minutes, draft follow-ups for calls that just ended.
@@ -372,6 +377,7 @@ export class Scheduler {
   }
 
   stop(): void {
+    this.competitors.stop();
     this.leads.stop();
     this.inbox.stop();
     this.stock.stop();

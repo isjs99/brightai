@@ -56,6 +56,7 @@ import { inboxSettings as inboxSettingsOf } from '../inbox/sync.js';
 import type { FbtField, FbtProfile, OnboardingTerms, PitchBrief, PitchDeck, PitchesData, PitchSlide, PitchStat, PnlForecastInputs, PnlInputs, ReportSchedule } from '../sweep/types.js';
 import { researchPitch } from '../pitch/research.js';
 import { buildDeck, deckHtml, DEFAULT_BRIEF, normaliseBrief } from '../pitch/deck.js';
+import type { AtsKind, CompetitorAts } from '../sweep/types.js';
 import { periodBounds } from '../reports/client.js';
 import type { IngestPayload } from '../health/index.js';
 import { THRESHOLD_LABELS } from '../health/rules.js';
@@ -2994,6 +2995,47 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     fastmoss_configured: fastmoss.configured, cruva_configured: cruvaMcp.configured, llm_configured: Boolean(config.anthropicApiKey),
   });
   const pitchParam = (req: Request) => { const p = q.getPitch(idParam(req)); if (!p) throw new HttpError(404, 'Pitch not found'); return p; };
+  // ---- Competitor intelligence (Growth > Competitors) ----
+  const competitors = scheduler.competitors;
+  const competitorParam = (req: Request) => { const c = q.getCompetitor(idParam(req)); if (!c) throw new HttpError(404, 'Competitor not found'); return c; };
+  const competitorPatch = (b: Record<string, unknown>) => {
+    const patch: Parameters<Queries['updateCompetitor']>[1] = {};
+    const dom = (v: unknown) => { const t = optText(v); return t ? t.replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/.*$/, '').toLowerCase() : null; };
+    if (b.name !== undefined) { const v = optText(b.name); if (!v) throw new HttpError(400, 'Name cannot be empty.'); patch.name = v; }
+    if (b.domain !== undefined) patch.domain = dom(b.domain);
+    if (b.linkedin_url !== undefined) patch.linkedin_url = optText(b.linkedin_url);
+    if (b.tiktok_handle !== undefined) patch.tiktok_handle = optText(b.tiktok_handle)?.replace(/^@/, '') ?? null;
+    if (b.markets !== undefined) patch.markets = Array.isArray(b.markets) ? b.markets.map((m) => String(m).toUpperCase().trim()).filter(Boolean).slice(0, 10) : String(b.markets).split(',').map((m) => m.toUpperCase().trim()).filter(Boolean).slice(0, 10);
+    if (b.notes !== undefined) patch.notes = optText(b.notes);
+    if (b.enabled !== undefined) patch.enabled = bool(b.enabled, true);
+    if (b.apollo_org_id !== undefined) patch.apollo_org_id = optText(b.apollo_org_id);
+    if (b.watch_urls !== undefined) patch.watch_urls = (Array.isArray(b.watch_urls) ? b.watch_urls.map(String) : String(b.watch_urls).split(/\r?\n/)).map((u) => u.trim()).filter((u) => /^https?:\/\//i.test(u)).slice(0, 12);
+    if (b.ats !== undefined) {
+      const rows = Array.isArray(b.ats) ? b.ats : String(b.ats).split(/\r?\n/).map((l) => { const [kind, slug] = l.split(':').map((x) => x.trim()); return { kind, slug }; });
+      patch.ats = (rows as { kind?: unknown; slug?: unknown }[]).map((a) => ({ kind: String(a.kind ?? '').toLowerCase() as AtsKind, slug: String(a.slug ?? '').trim() })).filter((a): a is CompetitorAts => ['greenhouse', 'lever', 'workable', 'personio'].includes(a.kind) && /^[a-z0-9._-]+$/i.test(a.slug)).slice(0, 6);
+    }
+    return patch;
+  };
+  r.get('/competitors', (_req, res) => res.json(competitors.data()));
+  r.get('/competitors/:id', (req, res) => { const d = competitors.detail(idParam(req)); if (!d) throw new HttpError(404, 'Competitor not found'); res.json(d); });
+  r.post('/competitors', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const patch = competitorPatch(b);
+    if (!patch.name) throw new HttpError(400, 'Name is required.');
+    const c = q.createCompetitor({ name: patch.name, domain: patch.domain ?? null, linkedin_url: patch.linkedin_url ?? null, tiktok_handle: patch.tiktok_handle ?? null, markets: patch.markets ?? [], notes: patch.notes ?? null, watch_urls: patch.watch_urls ?? (patch.domain ? [`https://${patch.domain}`] : []), ats: patch.ats ?? [] });
+    liveEvents.emitUpdate({ kind: 'competitors' });
+    res.status(201).json({ competitor: c, ...competitors.data() });
+  });
+  r.put('/competitors/settings', (req, res) => { const b = (req.body ?? {}) as Record<string, unknown>; competitors.saveSettings({ day: b.day !== undefined ? Number(b.day) : undefined, time: optText(b.time) ?? undefined, digest_time: optText(b.digest_time) ?? undefined, channel: b.channel !== undefined ? String(b.channel) : undefined, apollo_jobs: b.apollo_jobs !== undefined ? bool(b.apollo_jobs, false) : undefined }); res.json(competitors.data()); });
+  r.put('/competitors/:id', (req, res) => { const c = competitorParam(req); const out = q.updateCompetitor(c.id, competitorPatch((req.body ?? {}) as Record<string, unknown>)); liveEvents.emitUpdate({ kind: 'competitors' }); res.json({ competitor: out, ...competitors.data() }); });
+  r.delete('/competitors/:id', (req, res) => { const c = competitorParam(req); q.deleteCompetitor(c.id); liveEvents.emitUpdate({ kind: 'competitors' }); res.json(competitors.data()); });
+  r.post('/competitors/sweep', async (req, res) => { const b = (req.body ?? {}) as Record<string, unknown>; const r2 = await competitors.sweep({ competitorId: b.competitor_id !== undefined ? Number(b.competitor_id) : undefined, useLlm: b.use_llm === undefined ? undefined : bool(b.use_llm, true) }); res.json({ ...r2, ...competitors.data() }); });
+  r.post('/competitors/seen', (req, res) => { const b = (req.body ?? {}) as Record<string, unknown>; competitors.markSeen(b.competitor_id === undefined || b.competitor_id === null ? null : Number(b.competitor_id)); res.json(competitors.data()); });
+  r.post('/competitors/digest', async (req, res) => { const b = (req.body ?? {}) as Record<string, unknown>; const r2 = await competitors.sendDigest({ force: bool(b.force, false), sinceDays: b.since_days !== undefined ? Number(b.since_days) : undefined }); res.json({ ...r2, ...competitors.data() }); });
+  r.post('/competitors/:id/clients', (req, res) => { const c = competitorParam(req); const b = (req.body ?? {}) as Record<string, unknown>; const brand = optText(b.brand); if (!brand) throw new HttpError(400, 'Brand is required.'); competitors.addClient(c.id, { brand, market: optText(b.market)?.toUpperCase() ?? null, evidence: optText(b.evidence), url: optText(b.url), actor: actorOf(req) }); res.json(competitors.detail(c.id)); });
+  r.delete('/competitors/:id/clients/:clientId', (req, res) => { const c = competitorParam(req); const cid = Number(req.params.clientId); if (!Number.isInteger(cid)) throw new HttpError(400, 'Bad client id'); q.patchCompetitorClient(cid, { status: 'removed' }); liveEvents.emitUpdate({ kind: 'competitors' }); res.json(competitors.detail(c.id)); });
+  r.post('/competitors/:id/notes', (req, res) => { const c = competitorParam(req); const b = (req.body ?? {}) as Record<string, unknown>; const text = optText(b.text); if (!text) throw new HttpError(400, 'Text is required.'); competitors.addNote(c.id, { text, url: optText(b.url), actor: actorOf(req) }); res.json(competitors.detail(c.id)); });
+
   r.get('/pitch', (_req, res) => res.json(pitchesData()));
   r.get('/pitch/:id', (req, res) => res.json({ pitch: pitchParam(req), ...pitchesData() }));
   r.post('/pitch', (req, res) => {

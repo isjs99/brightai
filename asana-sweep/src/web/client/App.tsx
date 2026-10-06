@@ -22,6 +22,7 @@ import PnlPage from './pages/Pnl';
 import TargetsPage from './pages/Targets';
 import OnboardingPage from './pages/Onboarding';
 import PitchPage from './pages/Pitch';
+import CompetitorsPage from './pages/Competitors';
 import ReportsPage from './pages/Reports';
 import CruvaPage from './pages/Cruva';
 import CopilotPage from './pages/Copilot';
@@ -205,6 +206,7 @@ export default function App() {
               <Route path="/bd" element={<Hub title="Growth" tabs={GROWTH_TABS}><BdPage /></Hub>} />
               <Route path="/outreach" element={<Hub title="Growth" tabs={GROWTH_TABS}><OutreachPage /></Hub>} />
               <Route path="/leads" element={<Hub title="Growth" tabs={GROWTH_TABS}><LeadsPage /></Hub>} />
+              <Route path="/competitors" element={<Hub title="Growth" tabs={GROWTH_TABS}><CompetitorsPage /></Hub>} />
               <Route path="/gmv" element={<Hub title="Performance" tabs={PERFORMANCE_TABS}><GmvPage /></Hub>} />
               <Route path="/analytics" element={<Hub title="Performance" tabs={PERFORMANCE_TABS}><AnalyticsPage /></Hub>} />
               <Route path="/accounts" element={<Hub title="Settings" tabs={SETTINGS_TABS}><Accounts /></Hub>} />

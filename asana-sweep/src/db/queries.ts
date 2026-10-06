@@ -55,6 +55,13 @@ import type {
   ReportSchedule,
   Onboarding,
   OnboardingContext,
+  Competitor,
+  CompetitorAts,
+  CompetitorClient,
+  CompetitorJob,
+  CompetitorPerson,
+  CompetitorSignal,
+  CompetitorSignalKind,
   Pitch,
   PitchBrief,
   PitchDeck,
@@ -2666,4 +2673,192 @@ export class Queries {
     for (const r of this.db.prepare('SELECT kind, COUNT(*) AS n FROM copilot_evidence GROUP BY kind').all() as { kind: string; n: number }[]) out[r.kind] = r.n;
     return out;
   }
+  // ---- Competitor intelligence ----
+
+  private rowToCompetitor(r: Row): Competitor {
+    return {
+      id: Number(r.id), name: String(r.name), domain: (r.domain as string | null) ?? null, linkedin_url: (r.linkedin_url as string | null) ?? null, tiktok_handle: (r.tiktok_handle as string | null) ?? null,
+      markets: String(r.markets ?? '').split(',').map((m) => m.trim()).filter(Boolean), apollo_org_id: (r.apollo_org_id as string | null) ?? null,
+      watch_urls: parseJson<string[]>(r.watch_urls_json, []), ats: parseJson<CompetitorAts[]>(r.ats_json, []), notes: (r.notes as string | null) ?? null, enabled: Boolean(r.enabled),
+      last_checked_at: (r.last_checked_at as string | null) ?? null, last_error: (r.last_error as string | null) ?? null, created_at: String(r.created_at), updated_at: String(r.updated_at),
+    };
+  }
+
+  listCompetitors(): Competitor[] {
+    return (this.db.prepare('SELECT * FROM competitors ORDER BY name COLLATE NOCASE').all() as Row[]).map((r) => this.rowToCompetitor(r));
+  }
+
+  getCompetitor(id: number): Competitor | null {
+    const r = this.db.prepare('SELECT * FROM competitors WHERE id = ?').get(id) as Row | undefined;
+    return r ? this.rowToCompetitor(r) : null;
+  }
+
+  createCompetitor(i: { name: string; domain?: string | null; linkedin_url?: string | null; tiktok_handle?: string | null; markets?: string[]; apollo_org_id?: string | null; watch_urls?: string[]; ats?: CompetitorAts[]; notes?: string | null; enabled?: boolean }): Competitor {
+    const res = this.db.prepare('INSERT INTO competitors (name, domain, linkedin_url, tiktok_handle, markets, apollo_org_id, watch_urls_json, ats_json, notes, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(i.name, i.domain ?? null, i.linkedin_url ?? null, i.tiktok_handle ?? null, (i.markets ?? []).join(','), i.apollo_org_id ?? null, JSON.stringify(i.watch_urls ?? []), JSON.stringify(i.ats ?? []), i.notes ?? null, i.enabled === false ? 0 : 1);
+    return this.getCompetitor(Number(res.lastInsertRowid))!;
+  }
+
+  updateCompetitor(id: number, patch: Partial<{ name: string; domain: string | null; linkedin_url: string | null; tiktok_handle: string | null; markets: string[]; apollo_org_id: string | null; watch_urls: string[]; ats: CompetitorAts[]; notes: string | null; enabled: boolean; last_checked_at: string | null; last_error: string | null }>): Competitor | null {
+    const sets: string[] = []; const params: Record<string, unknown> = { id };
+    const set = (col: string, v: unknown) => { sets.push(`${col} = @${col}`); params[col] = v; };
+    if (patch.name !== undefined) set('name', patch.name);
+    if (patch.domain !== undefined) set('domain', patch.domain);
+    if (patch.linkedin_url !== undefined) set('linkedin_url', patch.linkedin_url);
+    if (patch.tiktok_handle !== undefined) set('tiktok_handle', patch.tiktok_handle);
+    if (patch.markets !== undefined) set('markets', patch.markets.join(','));
+    if (patch.apollo_org_id !== undefined) set('apollo_org_id', patch.apollo_org_id);
+    if (patch.watch_urls !== undefined) set('watch_urls_json', JSON.stringify(patch.watch_urls));
+    if (patch.ats !== undefined) set('ats_json', JSON.stringify(patch.ats));
+    if (patch.notes !== undefined) set('notes', patch.notes);
+    if (patch.enabled !== undefined) set('enabled', patch.enabled ? 1 : 0);
+    if (patch.last_checked_at !== undefined) set('last_checked_at', patch.last_checked_at);
+    if (patch.last_error !== undefined) set('last_error', patch.last_error);
+    if (sets.length) this.db.prepare(`UPDATE competitors SET ${sets.join(', ')}, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = @id`).run(params);
+    return this.getCompetitor(id);
+  }
+
+  deleteCompetitor(id: number): boolean {
+    return this.db.prepare('DELETE FROM competitors WHERE id = ?').run(id).changes > 0;
+  }
+
+  private rowToCompetitorPerson(r: Row): CompetitorPerson {
+    return { id: Number(r.id), competitor_id: Number(r.competitor_id), apollo_id: String(r.apollo_id), name: String(r.name), title: (r.title as string | null) ?? null, prev_title: (r.prev_title as string | null) ?? null, seniority: (r.seniority as string | null) ?? null, department: (r.department as string | null) ?? null, location: (r.location as string | null) ?? null, linkedin_url: (r.linkedin_url as string | null) ?? null, started_at: (r.started_at as string | null) ?? null, first_seen_at: String(r.first_seen_at), last_seen_at: String(r.last_seen_at), miss_count: Number(r.miss_count ?? 0), left_at: (r.left_at as string | null) ?? null };
+  }
+
+  listCompetitorPeople(competitorId: number, opts: { includeLeft?: boolean } = {}): CompetitorPerson[] {
+    return (this.db.prepare(`SELECT * FROM competitor_people WHERE competitor_id = ? ${opts.includeLeft ? '' : 'AND left_at IS NULL'} ORDER BY left_at IS NOT NULL, name COLLATE NOCASE`).all(competitorId) as Row[]).map((r) => this.rowToCompetitorPerson(r));
+  }
+
+  upsertCompetitorPerson(p: { competitor_id: number; apollo_id: string; name: string; title: string | null; prev_title?: string | null; seniority: string | null; department: string | null; location: string | null; linkedin_url: string | null; started_at: string | null; seen_at: string; miss_count?: number; left_at?: string | null }): void {
+    this.db.prepare(`INSERT INTO competitor_people (competitor_id, apollo_id, name, title, prev_title, seniority, department, location, linkedin_url, started_at, first_seen_at, last_seen_at, miss_count, left_at)
+      VALUES (@competitor_id, @apollo_id, @name, @title, @prev_title, @seniority, @department, @location, @linkedin_url, @started_at, @seen_at, @seen_at, @miss_count, @left_at)
+      ON CONFLICT(competitor_id, apollo_id) DO UPDATE SET name = excluded.name, title = excluded.title, prev_title = excluded.prev_title, seniority = excluded.seniority, department = excluded.department, location = excluded.location, linkedin_url = COALESCE(excluded.linkedin_url, competitor_people.linkedin_url), started_at = COALESCE(excluded.started_at, competitor_people.started_at), last_seen_at = excluded.last_seen_at, miss_count = excluded.miss_count, left_at = excluded.left_at`)
+      .run({ ...p, prev_title: p.prev_title ?? null, miss_count: p.miss_count ?? 0, left_at: p.left_at ?? null });
+  }
+
+  markCompetitorPersonMissed(id: number, missCount: number, leftAt: string | null): void {
+    this.db.prepare('UPDATE competitor_people SET miss_count = ?, left_at = ? WHERE id = ?').run(missCount, leftAt, id);
+  }
+
+  private rowToCompetitorJob(r: Row): CompetitorJob {
+    return { id: Number(r.id), competitor_id: Number(r.competitor_id), source: String(r.source), ext_id: String(r.ext_id), title: String(r.title), location: (r.location as string | null) ?? null, url: (r.url as string | null) ?? null, posted_at: (r.posted_at as string | null) ?? null, first_seen_at: String(r.first_seen_at), last_seen_at: String(r.last_seen_at), closed_at: (r.closed_at as string | null) ?? null };
+  }
+
+  listCompetitorJobs(competitorId: number, opts: { includeClosed?: boolean } = {}): CompetitorJob[] {
+    return (this.db.prepare(`SELECT * FROM competitor_jobs WHERE competitor_id = ? ${opts.includeClosed ? '' : 'AND closed_at IS NULL'} ORDER BY closed_at IS NOT NULL, COALESCE(posted_at, first_seen_at) DESC`).all(competitorId) as Row[]).map((r) => this.rowToCompetitorJob(r));
+  }
+
+  /** Upsert the open roles from one source; roles no longer listed by that source are closed. Returns what opened and what closed. */
+  syncCompetitorJobs(competitorId: number, source: string, jobs: { ext_id: string; title: string; location: string | null; url: string | null; posted_at: string | null }[], now: string): { opened: CompetitorJob[]; closed: CompetitorJob[] } {
+    const before = new Map(this.listCompetitorJobs(competitorId).filter((j) => j.source === source).map((j) => [j.ext_id, j]));
+    const opened: CompetitorJob[] = [];
+    const ins = this.db.prepare(`INSERT INTO competitor_jobs (competitor_id, source, ext_id, title, location, url, posted_at, first_seen_at, last_seen_at, closed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+      ON CONFLICT(competitor_id, source, ext_id) DO UPDATE SET title = excluded.title, location = excluded.location, url = excluded.url, posted_at = COALESCE(excluded.posted_at, competitor_jobs.posted_at), last_seen_at = excluded.last_seen_at, closed_at = NULL`);
+    const seen = new Set<string>();
+    this.db.transaction(() => {
+      for (const j of jobs) {
+        if (!j.ext_id || seen.has(j.ext_id)) continue; seen.add(j.ext_id);
+        ins.run(competitorId, source, j.ext_id, j.title, j.location, j.url, j.posted_at, now, now);
+        if (!before.has(j.ext_id)) opened.push(this.db.prepare('SELECT * FROM competitor_jobs WHERE competitor_id = ? AND source = ? AND ext_id = ?').get(competitorId, source, j.ext_id) as unknown as CompetitorJob);
+      }
+    })();
+    const closed: CompetitorJob[] = [];
+    for (const [ext, j] of before) if (!seen.has(ext)) { this.db.prepare('UPDATE competitor_jobs SET closed_at = ? WHERE id = ?').run(now, j.id); closed.push({ ...j, closed_at: now }); }
+    return { opened: opened.map((r) => this.rowToCompetitorJob(r as unknown as Row)), closed };
+  }
+
+  latestCompetitorSnapshot(competitorId: number, url: string): { id: number; fetched_at: string; hash: string; text: string; error: string | null } | null {
+    const r = this.db.prepare('SELECT id, fetched_at, hash, text, error FROM competitor_snapshots WHERE competitor_id = ? AND url = ? AND error IS NULL ORDER BY fetched_at DESC LIMIT 1').get(competitorId, url) as Row | undefined;
+    return r ? { id: Number(r.id), fetched_at: String(r.fetched_at), hash: String(r.hash), text: String(r.text), error: (r.error as string | null) ?? null } : null;
+  }
+
+  addCompetitorSnapshot(s: { competitor_id: number; url: string; fetched_at: string; hash: string; text: string; error?: string | null }): void {
+    this.db.prepare('INSERT INTO competitor_snapshots (competitor_id, url, fetched_at, hash, text, error) VALUES (?, ?, ?, ?, ?, ?)').run(s.competitor_id, s.url, s.fetched_at, s.hash, s.text, s.error ?? null);
+    // Keep the last 6 per URL.
+    this.db.prepare('DELETE FROM competitor_snapshots WHERE competitor_id = ? AND url = ? AND id NOT IN (SELECT id FROM competitor_snapshots WHERE competitor_id = ? AND url = ? ORDER BY fetched_at DESC LIMIT 6)').run(s.competitor_id, s.url, s.competitor_id, s.url);
+  }
+
+  listCompetitorSnapshots(competitorId: number): { url: string; fetched_at: string; error: string | null; chars: number }[] {
+    return (this.db.prepare('SELECT url, MAX(fetched_at) AS fetched_at, error, LENGTH(text) AS chars FROM competitor_snapshots WHERE competitor_id = ? GROUP BY url ORDER BY url').all(competitorId) as Row[]).map((r) => ({ url: String(r.url), fetched_at: String(r.fetched_at), error: (r.error as string | null) ?? null, chars: Number(r.chars ?? 0) }));
+  }
+
+  private rowToCompetitorClient(r: Row): CompetitorClient {
+    return { id: Number(r.id), competitor_id: Number(r.competitor_id), brand: String(r.brand), brand_key: String(r.brand_key), market: (r.market as string | null) ?? null, confidence: (r.confidence as CompetitorClient['confidence']) ?? 'medium', sources: parseJson<CompetitorClient['sources']>(r.sources_json, []), prospect_id: r.prospect_id === null || r.prospect_id === undefined ? null : Number(r.prospect_id), lead_id: r.lead_id === null || r.lead_id === undefined ? null : Number(r.lead_id), status: (r.status as CompetitorClient['status']) ?? 'active', first_seen_at: String(r.first_seen_at), last_seen_at: String(r.last_seen_at) };
+  }
+
+  listCompetitorClients(competitorId?: number): CompetitorClient[] {
+    const rows = competitorId === undefined ? this.db.prepare("SELECT * FROM competitor_clients WHERE status = 'active' ORDER BY brand COLLATE NOCASE").all() : this.db.prepare('SELECT * FROM competitor_clients WHERE competitor_id = ? ORDER BY status, brand COLLATE NOCASE').all(competitorId);
+    return (rows as Row[]).map((r) => this.rowToCompetitorClient(r));
+  }
+
+  /** Adds or refreshes a client attribution with one more source; returns the row and whether it is new. */
+  upsertCompetitorClient(c: { competitor_id: number; brand: string; brand_key: string; market?: string | null; confidence?: CompetitorClient['confidence']; source: { url: string | null; evidence: string; at: string }; now: string }): { client: CompetitorClient; created: boolean } {
+    const existing = this.db.prepare('SELECT * FROM competitor_clients WHERE competitor_id = ? AND brand_key = ?').get(c.competitor_id, c.brand_key) as Row | undefined;
+    if (existing) {
+      const sources = parseJson<CompetitorClient['sources']>(existing.sources_json, []);
+      if (!sources.some((s) => s.url === c.source.url && s.evidence === c.source.evidence)) sources.push(c.source);
+      const conf = sources.length >= 2 ? 'high' : (c.confidence ?? (existing.confidence as CompetitorClient['confidence']));
+      this.db.prepare("UPDATE competitor_clients SET sources_json = ?, confidence = ?, market = COALESCE(?, market), last_seen_at = ?, status = 'active' WHERE id = ?").run(JSON.stringify(sources.slice(-8)), conf, c.market ?? null, c.now, existing.id);
+      return { client: this.rowToCompetitorClient(this.db.prepare('SELECT * FROM competitor_clients WHERE id = ?').get(existing.id) as Row), created: false };
+    }
+    const res = this.db.prepare('INSERT INTO competitor_clients (competitor_id, brand, brand_key, market, confidence, sources_json, first_seen_at, last_seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(c.competitor_id, c.brand, c.brand_key, c.market ?? null, c.confidence ?? 'medium', JSON.stringify([c.source]), c.now, c.now);
+    return { client: this.rowToCompetitorClient(this.db.prepare('SELECT * FROM competitor_clients WHERE id = ?').get(Number(res.lastInsertRowid)) as Row), created: true };
+  }
+
+  patchCompetitorClient(id: number, patch: Partial<{ prospect_id: number | null; lead_id: number | null; status: 'active' | 'removed'; market: string | null; confidence: CompetitorClient['confidence'] }>): void {
+    const sets: string[] = []; const params: Record<string, unknown> = { id };
+    for (const k of ['prospect_id', 'lead_id', 'status', 'market', 'confidence'] as const) if (patch[k] !== undefined) { sets.push(`${k} = @${k}`); params[k] = patch[k]; }
+    if (sets.length) this.db.prepare(`UPDATE competitor_clients SET ${sets.join(', ')} WHERE id = @id`).run(params);
+  }
+
+  deleteCompetitorClient(id: number): boolean {
+    return this.db.prepare('DELETE FROM competitor_clients WHERE id = ?').run(id).changes > 0;
+  }
+
+  private rowToCompetitorSignal(r: Row): CompetitorSignal {
+    return { id: Number(r.id), competitor_id: Number(r.competitor_id), kind: String(r.kind) as CompetitorSignalKind, summary: String(r.summary), evidence: (r.evidence as string | null) ?? null, url: (r.url as string | null) ?? null, observed_at: String(r.observed_at), created_at: String(r.created_at), seen_at: (r.seen_at as string | null) ?? null };
+  }
+
+  /** Insert once per dedupe key; returns null when the signal was already on record. */
+  addCompetitorSignal(s: { competitor_id: number; kind: CompetitorSignalKind; summary: string; evidence?: string | null; url?: string | null; observed_at: string; dedupe_key: string }): CompetitorSignal | null {
+    const res = this.db.prepare('INSERT OR IGNORE INTO competitor_signals (competitor_id, kind, summary, evidence, url, observed_at, dedupe_key) VALUES (?, ?, ?, ?, ?, ?, ?)').run(s.competitor_id, s.kind, s.summary, s.evidence ?? null, s.url ?? null, s.observed_at, s.dedupe_key);
+    if (!res.changes) return null;
+    return this.rowToCompetitorSignal(this.db.prepare('SELECT * FROM competitor_signals WHERE id = ?').get(Number(res.lastInsertRowid)) as Row);
+  }
+
+  listCompetitorSignals(opts: { competitorId?: number; since?: string | null; limit?: number; unseenOnly?: boolean } = {}): CompetitorSignal[] {
+    const where: string[] = []; const params: unknown[] = [];
+    if (opts.competitorId !== undefined) { where.push('competitor_id = ?'); params.push(opts.competitorId); }
+    if (opts.since) { where.push('observed_at >= ?'); params.push(opts.since); }
+    if (opts.unseenOnly) where.push('seen_at IS NULL');
+    return (this.db.prepare(`SELECT * FROM competitor_signals ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY observed_at DESC, id DESC LIMIT ?`).all(...params, opts.limit ?? 200) as Row[]).map((r) => this.rowToCompetitorSignal(r));
+  }
+
+  markCompetitorSignalsSeen(competitorId: number | null, at: string): number {
+    return competitorId === null ? this.db.prepare('UPDATE competitor_signals SET seen_at = ? WHERE seen_at IS NULL').run(at).changes : this.db.prepare('UPDATE competitor_signals SET seen_at = ? WHERE seen_at IS NULL AND competitor_id = ?').run(at, competitorId).changes;
+  }
+
+  competitorCounts(): Map<number, { people_active: number; joined_30d: number; left_30d: number; open_jobs: number; clients: number; overlap: number; new_signals: number; latest_signal_at: string | null }> {
+    const out = new Map<number, { people_active: number; joined_30d: number; left_30d: number; open_jobs: number; clients: number; overlap: number; new_signals: number; latest_signal_at: string | null }>();
+    const get = (id: number) => { let v = out.get(id); if (!v) { v = { people_active: 0, joined_30d: 0, left_30d: 0, open_jobs: 0, clients: 0, overlap: 0, new_signals: 0, latest_signal_at: null }; out.set(id, v); } return v; };
+    const d30 = new Date(Date.now() - 30 * 86400000).toISOString();
+    for (const r of this.db.prepare('SELECT competitor_id, COUNT(*) AS n FROM competitor_people WHERE left_at IS NULL GROUP BY competitor_id').all() as Row[]) get(Number(r.competitor_id)).people_active = Number(r.n);
+    for (const r of this.db.prepare("SELECT competitor_id, COUNT(*) AS n FROM competitor_signals WHERE kind = 'joined' AND observed_at >= ? GROUP BY competitor_id").all(d30) as Row[]) get(Number(r.competitor_id)).joined_30d = Number(r.n);
+    for (const r of this.db.prepare("SELECT competitor_id, COUNT(*) AS n FROM competitor_signals WHERE kind = 'left' AND observed_at >= ? GROUP BY competitor_id").all(d30) as Row[]) get(Number(r.competitor_id)).left_30d = Number(r.n);
+    for (const r of this.db.prepare('SELECT competitor_id, COUNT(*) AS n FROM competitor_jobs WHERE closed_at IS NULL GROUP BY competitor_id').all() as Row[]) get(Number(r.competitor_id)).open_jobs = Number(r.n);
+    for (const r of this.db.prepare("SELECT competitor_id, COUNT(*) AS n, SUM(CASE WHEN prospect_id IS NOT NULL OR lead_id IS NOT NULL THEN 1 ELSE 0 END) AS o FROM competitor_clients WHERE status = 'active' GROUP BY competitor_id").all() as Row[]) { const v = get(Number(r.competitor_id)); v.clients = Number(r.n); v.overlap = Number(r.o ?? 0); }
+    for (const r of this.db.prepare('SELECT competitor_id, SUM(CASE WHEN seen_at IS NULL THEN 1 ELSE 0 END) AS n, MAX(observed_at) AS latest FROM competitor_signals GROUP BY competitor_id').all() as Row[]) { const v = get(Number(r.competitor_id)); v.new_signals = Number(r.n ?? 0); v.latest_signal_at = (r.latest as string | null) ?? null; }
+    return out;
+  }
+
+  addCompetitorDigest(d: { week: string; sent_at: string; channel: string | null; text: string }): void {
+    this.db.prepare('INSERT INTO competitor_digests (week, sent_at, channel, text) VALUES (?, ?, ?, ?)').run(d.week, d.sent_at, d.channel, d.text);
+  }
+
+  lastCompetitorDigest(): { week: string; sent_at: string; channel: string | null; text: string } | null {
+    const r = this.db.prepare('SELECT week, sent_at, channel, text FROM competitor_digests ORDER BY sent_at DESC LIMIT 1').get() as Row | undefined;
+    return r ? { week: String(r.week), sent_at: String(r.sent_at), channel: (r.channel as string | null) ?? null, text: String(r.text) } : null;
+  }
 }
+

@@ -600,3 +600,13 @@ ol.sources { padding-left: 20px; font-size: 12.5px; } ol.sources li { margin-bot
 .ring::after { content: attr(data-label); position: absolute; inset: 5px; border-radius: 50%; background: var(--surface); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; }
 .target-steps li, .target-blockers li { margin-bottom: 3px; }
 .win-badge { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; color: var(--good-ink); background: var(--good-bg); border: 1px solid var(--good-border); border-radius: 999px; padding: 2px 10px; animation: tick-pop .5s cubic-bezier(.2,1.4,.4,1); }
+
+/* Competitors: the signals timeline */
+.signals { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 6px; }
+.signals .signal { display: grid; grid-template-columns: 110px 1fr auto; gap: 10px; align-items: baseline; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--border); }
+.signals .signal.unseen { border-left: 3px solid var(--accent, #1d3df0); background: color-mix(in srgb, var(--accent, #1d3df0) 6%, transparent); }
+.signals .signal .text { min-width: 0; overflow-wrap: anywhere; }
+.signals .signal .when { white-space: nowrap; }
+.slack-preview { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: var(--panel, rgba(127,127,127,.08)); padding: 10px; border-radius: 8px; }
+.table tr.muted td { opacity: .6; }
+@media (max-width: 700px) { .signals .signal { grid-template-columns: 1fr; } }

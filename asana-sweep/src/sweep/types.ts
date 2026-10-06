@@ -2317,3 +2317,127 @@ export interface CopilotData {
   tldv_configured: boolean;
   llm_configured: boolean;
 }
+
+// ---- Competitor intelligence (Growth > Competitors) ----
+
+export type AtsKind = 'greenhouse' | 'lever' | 'workable' | 'personio';
+export interface CompetitorAts { kind: AtsKind; slug: string }
+export interface Competitor {
+  id: number;
+  name: string;
+  domain: string | null;
+  linkedin_url: string | null;
+  tiktok_handle: string | null;
+  markets: string[];
+  apollo_org_id: string | null;
+  watch_urls: string[];
+  ats: CompetitorAts[];
+  notes: string | null;
+  enabled: boolean;
+  last_checked_at: string | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export interface CompetitorPerson {
+  id: number;
+  competitor_id: number;
+  apollo_id: string;
+  name: string;
+  title: string | null;
+  prev_title: string | null;
+  seniority: string | null;
+  department: string | null;
+  location: string | null;
+  linkedin_url: string | null;
+  started_at: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  miss_count: number;
+  left_at: string | null;
+}
+export interface CompetitorJob {
+  id: number;
+  competitor_id: number;
+  source: string;
+  ext_id: string;
+  title: string;
+  location: string | null;
+  url: string | null;
+  posted_at: string | null;
+  first_seen_at: string;
+  last_seen_at: string;
+  closed_at: string | null;
+}
+export interface CompetitorClient {
+  id: number;
+  competitor_id: number;
+  brand: string;
+  brand_key: string;
+  market: string | null;
+  confidence: 'low' | 'medium' | 'high';
+  sources: { url: string | null; evidence: string; at: string }[];
+  prospect_id: number | null;
+  lead_id: number | null;
+  status: 'active' | 'removed';
+  first_seen_at: string;
+  last_seen_at: string;
+}
+export type CompetitorSignalKind = 'joined' | 'left' | 'title_change' | 'hiring' | 'job_closed' | 'new_client' | 'client_gone' | 'overlap' | 'press' | 'event' | 'market' | 'website' | 'note';
+export interface CompetitorSignal {
+  id: number;
+  competitor_id: number;
+  kind: CompetitorSignalKind;
+  summary: string;
+  evidence: string | null;
+  url: string | null;
+  observed_at: string;
+  created_at: string;
+  seen_at: string | null;
+}
+export interface CompetitorView extends Competitor {
+  people_active: number;
+  joined_30d: number;
+  left_30d: number;
+  open_jobs: number;
+  clients: number;
+  overlap: number;
+  new_signals: number;
+  latest_signal_at: string | null;
+}
+export interface CompetitorOverlapRow {
+  competitor_id: number;
+  competitor: string;
+  brand: string;
+  market: string | null;
+  confidence: string;
+  prospect_id: number | null;
+  prospect_status: string | null;
+  lead_id: number | null;
+  lead_stage: string | null;
+  last_seen_at: string;
+}
+export interface CompetitorsSettings { day: number; time: string; digest_time: string; channel: string; apollo_jobs: boolean }
+export interface CompetitorsData {
+  competitors: CompetitorView[];
+  overlap: CompetitorOverlapRow[];
+  settings: CompetitorsSettings;
+  apollo_configured: boolean;
+  llm_configured: boolean;
+  slack_configured: boolean;
+  running: boolean;
+  last_run_at: string | null;
+  last_error: string | null;
+  last_digest_at: string | null;
+  digest_preview: string;
+  timezone: string;
+}
+export interface CompetitorDetail {
+  competitor: Competitor;
+  people: CompetitorPerson[];
+  leavers: CompetitorPerson[];
+  jobs: CompetitorJob[];
+  clients: CompetitorClient[];
+  signals: CompetitorSignal[];
+  snapshots: { url: string; fetched_at: string; error: string | null; chars: number }[];
+}

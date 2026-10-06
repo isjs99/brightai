@@ -196,9 +196,16 @@ Growth > BD pipeline holds fast-rising TikTok Shops per EU market, the decision 
 - **Call follow-ups**: with `TLDV_API_KEY` set, every tl;dv call gets a follow-up email drafted from the notes and transcript (thanks, what we discussed, next steps) to the external attendee, saved under Outreach emails > Call follow-ups and, when Gmail is connected, straight into Gmail drafts. Checked every 30 minutes.
 - **Outreach checklist and history**: TTS AM, Gmail and LinkedIn per prospect. Ticking a channel asks for an optional note (who you contacted, about what) and writes a history event with the channel, note, contact and who ticked it; status changes and "+ Note" entries land in the same history, which lives in the prospect detail. Outreach is complete only when all three are ticked; the CRM overview per country counts prospects, any outreach, complete, won and lost.
 
-## Deal and competitor intelligence (planned)
+## Competitors (Growth › Competitors)
 
-Not built yet. `docs/intel-plan.md` sets out how deep the BD intelligence can go per prospect (account map, TikTok Shop side, signals timeline, warmth score) and a Growth › Competitors tab (registry, joiners and leavers, client lists, TikTok Shop closeness, courtship signals, weekly digest), source by source with what is licensed, what is public and what we will not automate.
+The agencies we meet in deals, one collapsible block each, seeded with Genuine, Unsociable, Flywheel Digital, AdToker and AdBaker (edit the domains and markets, add the rest). Every week on the day and time in settings (Monday 06:00 by default) the sweep:
+
+- **People**: pulls everyone Apollo lists at the company (no credits), diffs against last week and reports who joined (with start month and whether senior), whose title changed, and who left (missing on two consecutive sweeps, so a flaky listing does not count). The first sweep is a baseline and reports nothing.
+- **Hiring**: reads the public job feeds of their ATS (Greenhouse, Lever, Workable or Personio slug under Sources) and, when switched on, Apollo's job postings (1 credit per competitor per sweep); new roles are signals, closed roles are kept for the record.
+- **Clients**: fetches the pages you list (client logos, case studies, team, press; the home page when none), diffs the text against last week's snapshot and reads the additions with Claude (brands with market and the quoted line as evidence, hires, markets they are entering, events, press); without a key, rules match brands we already know and lines that read like hires, events or press. A brand named by two sources is high confidence. Clients can be added by hand with how we know.
+- **Overlap**: every attributed client is matched to our BD pipeline and lead list; a fresh match is a signal and the "In our pipeline and theirs" table on top links to the prospect or lead.
+
+Signals (joined, left, new title, hiring, new client, in our pipeline, market, press, event, website, note) sit on the competitor's timeline with their source link; new ones light the block amber, red when the pipeline is touched, and are marked seen when read. The **digest** (Monday 08:00 by default) posts the week's movements per competitor to the Slack channel in settings, quiet competitors listed at the end; "Send digest now" and a copyable preview are on the page. The wider plan (prospect account maps, TikTok Shop closeness, courtship signals, the LinkedIn clip) is in `docs/intel-plan.md`.
 
 ## Website enquiries
 
