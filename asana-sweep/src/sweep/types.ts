@@ -1536,6 +1536,8 @@ export interface ReplyEvent {
   decision: ReplyDecision;
   reply_id: number | null;
   model: string | null;
+  /** What the Claude call behind this decision cost (filled in when the event is listed). */
+  cost?: { usd: number; input: number; output: number; model: string } | null;
   feedback: 'right' | 'wrong' | null;
   feedback_note: string | null;
   created_at: string;
@@ -1700,6 +1702,20 @@ export interface ClientTasksData {
   last_scan_error: string | null;
   scanning: boolean;
   llm_configured: boolean;
+  /** Where the tasks come from and whether each source can deliver; the fix is spelled out per source. */
+  sources: ClientTaskSources;
+}
+export interface ClientTaskSource { ok: boolean; label: string; detail: string; fix: string | null }
+export interface ClientTaskSources {
+  slack: ClientTaskSource;
+  gmail: ClientTaskSource;
+  tldv: ClientTaskSource;
+  llm: ClientTaskSource;
+  index: { last_at: string | null; last_error: string | null; indexing: boolean };
+  /** Per account: evidence rows in the last 14 days by kind, and what is missing to get more. */
+  accounts: { id: number; name: string; slack: number; email: number; call: number; missing: string[] }[];
+  /** Calls indexed in the last 14 days that matched no account (no client domain or name matched). */
+  unmatched_calls: { title: string; occurred_at: string | null }[];
 }
 
 // ---- Sync status (what scans when) ----
@@ -2440,4 +2456,26 @@ export interface CompetitorDetail {
   clients: CompetitorClient[];
   signals: CompetitorSignal[];
   snapshots: { url: string; fetched_at: string; error: string | null; chars: number }[];
+}
+
+// ---- Claude usage and cost ----
+
+export interface LlmModelPrice { id: string; label: string; input: number; output: number; cache_read: number; note: string }
+export interface LlmUsageBucket { calls: number; ok: number; input: number; output: number; cache_read: number; cost_usd: number }
+export interface LlmUsageData {
+  configured: boolean;
+  models: LlmModelPrice[];
+  /** Model per feature, as configured (or the default). */
+  feature_models: { feature: string; label: string; model: string; auto: boolean }[];
+  daily_budget_usd: number;
+  today: LlmUsageBucket;
+  d7: LlmUsageBucket;
+  month: LlmUsageBucket;
+  projected_month_usd: number;
+  by_feature: ({ feature: string; label: string } & LlmUsageBucket)[];
+  by_model: ({ model: string } & LlmUsageBucket)[];
+  /** Replies: what one message costs on average over the last 7 days, and on each model at that size. */
+  reply_avg: { cost_usd: number | null; input: number | null; output: number | null; messages_7d: number; per_model: { model: string; label: string; cost_usd: number }[] };
+  last_error: { at: string; feature: string; message: string } | null;
+  budget_reached: boolean;
 }

@@ -171,7 +171,7 @@ export async function buildDeck(q: Queries, brief: PitchBrief, research: PitchRe
   let deck = templateDeck(q, brief, research);
   // Keep custom slides and manual edits on slides the AM already touched? Custom slides survive a rebuild.
   if (prev) deck.slides = [...deck.slides, ...prev.slides.filter((s) => s.kind === 'custom')];
-  const fn = llm === undefined ? (config.anthropicApiKey ? (s: string, u: string) => draftWithClaude(s, u, { maxTokens: 3500 }) : null) : llm;
+  const fn = llm === undefined ? (config.anthropicApiKey ? (s: string, u: string) => draftWithClaude(s, u, { maxTokens: 3500, feature: 'pitch' }) : null) : llm;
   if (fn) {
     try { const { system, user } = renderDeckPrompt(brief, research, deck); deck = applyDeckJson(await fn(system, user), deck); } catch { /* template copy stands */ }
   }

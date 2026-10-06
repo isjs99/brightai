@@ -1730,6 +1730,32 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 44,
+    name: 'llm_calls: every Claude call with its tokens and cost',
+    up(db) {
+      db.exec(`
+        CREATE TABLE llm_calls (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          feature TEXT NOT NULL,
+          account_id INTEGER,
+          ref TEXT,
+          model TEXT NOT NULL,
+          input_tokens INTEGER NOT NULL DEFAULT 0,
+          output_tokens INTEGER NOT NULL DEFAULT 0,
+          cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+          cache_write_tokens INTEGER NOT NULL DEFAULT 0,
+          cost_usd REAL NOT NULL DEFAULT 0,
+          ms INTEGER NOT NULL DEFAULT 0,
+          ok INTEGER NOT NULL DEFAULT 1,
+          error TEXT,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+        CREATE INDEX idx_llm_calls_created ON llm_calls(created_at);
+        CREATE INDEX idx_llm_calls_ref ON llm_calls(ref);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

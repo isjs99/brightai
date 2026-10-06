@@ -2860,5 +2860,51 @@ export class Queries {
     const r = this.db.prepare('SELECT week, sent_at, channel, text FROM competitor_digests ORDER BY sent_at DESC LIMIT 1').get() as Row | undefined;
     return r ? { week: String(r.week), sent_at: String(r.sent_at), channel: (r.channel as string | null) ?? null, text: String(r.text) } : null;
   }
+  // ---- Claude usage ----
+
+  addLlmCall(r: { feature: string; account_id: number | null; ref: string | null; model: string; input_tokens: number; output_tokens: number; cache_read_tokens: number; cache_write_tokens: number; cost_usd: number; ms: number; ok: boolean; error: string | null }): void {
+    this.db.prepare('INSERT INTO llm_calls (feature, account_id, ref, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, ms, ok, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(r.feature, r.account_id, r.ref, r.model, r.input_tokens, r.output_tokens, r.cache_read_tokens, r.cache_write_tokens, r.cost_usd, r.ms, r.ok ? 1 : 0, r.error);
+  }
+
+  llmBucket(from: string, to?: string, opts: { feature?: string; model?: string } = {}): { calls: number; ok: number; input: number; output: number; cache_read: number; cost_usd: number } {
+    const where = ['created_at >= ?']; const params: unknown[] = [from];
+    if (to) { where.push('created_at < ?'); params.push(to); }
+    if (opts.feature) { where.push('feature = ?'); params.push(opts.feature); }
+    if (opts.model) { where.push('model = ?'); params.push(opts.model); }
+    const r = this.db.prepare(`SELECT COUNT(*) AS calls, SUM(ok) AS ok, SUM(input_tokens + cache_write_tokens) AS input, SUM(output_tokens) AS output, SUM(cache_read_tokens) AS cache_read, SUM(cost_usd) AS cost FROM llm_calls WHERE ${where.join(' AND ')}`).get(...params) as Row;
+    return { calls: Number(r.calls ?? 0), ok: Number(r.ok ?? 0), input: Number(r.input ?? 0), output: Number(r.output ?? 0), cache_read: Number(r.cache_read ?? 0), cost_usd: Number(r.cost ?? 0) };
+  }
+
+  llmGroups(from: string, by: 'feature' | 'model'): ({ key: string } & { calls: number; ok: number; input: number; output: number; cache_read: number; cost_usd: number })[] {
+    return (this.db.prepare(`SELECT ${by} AS key, COUNT(*) AS calls, SUM(ok) AS ok, SUM(input_tokens + cache_write_tokens) AS input, SUM(output_tokens) AS output, SUM(cache_read_tokens) AS cache_read, SUM(cost_usd) AS cost FROM llm_calls WHERE created_at >= ? GROUP BY ${by} ORDER BY cost DESC`).all(from) as Row[])
+      .map((r) => ({ key: String(r.key), calls: Number(r.calls ?? 0), ok: Number(r.ok ?? 0), input: Number(r.input ?? 0), output: Number(r.output ?? 0), cache_read: Number(r.cache_read ?? 0), cost_usd: Number(r.cost ?? 0) }));
+  }
+
+  /** Cost per ref (the newest successful call wins), for showing what one reply or one scan cost. */
+  llmCostByRef(refs: string[]): Map<string, { usd: number; input: number; output: number; model: string }> {
+    const out = new Map<string, { usd: number; input: number; output: number; model: string }>();
+    const uniq = [...new Set(refs.filter(Boolean))];
+    for (let i = 0; i < uniq.length; i += 400) {
+      const chunk = uniq.slice(i, i + 400);
+      for (const r of this.db.prepare(`SELECT ref, model, input_tokens + cache_read_tokens + cache_write_tokens AS input, output_tokens AS output, cost_usd FROM llm_calls WHERE ref IN (${chunk.map(() => '?').join(',')}) ORDER BY id`).all(...chunk) as Row[]) out.set(String(r.ref), { usd: Number(r.cost_usd ?? 0), input: Number(r.input ?? 0), output: Number(r.output ?? 0), model: String(r.model) });
+    }
+    return out;
+  }
+
+  llmLastError(): { at: string; feature: string; message: string } | null {
+    const r = this.db.prepare('SELECT created_at, feature, error FROM llm_calls WHERE ok = 0 ORDER BY id DESC LIMIT 1').get() as Row | undefined;
+    return r ? { at: String(r.created_at), feature: String(r.feature), message: String(r.error ?? '') } : null;
+  }
+
+  llmLastOkAt(): string | null {
+    const r = this.db.prepare('SELECT created_at FROM llm_calls WHERE ok = 1 ORDER BY id DESC LIMIT 1').get() as Row | undefined;
+    return r ? String(r.created_at) : null;
+  }
+
+  pruneLlmCalls(olderThan: string): number {
+    return this.db.prepare('DELETE FROM llm_calls WHERE created_at < ?').run(olderThan).changes;
+  }
 }
+
 

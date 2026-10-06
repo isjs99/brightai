@@ -4,6 +4,7 @@ import { api, type ConnectionRow } from '../api';
 import { WindsorPanel } from './Gmv';
 import type { InboxSettings } from '../../../sweep/types';
 import { useIsAdmin } from '../session';
+import { LlmCostCard } from '../llm';
 
 /** Every integration the dashboard runs on, whether it is live, and a test where one exists. */
 export default function ConnectionsPage() {
@@ -61,6 +62,8 @@ export default function ConnectionsPage() {
           </table>
         </>
       )}
+      <h2>Claude</h2>
+      <LlmCostCard />
       <h2>Automatic replies</h2>
       <RepliesMaster onError={setError} />
       <h2>Windsor.ai shops</h2>
@@ -101,7 +104,7 @@ function RepliesMaster({ onError }: { onError: (e: string | null) => void }) {
         <div className="inline-form" style={{ marginTop: 12 }}>
           <label className="field" style={{ minWidth: 140 }}><span className="lbl">Read inboxes every (s)</span><input type="number" min={30} defaultValue={s.poll_seconds} onBlur={(e) => Number(e.target.value) !== s.poll_seconds && void save({ poll_seconds: Number(e.target.value) })} /></label>
           <label className="field check"><input type="checkbox" checked={s.inbox_enabled} onChange={(e) => void save({ inbox_enabled: e.target.checked })} /> Read inboxes in the background</label>
-          <span className="sub">Model: {s.model}</span>
+          <span className="sub">Models per feature are set under Claude above.</span>
         </div>
       )}
     </div>

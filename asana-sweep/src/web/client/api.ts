@@ -53,6 +53,7 @@ import type {
   Onboarding,
   OnboardingsData,
   OnboardingTerms,
+  LlmUsageData,
   Competitor,
   CompetitorDetail,
   CompetitorsData,
@@ -517,6 +518,10 @@ export const api = {
   pitchDelete: (id: number) => call<PitchesData>('DELETE', `/pitch/${id}`),
   pitchDeckUrl: (id: number, download = false) => `/api/pitch/${id}/deck.html${download ? '?download=1' : ''}`,
   pitchExportUrl: (id: number) => `/api/pitch/${id}/export.json`,
+  // Claude usage and models
+  llmUsage: () => call<LlmUsageData>('GET', '/llm/usage'),
+  llmSettings: (b: { feature_models?: Record<string, string>; daily_budget_usd?: number }) => call<LlmUsageData>('PUT', '/llm/settings', b),
+  clientTasksIndex: () => call<{ added: number; errors: string[] }>('POST', '/copilot/index'),
   // Competitor intelligence
   competitors: () => call<CompetitorsData>('GET', '/competitors'),
   competitor: (id: number) => call<CompetitorDetail>('GET', `/competitors/${id}`),

@@ -471,7 +471,7 @@ export class PlaybookEngine {
   async rewriteDraft(id: number, instruction?: string | null): Promise<PlaybookDraft> {
     const d = this.q.getRolloutDraft(id);
     if (!d) throw new Error('Draft not found');
-    const llm = this.llm !== undefined ? this.llm : config.anthropicApiKey ? (s: string, u: string) => draftWithClaude(s, u, { maxTokens: 700 }) : null;
+    const llm = this.llm !== undefined ? this.llm : config.anthropicApiKey ? (s: string, u: string) => draftWithClaude(s, u, { maxTokens: 700, feature: 'playbook' }) : null;
     if (!llm) throw new Error('ANTHROPIC_API_KEY is not set, so there is nothing to rewrite with.');
     if (!d.copy) throw new Error('This draft has no message to rewrite.');
     const lang = ({ de: 'German', fr: 'French', it: 'Italian', es: 'Spanish' } as Record<string, string>)[d.language] ?? 'English';

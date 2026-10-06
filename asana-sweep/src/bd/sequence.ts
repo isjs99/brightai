@@ -37,7 +37,7 @@ export async function linkedinMessage(q: Queries, prospect: BdProspect, contact:
   ].join('\n');
   const user = [`Person: ${contact.name}${contact.title ? `, ${contact.title}` : ''}`, `Company: ${brand} on TikTok Shop ${market}`, `Why they caught our eye: ${tailoredOpener(prospect)}`, `Momentum band: ${riseBand(prospect.rise_score)}`, inputs.bookingUrl ? `Booking link: ${inputs.bookingUrl}` : ''].filter(Boolean).join('\n');
   try {
-    const text = (await draftWithClaude(system, user, { maxTokens: 300 })).trim();
+    const text = (await draftWithClaude(system, user, { maxTokens: 300, feature: 'outreach' })).trim();
     return { text: text.length > 320 ? fallback : text, generator: 'claude' };
   } catch {
     return { text: fallback, generator: 'template' };

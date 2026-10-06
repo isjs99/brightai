@@ -231,7 +231,7 @@ export class Competitors {
   private get now(): string { return this.deps.now ? this.deps.now() : new Date().toISOString(); }
   private get llm(): ((system: string, user: string) => Promise<string>) | null {
     if (this.deps.llm !== undefined) return this.deps.llm;
-    return config.anthropicApiKey ? (s, u) => draftWithClaude(s, u, { maxTokens: 1800 }) : null;
+    return config.anthropicApiKey ? (s, u) => draftWithClaude(s, u, { maxTokens: 1800, feature: 'competitors' }) : null;
   }
 
   settings(): CompetitorsSettings {

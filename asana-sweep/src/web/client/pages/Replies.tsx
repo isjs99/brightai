@@ -4,6 +4,7 @@ import type { ConversationDetail, InboxChannel, RepliesData, RepliesSummaryRow, 
 import { api, fmtRelative, useLiveUpdates } from '../api';
 import { useAccountScope } from '../hubs';
 import { useIsAdmin } from '../session';
+import { LlmBanner, LlmCostCard, useLlmUsage, usd } from '../llm';
 import { Library } from './Library';
 import { AccountGroup, GroupsHead, useOpenGroups, type GroupLight } from '../groups';
 
@@ -32,6 +33,7 @@ const DECISION: Record<ReplyEvent['decision'], { label: string; cls: string }> =
 };
 
 function Summary({ channel }: { channel: InboxChannel }) {
+  const llm = useLlmUsage();
   const [rows, setRows] = useState<RepliesSummaryRow[] | null>(null);
   const [meta, setMeta] = useState<{ master_on: boolean; llm_configured: boolean } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -56,6 +58,8 @@ function Summary({ channel }: { channel: InboxChannel }) {
         </div>
       </div>
       {error && <div className="banner crit">{error}</div>}
+      <LlmBanner data={llm.data} />
+      <LlmCostCard compact />
       {(() => {
         const lightOf = (r: RepliesSummaryRow): GroupLight => r.mode === 'off' ? 'grey' : r.escalated ? 'red' : r.waiting ? 'amber' : r.ready ? 'green' : 'amber';
         const order = ['red', 'amber', 'green', 'grey'];
@@ -292,6 +296,7 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
                   <span className={`badge ${DECISION[e.decision].cls}`}>{DECISION[e.decision].label}</span>
                   <b>{e.context.counterpart ?? who(channel)}</b>
                   <span className="sub">{fmtRelative(e.created_at)}{e.language ? ` · ${data.languages[e.language] ?? e.language}` : ''}{e.intent ? ` · ${data.intents.find((i) => i.key === e.intent)?.label ?? e.intent}` : ''}{e.confidence !== null ? ` · ${Math.round(e.confidence * 100)}%` : ''}</span>
+                  {e.cost && <span className="badge muted" title={`${e.cost.input.toLocaleString()} tokens in, ${e.cost.output.toLocaleString()} out on ${e.cost.model}`}>{usd(e.cost.usd, 4)} · {e.cost.model.replace('claude-', '')}</span>}
                   {e.feedback === 'right' && <span className="badge good">looks right</span>}
                   {e.feedback === 'wrong' && <span className="badge crit">marked wrong</span>}
                 </div>

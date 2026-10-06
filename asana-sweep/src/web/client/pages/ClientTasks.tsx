@@ -21,6 +21,7 @@ export default function ClientTasksView({ amFilter }: { amFilter: string }) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [showSources, setShowSources] = useState(false);
   const isAdmin = useIsAdmin();
   const scope = useAccountScope();
   const inScope = useInScope();
@@ -70,8 +71,10 @@ export default function ClientTasksView({ amFilter }: { amFilter: string }) {
         {preset === 'custom' && range && <><input type="date" value={range.from} max={range.to} onChange={(e) => setRange({ ...range, from: e.target.value })} /><span className="sub">to</span><input type="date" value={range.to} min={range.from} onChange={(e) => setRange({ ...range, to: e.target.value })} /></>}
         <span className="sub">{isToday ? 'Open tasks and anything that moved today' : `${data.from} to ${data.to}: open tasks plus everything created, due, done or dismissed in the range`}</span>
         <span style={{ marginLeft: 'auto' }} className="sub">{data.last_scan_at ? `Scanned ${fmtRelative(data.last_scan_at)}` : 'Not scanned yet'}{data.last_scan_error ? ` · ${data.last_scan_error}` : ''}{data.llm_configured ? '' : ' · pattern matching only (no ANTHROPIC_API_KEY)'}</span>
-        {isAdmin && <button className="small" disabled={busy === 'scan' || data.scanning} onClick={() => run('scan', () => api.clientTasksScan({ since_days: 14, from: data.from, to: data.to }), (r) => setNotice(`Scanned ${r.scanned} source(s), ${r.added} task(s) added.`))}>{busy === 'scan' || data.scanning ? 'Scanning…' : 'Scan now'}</button>}
+        {isAdmin && <button className="small" disabled={busy === 'scan' || data.scanning} onClick={() => run('scan', () => api.clientTasksScan({ since_days: 14, from: data.from, to: data.to }), (r) => setNotice(`Scanned ${r.scanned} source(s), ${r.added} task(s) added${r.errors.length ? `; ${r.errors.length} note(s): ${r.errors.slice(0, 2).join(' · ')}` : ''}.`))}>{busy === 'scan' || data.scanning ? 'Scanning…' : 'Scan now'}</button>}
+        <button className="small" onClick={() => setShowSources((v) => !v)}>{showSources ? 'Hide sources' : `Sources${[data.sources.slack, data.sources.gmail, data.sources.tldv, data.sources.llm].some((s) => !s.ok) ? ' ⚠' : ''}`}</button>
       </div>
+      {showSources && <SourcesPanel data={data} isAdmin={isAdmin} busy={busy} onIndex={() => run('index', async () => { const r = await api.clientTasksIndex(); const d = await api.clientTasks(range?.from, range?.to); return { ...d, added: r.added, errors: r.errors }; }, (r) => setNotice(`Sources indexed: ${r.added} new row(s)${r.errors.length ? `; ${r.errors.join(' · ')}` : ''}.`))} />}
       <div className="kpis">
         <div className="kpi"><div className="v">{open.length}</div><div className="k">open client tasks</div></div>
         <div className="kpi"><div className={`v ${open.some((t) => t.due_date && t.due_date < today) ? 'crit' : ''}`}>{open.filter((t) => t.due_date && t.due_date < today).length}</div><div className="k">overdue</div></div>
@@ -159,6 +162,29 @@ function TaskList({ accountId, tasks, today, range, busy, run, isAdmin }: { acco
           <button className="small" onClick={() => setShowAdd(false)}>Cancel</button>
         </div>
       ) : <button className="small" style={{ marginTop: 8 }} onClick={() => setShowAdd(true)}>+ Add a task</button>}
+    </div>
+  );
+}
+
+/** Why tasks are or are not arriving: each source, whether it can deliver, and the exact fix. */
+function SourcesPanel({ data, isAdmin, busy, onIndex }: { data: ClientTasksData; isAdmin: boolean; busy: string | null; onIndex: () => void }) {
+  const s = data.sources;
+  const rows = [s.slack, s.gmail, s.tldv, s.llm];
+  return (
+    <div className="card" style={{ marginBottom: 12 }}>
+      <div className="page-head" style={{ marginBottom: 6 }}>
+        <div><b>Where tasks come from</b> <span className="sub">· sources re-read before every scan (every 30 minutes) · last index {s.index.last_at ? fmtRelative(s.index.last_at) : 'never'}{s.index.last_error ? ` · ${s.index.last_error}` : ''}</span></div>
+        {isAdmin && <button className="small" disabled={busy === 'index' || s.index.indexing} onClick={onIndex}>{busy === 'index' || s.index.indexing ? 'Indexing…' : 'Index sources now'}</button>}
+      </div>
+      <table>
+        <thead><tr><th>Source</th><th>Status</th><th>Detail</th><th>Fix</th></tr></thead>
+        <tbody>{rows.map((r) => <tr key={r.label}><td><b>{r.label}</b></td><td>{r.ok ? <span className="badge good">● Live</span> : <span className="badge warn">○ Not delivering</span>}</td><td className="sub">{r.detail}</td><td className="sub">{r.fix ?? ''}</td></tr>)}</tbody>
+      </table>
+      <table style={{ marginTop: 10 }}>
+        <thead><tr><th>Account</th><th>Slack days (14d)</th><th>Emails (14d)</th><th>Calls (14d)</th><th>Missing</th></tr></thead>
+        <tbody>{s.accounts.map((a) => <tr key={a.id}><td><b>{a.name}</b></td><td>{a.slack}</td><td>{a.email}</td><td>{a.call}</td><td className="sub">{a.missing.length ? `Set the ${a.missing.join(' and ')} under Settings › Accounts` : ''}</td></tr>)}</tbody>
+      </table>
+      {s.unmatched_calls.length > 0 && <p className="sub" style={{ marginTop: 8 }}>Calls that matched no account (set the client domain, or name the account in the call title): {s.unmatched_calls.map((c) => c.title.replace(/^Call: /, '')).join(' · ')}</p>}
     </div>
   );
 }

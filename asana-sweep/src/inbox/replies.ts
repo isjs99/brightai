@@ -6,7 +6,7 @@ import type { Account, InboxChannel, InboxConversation, InboxMessage, InboxReply
 import { buildContext, cruvaShopFor, renderPrompt } from './context.js';
 import { cruvaMcp } from '../cruva/mcp.js';
 import { marketOfShopName } from '../gmv/market.js';
-import { draftWithClaude } from './llm.js';
+import { draftWithClaude, LlmBudgetError, modelFor } from './llm.js';
 import { LANGUAGE_NAMES } from './language.js';
 import { tts, ttsAffiliate, TtsClient } from '../tts/client.js';
 import { inboxSettings, sendReply } from './sync.js';
@@ -186,7 +186,6 @@ export async function processConversations(q: Queries, ids: number[], deps: Proc
   if (!ids.length) return out;
   const settings = inboxSettings(q);
   const now = deps.now ?? Date.now();
-  const llm = deps.llm ?? ((s: string, u: string) => draftWithClaude(s, u, { maxTokens: 900 }));
   const client = deps.client ?? tts;
   const send = deps.send ?? ((qq, c, rid, text, cl) => sendReply(qq, c, rid, text, cl));
   for (const id of [...new Set(ids)]) {
@@ -199,7 +198,9 @@ export async function processConversations(q: Queries, ids: number[], deps: Proc
     const last = [...messages].reverse().find((m) => m.message_id === c.last_message_id) ?? null;
     const theirText = last?.text ?? c.last_message_text;
     const theirAt = last?.created_at ?? c.last_message_at;
-    const base = { conversation_ref: c.id, account_id: c.account_id, channel: c.channel, message_id: c.last_message_id, language: c.language, model: config.replyModel };
+    const replyRef = `reply:${c.id}:${c.last_message_id}`;
+    const llm = deps.llm ?? ((s: string, u: string) => draftWithClaude(s, u, { maxTokens: 900, feature: 'reply', accountId: c.account_id, ref: replyRef }));
+    const base = { conversation_ref: c.id, account_id: c.account_id, channel: c.channel, message_id: c.last_message_id, language: c.language, model: deps.llm ? config.replyModel : modelFor('reply') };
     const record = (decision: ReplyDecision, extra: Partial<Omit<ReplyEvent, 'id' | 'created_at' | 'feedback' | 'feedback_note'>> & { chips?: string[]; reply_text?: string | null }) => {
       const { chips = [], reply_text = null, ...rest } = extra;
       q.addReplyEvent({ ...base, needs_reply: true, intent: null, escalation: null, confidence: null, reply_id: null, decision, context: { chips, their_text: theirText, reply_text, counterpart: c.counterpart_name, their_at: theirAt }, ...rest });
@@ -219,6 +220,7 @@ export async function processConversations(q: Queries, ids: number[], deps: Proc
       const { system, user } = renderPrompt(c, messages, ctx, { json: true, intents: INTENTS[c.channel] });
       cls = parseClassification(await llm(system, user), c.channel);
     } catch (err) {
+      if (err instanceof LlmBudgetError) { log.warn(`Replies paused: ${err.message}`); record('error', { escalation: err.message.slice(0, 200) }); break; }
       log.error(`Reply pass failed for ${c.shop_name} ${c.channel} ${c.conversation_id}: ${(err as Error).message}`);
       record('error', { escalation: (err as Error).message.slice(0, 200) });
       continue;
@@ -331,7 +333,7 @@ export function repliesData(q: Queries, account: Account, channel: InboxChannel,
   const since = startOfDay(tz, now);
   const sent = q.countRepliesSentSince(account.id, channel, since);
   const waiting = waitingFor(q, account.id, channel, policy, now);
-  const log = q.listReplyEvents({ accountId: account.id, channel, limit: 300 });
+  const log = withCosts(q, q.listReplyEvents({ accountId: account.id, channel, limit: 300 }));
   const week = q.listReplyEvents({ accountId: account.id, channel, since: dayAgo(7, now), limit: 2000 });
   const minutes = log.filter((e) => e.decision === 'auto_sent' && e.created_at >= since && e.context.their_at).map((e) => (Date.parse(e.created_at) - Date.parse(e.context.their_at!)) / 60000).filter((m) => m >= 0 && m < 1440);
   const cruvaShop = cruvaShopFor(q, account.id, null);
@@ -390,6 +392,13 @@ export function repliesData(q: Queries, account: Account, channel: InboxChannel,
 }
 
 /** Every thread waiting for a person across accounts, newest first (for Today). */
+/** The Claude cost behind each event, from the usage log (manual drafts and automatic passes alike). */
+export function withCosts<T extends Pick<ReplyEvent, 'conversation_ref' | 'message_id' | 'cost'>>(q: Queries, events: T[]): T[] {
+  const refs = events.map((e) => `reply:${e.conversation_ref}:${e.message_id}`);
+  const costs = q.llmCostByRef(refs);
+  return events.map((e) => ({ ...e, cost: costs.get(`reply:${e.conversation_ref}:${e.message_id}`) ?? null }));
+}
+
 export function waitingAll(q: Queries, limit = 40, now = Date.now()): (InboxConversation & { reason: string | null })[] {
   const out: (InboxConversation & { reason: string | null })[] = [];
   for (const a of q.listAccounts().filter((x) => x.enabled)) {

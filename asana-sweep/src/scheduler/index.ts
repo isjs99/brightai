@@ -99,7 +99,7 @@ export class Scheduler {
     this.cruvaPull = new CruvaPuller(q);
     this.stock.cruvaRefresh = (shopId) => this.cruvaPull.run(shopId);
     this.copilot = new Copilot(q, { gmail: this.gmail });
-    this.clientTasks = new ClientTasks(q);
+    this.clientTasks = new ClientTasks(q, { copilot: this.copilot, gmailConnected: () => this.gmail.connected });
     this.cruvaInbox = new CruvaInboxWatcher(q);
     this.targets = new Targets(q);
     this.competitors = new Competitors(q);
@@ -114,6 +114,7 @@ export class Scheduler {
       if (n) log.info(`Pruned ${n} checklist rows older than ${config.runRetentionDays} days`);
       this.q.pruneHealthPulls(45);
       this.q.pruneAssessments(180);
+      this.q.pruneLlmCalls(new Date(Date.now() - 400 * 86400000).toISOString());
     });
     this.q.pruneChecks(config.runRetentionDays);
     this.q.pruneTicks(config.runRetentionDays);

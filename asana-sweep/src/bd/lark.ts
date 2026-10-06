@@ -78,7 +78,7 @@ export async function generateLarkMessage(q: Queries, prospect: BdProspect, r: L
 Rules: use ONLY the facts given; never invent numbers, dates, names or history. Mention at most two facts. If a fact is not in the list, do not imply it. The ask: if the recipient is the account's AM, ask whether the brand is already working with a TSP and offer to be introduced or to reach out directly; if the recipient is the TSP manager, ask who the AM on the brand is and whether the brand is with a TSP yet, and offer to reach out or take an intro. Output JSON only: {"message": "..."}.`;
   const user = `Recipient: ${to}. The recipient ${relationship}.\nFacts about the brand:\n${facts.map((f) => `- ${f}`).join('\n')}${opts.instructions ? `\nExtra instruction from the sender: ${opts.instructions}` : ''}`;
   try {
-    const text = await draftWithClaude(system, user, { maxTokens: 400 });
+    const text = await draftWithClaude(system, user, { maxTokens: 400, feature: 'outreach' });
     const m = text.match(/\{[\s\S]*\}/);
     const parsed = JSON.parse(m ? m[0] : text) as { message?: string };
     const body = String(parsed.message ?? '').trim();

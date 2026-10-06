@@ -75,7 +75,7 @@ export function renderSlackIncident(i: Incident, opts: { dashboardUrl?: string }
 }
 
 export class IncidentEngine {
-  constructor(private q: Queries, private slack: SlackBot = slackBot, private client: TtsClient = tts, private llm: ((system: string, user: string) => Promise<string>) | null = config.anthropicApiKey ? (s, u) => draftWithClaude(s, u, { maxTokens: 400 }) : null) {}
+  constructor(private q: Queries, private slack: SlackBot = slackBot, private client: TtsClient = tts, private llm: ((system: string, user: string) => Promise<string>) | null = config.anthropicApiKey ? (s, u) => draftWithClaude(s, u, { maxTokens: 400, feature: 'incidents' }) : null) {}
 
   kinds(): IncidentKind[] {
     return INCIDENT_KINDS;

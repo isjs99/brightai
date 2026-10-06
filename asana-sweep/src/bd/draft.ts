@@ -24,7 +24,7 @@ export async function generateDraft(q: Queries, prospectId: number, contact: { n
   let lastError = '';
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
-      const text = await draftWithClaude(system, user, { maxTokens: 1500 });
+      const text = await draftWithClaude(system, user, { maxTokens: 1500, feature: 'outreach' });
       return { ...parseDraftJson(text), generator: 'claude' };
     } catch (err) {
       lastError = (err as Error).message;

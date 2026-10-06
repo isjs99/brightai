@@ -37,7 +37,7 @@ export function stageOf(stage: string | null): { pct: number; label: string; nex
   return { pct: 30, label: stage, next: ['Confirm the next step with the client'], lost: false };
 }
 
-const INTERNAL_CALL_RE = /\b(internal|team (call|meeting|sync)|founders?|1:1|one to one|catch[\s-]?up|weekly|standup|all[\s-]?hands|ai training|interview)\b/i;
+export const INTERNAL_CALL_RE = /\b(internal|team (call|meeting|sync)|founders?|1:1|one to one|catch[\s-]?up|weekly|standup|all[\s-]?hands|ai training|interview)\b/i;
 const daysSince = (iso: string | null, now = Date.now()): number | null => (iso ? Math.floor((now - Date.parse(iso.length === 10 ? `${iso}T12:00:00Z` : iso)) / 86400000) : null);
 const domainOf = (lead: Lead, prospectDomain: string | null): string | null => {
   const m = (lead.notes ?? '').match(/\b([a-z0-9-]+\.(?:com|de|co\.uk|uk|fr|it|es|nl|io|eu|net|org))\b/i);
@@ -129,7 +129,7 @@ export class Targets {
 
   private get llm(): ((system: string, user: string) => Promise<string>) | null {
     if (this.deps.llm !== undefined) return this.deps.llm;
-    return config.anthropicApiKey ? (s, u) => draftWithClaude(s, u, { maxTokens: 900 }) : null;
+    return config.anthropicApiKey ? (s, u) => draftWithClaude(s, u, { maxTokens: 900, feature: 'targets' }) : null;
   }
 
   async analyse(lead: Lead, opts: { useLlm?: boolean } = {}): Promise<TargetAnalysis> {

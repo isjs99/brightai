@@ -1,7 +1,10 @@
 import type { Queries } from '../db/queries.js';
-import type { Account, ClientTask, ClientTasksData } from '../sweep/types.js';
+import type { Account, ClientTask, ClientTaskSources, ClientTasksData } from '../sweep/types.js';
 import { config } from '../config.js';
-import { draftWithClaude } from '../inbox/llm.js';
+import { draftWithClaude, modelFor } from '../inbox/llm.js';
+import { tldv } from '../bd/tldv.js';
+import { slackBot } from '../notify/slackbot.js';
+import { INTERNAL_CALL_RE } from '../onboarding/targets.js';
 import { todayIn } from '../checklist/checker.js';
 import { liveEvents } from '../live/events.js';
 import { log } from '../logger.js';
@@ -99,11 +102,36 @@ const similar = (a: string, b: string): boolean => {
 export class ClientTasks {
   private scanning = false;
   private timer: NodeJS.Timeout | null = null;
-  constructor(private q: Queries, private deps: { llm?: ((system: string, user: string) => Promise<string>) | null } = {}) {}
+  constructor(private q: Queries, private deps: { llm?: ((system: string, user: string) => Promise<string>) | null; copilot?: { index(): Promise<{ added: number; errors: string[] }>; indexStatus(): { last_at: string | null; last_error: string | null; indexing: boolean } } | null; gmailConnected?: () => boolean; slackConfigured?: () => boolean; tldvConfigured?: () => boolean } = {}) {}
 
   private get llm(): ((system: string, user: string) => Promise<string>) | null {
     if (this.deps.llm !== undefined) return this.deps.llm;
-    return config.anthropicApiKey ? (s, u) => draftWithClaude(s, u, { maxTokens: 1200 }) : null;
+    return config.anthropicApiKey ? (s, u) => draftWithClaude(s, u, { maxTokens: 1200, feature: 'tasks' }) : null;
+  }
+
+  /** Where the tasks would come from and why nothing arrives, with the fix per source. */
+  sources(): ClientTaskSources {
+    const accounts = this.q.listAccounts().filter((a) => a.enabled);
+    const slackOn = this.deps.slackConfigured ? this.deps.slackConfigured() : slackBot.configured;
+    const gmailOn = this.deps.gmailConnected ? this.deps.gmailConnected() : false;
+    const tldvOn = this.deps.tldvConfigured ? this.deps.tldvConfigured() : tldv.configured;
+    const withChannel = accounts.filter((a) => a.client_slack_channel);
+    const withDomain = accounts.filter((a) => a.client_domain);
+    const since = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10);
+    const rows = this.q.listEvidence({ kinds: ['slack', 'email', 'call'], from: since });
+    const count = (id: number, kind: string) => rows.filter((r) => r.account_id === id && r.kind === kind).length;
+    const idx = this.deps.copilot?.indexStatus() ?? { last_at: this.q.getSetting('copilot_last_index_at', '') || null, last_error: this.q.getSetting('copilot_last_index_error', '') || null, indexing: false };
+    const ie = idx.last_error ?? '';
+    const slackErr = /Slack/i.test(ie) ? ie.split(' · ').find((x) => /^Slack/i.test(x)) ?? null : null;
+    return {
+      slack: { ok: slackOn && withChannel.length > 0 && !slackErr, label: 'Client Slack channels', detail: !slackOn ? 'SLACK_BOT_TOKEN not set' : !withChannel.length ? 'No account has a client Slack channel set' : slackErr ? slackErr : `${withChannel.length} of ${accounts.length} accounts have a channel`, fix: !slackOn ? 'Set SLACK_BOT_TOKEN (bot scopes: channels:read, groups:read, channels:history, groups:history, chat:write) and restart.' : !withChannel.length ? 'Settings › Accounts: set the client Slack channel on each account, then invite the bot to that channel (/invite @bot).' : slackErr ? 'Invite the bot to the channel (/invite @bot) and check the bot has channels:history and groups:history.' : accounts.length > withChannel.length ? `Set the channel on: ${accounts.filter((a) => !a.client_slack_channel).map((a) => a.name).join(', ')}` : null },
+      gmail: { ok: gmailOn && withDomain.length > 0, label: 'Emails with the client (Gmail)', detail: !gmailOn ? 'Gmail not connected' : !withDomain.length ? 'No account has a client email domain set' : `${withDomain.length} of ${accounts.length} accounts have a domain`, fix: !gmailOn ? 'Growth › Outreach › Voice, Gmail & contacts: connect Gmail (needs GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET, scopes gmail.compose and gmail.readonly).' : !withDomain.length ? 'Settings › Accounts: set the client domain (e.g. neurogum.com) on each account.' : accounts.length > withDomain.length ? `Set the domain on: ${accounts.filter((a) => !a.client_domain).map((a) => a.name).join(', ')}` : null },
+      tldv: { ok: tldvOn && !/tl;dv/i.test(ie), label: 'tl;dv calls', detail: !tldvOn ? 'TLDV_API_KEY not set' : /tl;dv/i.test(ie) ? ie.split(' · ').find((x) => /tl;dv/i.test(x)) ?? ie : 'Calls from the last 180 days are indexed; a call lands on an account when an attendee has the client domain or the title names the account', fix: !tldvOn ? 'Set TLDV_API_KEY (tl;dv › Settings › API) and restart.' : null },
+      llm: { ok: Boolean(this.llm), label: 'Claude (reads the text into tasks)', detail: this.llm ? `${modelFor('tasks')}` : 'ANTHROPIC_API_KEY not set: pattern matching only', fix: this.llm ? null : 'Set ANTHROPIC_API_KEY and keep credit on the Anthropic account; without it only sentences that read like an ask become tasks.' },
+      index: idx,
+      accounts: accounts.map((a) => ({ id: a.id, name: a.name, slack: count(a.id, 'slack'), email: count(a.id, 'email'), call: count(a.id, 'call'), missing: [!a.client_slack_channel ? 'Slack channel' : '', !a.client_domain ? 'client domain' : ''].filter(Boolean) })),
+      unmatched_calls: rows.filter((r) => r.kind === 'call' && r.account_id === null && !INTERNAL_CALL_RE.test(r.title)).slice(0, 10).map((r) => ({ title: r.title, occurred_at: r.occurred_at })),
+    };
   }
 
   start(): void {
@@ -125,17 +153,19 @@ export class ClientTasks {
       from, to, today,
       tasks: this.q.listClientTasks({ accountId: opts.accountId ?? undefined, from, to }),
       accounts: this.q.listAccounts().filter((a) => a.enabled).map((a) => ({ id: a.id, name: a.name, am_name: a.am_name, markets: a.markets, client_slack_channel: a.client_slack_channel, client_domain: a.client_domain })),
-      ...this.status(), llm_configured: Boolean(this.llm),
+      ...this.status(), llm_configured: Boolean(this.llm), sources: this.sources(),
     };
   }
 
   /** New evidence since the last scan (client Slack, emails, calls) → tasks, deduplicated per account. */
-  async scan(opts: { sinceDays?: number; accountId?: number } = {}): Promise<{ scanned: number; added: number; errors: string[] }> {
+  async scan(opts: { sinceDays?: number; accountId?: number; index?: boolean } = {}): Promise<{ scanned: number; added: number; errors: string[] }> {
     if (this.scanning) return { scanned: 0, added: 0, errors: ['Already scanning'] };
     this.scanning = true;
     const errors: string[] = [];
     let scanned = 0, added = 0;
     try {
+      // Fresh evidence first: the client Slack channels, the emails and the calls are re-read on every scan.
+      if (opts.index !== false && this.deps.copilot) { try { const r = await this.deps.copilot.index(); errors.push(...r.errors.filter((e) => e !== 'Already indexing')); } catch (err) { errors.push(`Index: ${(err as Error).message}`); } }
       const last = this.q.getSetting('client_tasks_last_scan_at', '');
       const since = opts.sinceDays ? new Date(Date.now() - opts.sinceDays * 86400000).toISOString() : last || new Date(Date.now() - 14 * 86400000).toISOString();
       const accounts = this.q.listAccounts().filter((a) => a.enabled && (!opts.accountId || a.id === opts.accountId));

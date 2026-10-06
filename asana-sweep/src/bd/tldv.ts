@@ -106,7 +106,7 @@ export async function draftCallFollowups(q: Queries, opts: { gmail?: GmailClient
     return { checked: 0, drafted: 0, errors: [(err as Error).message] };
   }
   let drafted = 0;
-  const llm = opts.llm ?? ((s: string, u: string) => draftWithClaude(s, u, { maxTokens: 1200 }));
+  const llm = opts.llm ?? ((s: string, u: string) => draftWithClaude(s, u, { maxTokens: 1200, feature: 'calls' }));
   for (const m of meetings.sort((a, b) => a.happenedAt.localeCompare(b.happenedAt))) {
     if (q.draftForMeeting(m.id)) continue;
     const to = externalAttendee(m);

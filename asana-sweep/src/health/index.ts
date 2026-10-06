@@ -56,7 +56,7 @@ export class HealthEngine {
 
   private get llm(): ((system: string, user: string) => Promise<string>) | null {
     if (this.deps.llm !== undefined) return this.deps.llm;
-    return config.anthropicApiKey ? (s, u) => draftWithClaude(s, u, { maxTokens: 900 }) : null;
+    return config.anthropicApiKey ? (s, u) => draftWithClaude(s, u, { maxTokens: 900, feature: 'health' }) : null;
   }
 
   thresholds(): HealthThresholds {

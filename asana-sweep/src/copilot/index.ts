@@ -132,12 +132,13 @@ export const withSlack = (qn: CopilotQuestion): CopilotQuestion => ({ ...qn, sla
 export class Copilot {
   private indexing = false;
   private timer: NodeJS.Timeout | null = null;
+  private indexTimer: NodeJS.Timeout | null = null;
 
   constructor(private q: Queries, private deps: CopilotDeps = {}) {}
 
   private get llm(): ((system: string, user: string) => Promise<string>) | null {
     if (this.deps.llm !== undefined) return this.deps.llm;
-    return config.anthropicApiKey ? (s, u) => draftWithClaude(s, u, { maxTokens: 700 }) : null;
+    return config.anthropicApiKey ? (s, u) => draftWithClaude(s, u, { maxTokens: 700, feature: 'ask' }) : null;
   }
 
   settings(): CopilotData['settings'] {
@@ -163,12 +164,20 @@ export class Copilot {
   start(): void {
     this.stop();
     this.timer = setInterval(() => void this.poll(), 5 * 60000);
+    // The evidence store (Slack, Gmail, tl;dv, data) is rebuilt shortly after boot and then every hour; the
+    // client task scan also refreshes it before it reads.
+    this.indexTimer = setInterval(() => void this.index().catch(() => undefined), 60 * 60000);
     setTimeout(() => void this.index().then(() => this.poll()), 90000);
+  }
+
+  indexStatus(): { last_at: string | null; last_error: string | null; indexing: boolean } {
+    return { last_at: this.q.getSetting('copilot_last_index_at', '') || null, last_error: this.q.getSetting('copilot_last_index_error', '') || null, indexing: this.indexing };
   }
 
   stop(): void {
     if (this.timer) clearInterval(this.timer);
-    this.timer = null;
+    if (this.indexTimer) clearInterval(this.indexTimer);
+    this.timer = null; this.indexTimer = null;
   }
 
   private accountFor(opts: { domain?: string | null; channel?: string | null; text?: string | null }): Account | null {

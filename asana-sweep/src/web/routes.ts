@@ -55,6 +55,7 @@ import { syncStatus } from '../scheduler/sync-status.js';
 import { inboxSettings as inboxSettingsOf } from '../inbox/sync.js';
 import type { FbtField, FbtProfile, OnboardingTerms, PitchBrief, PitchDeck, PitchesData, PitchSlide, PitchStat, PnlForecastInputs, PnlInputs, ReportSchedule } from '../sweep/types.js';
 import { researchPitch } from '../pitch/research.js';
+import { llmUsageData, saveLlmSettings } from '../llm/usage.js';
 import { buildDeck, deckHtml, DEFAULT_BRIEF, normaliseBrief } from '../pitch/deck.js';
 import type { AtsKind, CompetitorAts } from '../sweep/types.js';
 import { periodBounds } from '../reports/client.js';
@@ -795,7 +796,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
         { key: 'routine', name: 'Daily review routine (Claude)', role: 'An optional scheduled Claude routine can post findings and an assessment per account to /api/flags/ingest; the fixed rules no longer depend on it', configured: Boolean(config.ingestToken), ok: Boolean(config.ingestToken) && Boolean(hs.last_ingest_at) && Date.now() - Date.parse(hs.last_ingest_at ?? '') < 2 * 86400000, detail: !config.ingestToken ? 'INGEST_TOKEN not set in .env' : hs.last_ingest_at ? `Last post ${hs.last_ingest_at}` : 'Token set, nothing posted yet', link: '/monitor?tab=review', testable: false },
         { key: 'slack', name: 'Slack bot', role: 'AM reminders, incident alerts, client reports', configured: slackBot.configured, ok: slackBot.configured, detail: slackBot.configured ? 'SLACK_BOT_TOKEN set' : 'SLACK_BOT_TOKEN not set', link: '/people', testable: false },
         { key: 'tldv', name: 'tl;dv', role: 'Follow-up emails after calls', configured: tldv.configured, ok: tldv.configured, detail: tldv.configured ? 'TLDV_API_KEY set' : 'TLDV_API_KEY not set', link: '/outreach', testable: false },
-        { key: 'anthropic', name: 'Anthropic API', role: 'Drafting replies, reports and the copilot', configured: Boolean(config.anthropicApiKey), ok: Boolean(config.anthropicApiKey), detail: config.anthropicApiKey ? `model ${config.replyModel}` : 'ANTHROPIC_API_KEY not set', link: '/inbox', testable: false },
+        { key: 'anthropic', name: 'Anthropic API', role: 'Drafting replies, reports and the copilot', configured: Boolean(config.anthropicApiKey), ok: Boolean(config.anthropicApiKey), detail: config.anthropicApiKey ? `models and spend under Claude below` : 'ANTHROPIC_API_KEY not set', link: '/connections', testable: false },
         { key: 'leads', name: 'Lead sheet', role: 'Leads dashboard', configured: leads.status !== 'never', ok: leads.status === 'ok', detail: leads.error ? leads.error : leads.last_sync_at ? `${leads.rows} rows, last sync ${leads.last_sync_at}` : 'not synced yet', link: '/leads', testable: false },
       ],
     });
@@ -2207,7 +2208,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
             ? 'You write short replies to people who asked for a call through the website of Brightform, a TikTok Shop Partner agency in the EU. British English, warm but plain, no hype, no exclamation marks, under 110 words. Acknowledge their brand and situation specifically from the details given (category, markets, whether they already sell on TikTok Shop), say one relevant thing Brightform does for brands like theirs, and propose two concrete slots that match their preferred time, written as placeholders like [Tue 10:00 CET] for the sender to fill in. No booking links. Sign off with the sender name given. Output the email body only, no subject.'
             : 'You write short replies to inbound enquiries for Brightform, a TikTok Shop Partner agency in the EU. British English, warm but plain, no hype, no exclamation marks, under 120 words. Acknowledge what they wrote specifically, say one relevant thing Brightform does for brands like theirs, and propose a short call with this link: https://calendly.com/isaacsinclair/brightform-2026-website-call. Sign off with the sender name given. Output the email body only, no subject.',
           `${isCall ? 'Call request' : 'Enquiry'} from ${inq.name}${inq.brand ? ` at ${inq.brand}` : ''} (${inq.email})${inq.language ? `, site language ${inq.language}` : ''}${inq.preferred_time ? `, preferred time: ${inq.preferred_time}` : ''}:\n\n${inq.message}\n\nSender name: ${actor}`,
-          { maxTokens: 400 },
+          { maxTokens: 400, feature: 'outreach' },
         );
       } catch (err) { log.warn(`Enquiry draft via Claude failed, using the template: ${(err as Error).message}`); }
     }
@@ -2488,7 +2489,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const { system, user } = renderPrompt(d.conversation, d.messages, d.context);
     const extra = optText(b.instructions);
     try {
-      const text = await draftWithClaude(system, extra ? `${user}\n\nExtra instruction from the team: ${extra}` : user);
+      const text = await draftWithClaude(system, extra ? `${user}\n\nExtra instruction from the team: ${extra}` : user, { maxTokens: 900, feature: 'reply', accountId: d.conversation.account_id, ref: `reply:${d.conversation.id}:${d.conversation.last_message_id ?? 'manual'}` });
       const reply = q.addReply({ conversation_ref: d.conversation.id, text, mode: 'draft', created_by: actorOf(req) ?? 'dashboard', in_reply_to: d.conversation.last_message_id });
       res.json({ reply, ...(await conversationDetail(d.conversation.id, optText(b.language))) });
     } catch (err) {
@@ -3035,6 +3036,10 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   r.post('/competitors/:id/clients', (req, res) => { const c = competitorParam(req); const b = (req.body ?? {}) as Record<string, unknown>; const brand = optText(b.brand); if (!brand) throw new HttpError(400, 'Brand is required.'); competitors.addClient(c.id, { brand, market: optText(b.market)?.toUpperCase() ?? null, evidence: optText(b.evidence), url: optText(b.url), actor: actorOf(req) }); res.json(competitors.detail(c.id)); });
   r.delete('/competitors/:id/clients/:clientId', (req, res) => { const c = competitorParam(req); const cid = Number(req.params.clientId); if (!Number.isInteger(cid)) throw new HttpError(400, 'Bad client id'); q.patchCompetitorClient(cid, { status: 'removed' }); liveEvents.emitUpdate({ kind: 'competitors' }); res.json(competitors.detail(c.id)); });
   r.post('/competitors/:id/notes', (req, res) => { const c = competitorParam(req); const b = (req.body ?? {}) as Record<string, unknown>; const text = optText(b.text); if (!text) throw new HttpError(400, 'Text is required.'); competitors.addNote(c.id, { text, url: optText(b.url), actor: actorOf(req) }); res.json(competitors.detail(c.id)); });
+
+  // ---- Claude usage, models and budget ----
+  r.get('/llm/usage', (_req, res) => res.json(llmUsageData(q)));
+  r.put('/llm/settings', (req, res) => { const b = (req.body ?? {}) as Record<string, unknown>; saveLlmSettings(q, { feature_models: b.feature_models && typeof b.feature_models === 'object' ? (b.feature_models as Record<string, string>) : undefined, daily_budget_usd: b.daily_budget_usd !== undefined && b.daily_budget_usd !== '' ? Number(b.daily_budget_usd) : undefined }); res.json(llmUsageData(q)); });
 
   r.get('/pitch', (_req, res) => res.json(pitchesData()));
   r.get('/pitch/:id', (req, res) => res.json({ pitch: pitchParam(req), ...pitchesData() }));
