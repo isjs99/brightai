@@ -291,14 +291,16 @@ export function replyBlocker(q: Queries, c: InboxConversation, now = Date.now())
 
 const dayAgo = (n: number, now = Date.now()) => new Date(now - n * 86400000).toISOString();
 
-export function channelReadiness(q: Queries, accountId: number, channel: InboxChannel, scopeLive: (scope: 'customer_service' | 'affiliate_seller') => boolean, apps: { main: boolean; affiliate: boolean; cruva?: boolean } = { main: tts.configured, affiliate: ttsAffiliate.configured, cruva: cruvaMcp.configured }): { ready: boolean; note: string | null; shops: RepliesData['shops'] } {
-  const shops = q.listTtsShops().filter((s) => s.account_id === accountId);
+export interface ShopsPrefetch { tts: ReturnType<Queries['listTtsShops']>; cruva: ReturnType<Queries['listShops']> }
+
+export function channelReadiness(q: Queries, accountId: number, channel: InboxChannel, scopeLive: (scope: 'customer_service' | 'affiliate_seller') => boolean, apps: { main: boolean; affiliate: boolean; cruva?: boolean } = { main: tts.configured, affiliate: ttsAffiliate.configured, cruva: cruvaMcp.configured }, pre?: ShopsPrefetch): { ready: boolean; note: string | null; shops: RepliesData['shops'] } {
+  const shops = (pre?.tts ?? q.listTtsShops()).filter((s) => s.account_id === accountId);
   const policy = getPolicy(q, accountId, channel);
   const rows: RepliesData['shops'] = shops.map((s) => ({ id: s.id, name: s.name, market: s.market, token_ok: channel === 'affiliate' ? (apps.affiliate ? s.affiliate_token_ok : s.token_ok) : s.token_ok, off: policy.shops_off.includes(s.id), language: policy.languages[s.id] ?? null, source: 'tts' as const }));
   if (channel === 'affiliate') {
     // Creators: every linked Cruva shop reads and answers its creator inbox through Cruva, whether or not the TikTok affiliate app is authorised.
     const cruvaOn = apps.cruva ?? cruvaMcp.configured;
-    const cruvaShops = q.listShops('cruva').filter((s) => s.account_id === accountId);
+    const cruvaShops = (pre?.cruva ?? q.listShops('cruva')).filter((s) => s.account_id === accountId);
     for (const s of cruvaShops) {
       const market = marketOfShopName(s.shop_name);
       // A market the TikTok affiliate app already covers stays on TikTok; Cruva fills the rest.
@@ -322,12 +324,16 @@ export function channelReadiness(q: Queries, accountId: number, channel: InboxCh
 
 const median = (xs: number[]): number | null => { if (!xs.length) return null; const s = [...xs].sort((a, b) => a - b); const m = Math.floor(s.length / 2); return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2; };
 
+/** Attach the latest decision and the pending draft to open threads: three queries, not two per thread. */
+export function withState(q: Queries, convs: InboxConversation[]): (InboxConversation & { event: ReplyEvent | null; draft: InboxReply | null })[] {
+  const events = q.replyEventsForMessages(convs.map((c) => ({ conversation_ref: c.id, message_id: c.last_message_id! })));
+  const drafts = q.pendingDrafts(convs.map((c) => c.id));
+  return convs.map((c) => ({ ...c, event: events.get(`${c.id}:${c.last_message_id}`) ?? null, draft: drafts.get(c.id) ?? null }));
+}
+
 /** Conversations that need the team, with their latest decision and pending draft. */
-export function waitingFor(q: Queries, accountId: number, channel: InboxChannel, policy: ReplyPolicy, now = Date.now()): RepliesData['waiting'] {
-  return q
-    .listConversations({ accountId, channel, limit: 500 })
-    .filter((c) => c.status !== 'closed' && c.last_sender === 'them' && c.last_message_id)
-    .map((c) => ({ ...c, event: q.replyEventFor(c.id, c.last_message_id!), draft: q.pendingDraft(c.id) }))
+export function waitingFor(q: Queries, accountId: number, channel: InboxChannel, policy: ReplyPolicy, now = Date.now(), open?: InboxConversation[]): RepliesData['waiting'] {
+  return withState(q, open ?? q.listOpenConversations({ accountId, channel, limit: 500 }))
     .filter((c) => (c.event ? ['escalated', 'drafted', 'capped', 'quiet', 'error'].includes(c.event.decision) : c.last_message_at ? now - Date.parse(c.last_message_at) <= policy.max_age_hours * 3600000 : false))
     .sort((a, b) => (b.last_message_at ?? '').localeCompare(a.last_message_at ?? ''));
 }
@@ -344,12 +350,12 @@ export function repliesData(q: Queries, account: Account, channel: InboxChannel,
   const week = q.listReplyEvents({ accountId: account.id, channel, since: dayAgo(7, now), limit: 2000 });
   const minutes = log.filter((e) => e.decision === 'auto_sent' && e.created_at >= since && e.context.their_at).map((e) => (Date.parse(e.created_at) - Date.parse(e.context.their_at!)) / 60000).filter((m) => m >= 0 && m < 1440);
   const cruvaShop = cruvaShopFor(q, account.id, null);
-  const pulls = q.latestHealthPulls('tts').filter((p) => readiness.shops.some((s) => s.id === p.shop_id));
-  const productCount = pulls.reduce((n, p) => n + (((p.rows as { products?: unknown[] }).products ?? []).length), 0);
-  const orderCount = pulls.reduce((n, p) => n + (((p.rows as { orders?: unknown[] }).orders ?? []).length), 0);
+  const pullCounts = [...q.latestHealthPullCounts('tts', readiness.shops.map((s) => s.id)).values()];
+  const productCount = pullCounts.reduce((n, p) => n + p.products, 0);
+  const orderCount = pullCounts.reduce((n, p) => n + p.orders, 0);
   const library = q.listContext().filter((e) => e.enabled && (e.scope === 'both' || e.scope === channel) && (e.account_id === null || e.account_id === account.id));
   const promos = q.listPromotions().filter((p) => Date.parse(p.end_at) > now && p.targets.some((t) => t.account_id === account.id && t.status !== 'error'));
-  const history = q.listConversations({ accountId: account.id, channel, limit: 5000 }).length;
+  const history = q.countConversations({ accountId: account.id, channel });
   const knowledge: RepliesData['knowledge'] = [
     { label: 'Context library', state: library.length ? 'ok' : 'warn', detail: library.length ? `${library.length} note(s) for this account or every account` : 'No notes yet. Teach from a wrong reply, or add notes under Inbox › Library.' },
     { label: 'Promotions', state: promos.length ? 'ok' : 'warn', detail: promos.length ? `${promos.length} live or upcoming` : 'None live for this account' },
@@ -406,28 +412,45 @@ export function withCosts<T extends Pick<ReplyEvent, 'conversation_ref' | 'messa
   return events.map((e) => ({ ...e, cost: costs.get(`reply:${e.conversation_ref}:${e.message_id}`) ?? null }));
 }
 
-export function waitingAll(q: Queries, limit = 40, now = Date.now()): (InboxConversation & { reason: string | null })[] {
-  const out: (InboxConversation & { reason: string | null })[] = [];
-  for (const a of q.listAccounts().filter((x) => x.enabled)) {
-    for (const channel of ['affiliate', 'cs'] as InboxChannel[]) {
-      for (const w of waitingFor(q, a.id, channel, getPolicy(q, a.id, channel), now)) out.push({ ...w, reason: w.event?.escalation ?? (w.event ? w.event.decision : null) });
-    }
+/** Open threads for every enabled account, grouped by account and channel, from one query. */
+function openByAccount(q: Queries, accounts: Account[]): Map<string, InboxConversation[]> {
+  const enabled = new Set(accounts.map((a) => a.id));
+  const by = new Map<string, InboxConversation[]>();
+  for (const c of q.listOpenConversations({ limit: 20000 })) {
+    if (c.account_id === null || !enabled.has(c.account_id)) continue;
+    const key = `${c.account_id}:${c.channel}`;
+    const list = by.get(key) ?? [];
+    if (list.length < 500) { list.push(c); by.set(key, list); }
   }
-  return out.sort((a, b) => (a.last_message_at ?? '').localeCompare(b.last_message_at ?? '')).slice(0, limit);
+  return by;
 }
 
-export function summary(q: Queries, scopeLive: (scope: 'customer_service' | 'affiliate_seller') => boolean, now = Date.now()): RepliesSummaryRow[] {
+export function waitingAll(q: Queries, limit = 40, now = Date.now()): (InboxConversation & { reason: string | null })[] {
+  return overview(q, () => true, now, limit).waiting;
+}
+
+/** The replies overview in one pass over the open threads: the per-account rows and the oldest threads waiting across accounts. */
+export function overview(q: Queries, scopeLive: (scope: 'customer_service' | 'affiliate_seller') => boolean, now = Date.now(), limit = 40): { rows: RepliesSummaryRow[]; waiting: (InboxConversation & { reason: string | null })[] } {
+  const accounts = q.listAccounts().filter((x) => x.enabled);
+  const by = openByAccount(q, accounts);
+  const pre: ShopsPrefetch = { tts: q.listTtsShops(), cruva: q.listShops('cruva') };
   const rows: RepliesSummaryRow[] = [];
-  for (const a of q.listAccounts().filter((a) => a.enabled)) {
+  const all: (InboxConversation & { reason: string | null })[] = [];
+  for (const a of accounts) {
     for (const channel of ['affiliate', 'cs'] as InboxChannel[]) {
       const policy = getPolicy(q, a.id, channel);
       const tz = tzFor(q, (a.markets ?? '').split(/[,\s]+/)[0] || null);
-      const waiting = waitingFor(q, a.id, channel, policy, now);
-      const readiness = channelReadiness(q, a.id, channel, scopeLive);
+      const waiting = waitingFor(q, a.id, channel, policy, now, by.get(`${a.id}:${channel}`) ?? []);
+      const readiness = channelReadiness(q, a.id, channel, scopeLive, undefined, pre);
       rows.push({ account_id: a.id, account_name: a.name, am_name: a.am_name, channel, mode: policy.mode, waiting: waiting.length, escalated: waiting.filter((w) => w.event?.decision === 'escalated' || w.event?.decision === 'error').length, auto_today: q.countReplyEvents(a.id, channel, 'auto_sent', startOfDay(tz, now)), cap: policy.daily_cap, ready: readiness.ready, note: readiness.note, shops: readiness.shops });
+      for (const w of waiting) all.push({ ...w, reason: w.event?.escalation ?? (w.event ? w.event.decision : null) });
     }
   }
-  return rows;
+  return { rows, waiting: all.sort((a, b) => (a.last_message_at ?? '').localeCompare(b.last_message_at ?? '')).slice(0, limit) };
+}
+
+export function summary(q: Queries, scopeLive: (scope: 'customer_service' | 'affiliate_seller') => boolean, now = Date.now()): RepliesSummaryRow[] {
+  return overview(q, scopeLive, now).rows;
 }
 
 /** Save a policy from the UI; unknown keys are dropped, numbers clamped. */

@@ -33,7 +33,7 @@ import type { BdContact, BdFollowup, TtsContact } from '../sweep/types.js';
 import { inboxSettings, sendReply, syncInbox } from '../inbox/sync.js';
 import { syncCruvaInbox } from '../inbox/cruva-inbox.js';
 import { cruvaMcp } from '../cruva/mcp.js';
-import { feedback as replyFeedback, repliesData, replyBlocker, retryErrors, sampleThread, savePolicy, summary as repliesSummary, waitingAll } from '../inbox/replies.js';
+import { feedback as replyFeedback, overview as repliesOverview, repliesData, replyBlocker, retryErrors, sampleThread, savePolicy, waitingAll } from '../inbox/replies.js';
 import { buildContext, renderPrompt } from '../inbox/context.js';
 import { draftWithClaude } from '../inbox/llm.js';
 import { LANGUAGE_NAMES } from '../inbox/language.js';
@@ -2573,7 +2573,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (!a) throw new HttpError(404, 'Account not found');
     return a;
   };
-  r.get('/replies/summary', (_req, res) => res.json({ rows: repliesSummary(q, scopeLive), waiting: waitingAll(q), master_on: inboxSettings(q).auto_reply_master, llm_configured: inboxSettings(q).llm_configured }));
+  r.get('/replies/summary', (_req, res) => { const o = repliesOverview(q, scopeLive); res.json({ rows: o.rows, waiting: o.waiting, master_on: inboxSettings(q).auto_reply_master, llm_configured: inboxSettings(q).llm_configured }); });
   r.get('/replies/:accountId/:channel', (req, res) => res.json(repliesData(q, accountParam(req), channelParam(req), scopeLive)));
   r.put('/replies/:accountId/:channel/policy', (req, res) => {
     const a = accountParam(req);

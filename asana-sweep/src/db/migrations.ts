@@ -1756,6 +1756,18 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 45,
+    name: 'indexes for the replies overview (open threads, latest decision per message)',
+    up(db) {
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS inbox_conversations_open ON inbox_conversations(status, last_sender, channel, last_message_at DESC);
+        CREATE INDEX IF NOT EXISTS inbox_conversations_shop ON inbox_conversations(tts_shop_id, channel);
+        CREATE INDEX IF NOT EXISTS reply_events_message ON reply_events(conversation_ref, message_id, id);
+        CREATE INDEX IF NOT EXISTS inbox_replies_pending ON inbox_replies(conversation_ref, mode, sent_at);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

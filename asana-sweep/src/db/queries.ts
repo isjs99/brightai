@@ -1792,6 +1792,59 @@ export class Queries {
     return (this.db.prepare(sql).all(...params) as Row[]).map((r) => this.rowToConversation(r));
   }
 
+  /** Threads waiting on an answer: open, last word from them, with a message id. One query for the whole dashboard or one account. */
+  listOpenConversations(opts: { channel?: InboxConversation['channel']; accountId?: number; limit?: number } = {}): InboxConversation[] {
+    const where: string[] = ["c.status != 'closed'", "c.last_sender = 'them'", 'c.last_message_id IS NOT NULL'];
+    const params: unknown[] = [];
+    if (opts.channel) { where.push('c.channel = ?'); params.push(opts.channel); }
+    if (opts.accountId) { where.push('COALESCE(s.account_id, cs.account_id) = ?'); params.push(opts.accountId); }
+    params.push(opts.limit ?? 500);
+    return (this.db.prepare(`${Queries.CONV_SELECT} WHERE ${where.join(' AND ')} ORDER BY c.last_message_at DESC NULLS LAST, c.id DESC LIMIT ?`).all(...params) as Row[]).map((r) => this.rowToConversation(r));
+  }
+
+  countConversations(opts: { channel?: InboxConversation['channel']; accountId?: number } = {}): number {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.channel) { where.push('c.channel = ?'); params.push(opts.channel); }
+    if (opts.accountId) { where.push('COALESCE(s.account_id, cs.account_id) = ?'); params.push(opts.accountId); }
+    const r = this.db.prepare(`SELECT COUNT(*) AS n FROM inbox_conversations c LEFT JOIN tts_shops s ON s.id = c.tts_shop_id LEFT JOIN account_shops cs ON cs.shop_id = c.tts_shop_id ${where.length ? 'WHERE ' + where.join(' AND ') : ''}`).get(...params) as { n: number };
+    return r.n;
+  }
+
+  /** The latest decision for each (conversation, message) pair, in one query per 400 threads. */
+  replyEventsForMessages(pairs: { conversation_ref: number; message_id: string }[]): Map<string, ReplyEvent> {
+    const out = new Map<string, ReplyEvent>();
+    const ids = [...new Set(pairs.map((p) => p.conversation_ref))];
+    const wanted = new Set(pairs.map((p) => `${p.conversation_ref}:${p.message_id}`));
+    for (let i = 0; i < ids.length; i += 400) {
+      const chunk = ids.slice(i, i + 400);
+      for (const r of this.db.prepare(`SELECT * FROM reply_events WHERE conversation_ref IN (${chunk.map(() => '?').join(',')}) ORDER BY id`).all(...chunk) as Row[]) {
+        const key = `${r.conversation_ref}:${r.message_id}`;
+        if (wanted.has(key)) out.set(key, this.rowToReplyEvent(r));
+      }
+    }
+    return out;
+  }
+
+  /** The newest unsent draft per thread, in one query per 400 threads. */
+  pendingDrafts(conversationRefs: number[]): Map<number, InboxReply> {
+    const out = new Map<number, InboxReply>();
+    const ids = [...new Set(conversationRefs)];
+    for (let i = 0; i < ids.length; i += 400) {
+      const chunk = ids.slice(i, i + 400);
+      for (const r of this.db.prepare(`SELECT * FROM inbox_replies WHERE conversation_ref IN (${chunk.map(() => '?').join(',')}) AND sent_at IS NULL AND error_message IS NULL AND mode = 'draft' ORDER BY id`).all(...chunk) as Row[]) out.set(Number(r.conversation_ref), this.rowToReply(r));
+    }
+    return out;
+  }
+
+  /** Row counts inside the latest pull per shop without parsing the payloads. */
+  latestHealthPullCounts(source: HealthSource, shopIds: string[]): Map<string, { products: number; orders: number }> {
+    const out = new Map<string, { products: number; orders: number }>();
+    if (!shopIds.length) return out;
+    for (const r of this.db.prepare(`SELECT p.shop_id, COALESCE(json_array_length(p.rows_json, '$.products'), 0) AS products, COALESCE(json_array_length(p.rows_json, '$.orders'), 0) AS orders FROM health_pulls p WHERE p.source = ? AND p.shop_id IN (${shopIds.map(() => '?').join(',')}) AND p.pull_date = (SELECT MAX(pull_date) FROM health_pulls x WHERE x.shop_id = p.shop_id AND x.source = p.source)`).all(source, ...shopIds) as Row[]) out.set(String(r.shop_id), { products: Number(r.products ?? 0), orders: Number(r.orders ?? 0) });
+    return out;
+  }
+
   getConversation(id: number): InboxConversation | null {
     const r = this.db.prepare(`${Queries.CONV_SELECT} WHERE c.id = ?`).get(id) as Row | undefined;
     return r ? this.rowToConversation(r) : null;
