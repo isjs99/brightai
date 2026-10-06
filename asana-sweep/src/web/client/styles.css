@@ -574,3 +574,29 @@ ul.ctasks li.ctask .tick { margin-top: 2px; }
 textarea.slack-text { font-size: 13px; line-height: 1.45; }
 ol.sources { padding-left: 20px; font-size: 12.5px; } ol.sources li { margin-bottom: 6px; }
 .ask-q .page-head { align-items: center; }
+
+/* Onboarding: targets and steps */
+.progress { height: 8px; background: var(--surface-2); border-radius: 999px; overflow: hidden; border: 1px solid var(--border); }
+.progress > i { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width .6s cubic-bezier(.2,.8,.2,1); }
+.progress.good > i { background: var(--good); } .progress.warn > i { background: var(--warn); } .progress.crit > i { background: var(--crit); }
+.bell { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 700; color: var(--accent); background: var(--accent-bg); border: 1px solid var(--accent-border); border-radius: 999px; padding: 1px 8px; animation: bell-pulse 2.2s ease-in-out infinite; }
+@keyframes bell-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(29,61,240,.25); } 50% { box-shadow: 0 0 0 6px rgba(29,61,240,0); } }
+.big-tick { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; }
+.big-tick .box { width: 26px; height: 26px; border-radius: 8px; border: 2px solid var(--border-strong); display: inline-flex; align-items: center; justify-content: center; background: var(--surface); transition: transform .15s, background .2s, border-color .2s; font-size: 16px; color: #fff; }
+.big-tick:hover .box { transform: scale(1.08); border-color: var(--good); }
+.big-tick.on .box { background: var(--good); border-color: var(--good); animation: tick-pop .45s cubic-bezier(.2,1.4,.4,1); }
+.big-tick.on .box::after { content: '✓'; }
+@keyframes tick-pop { 0% { transform: scale(.6); } 60% { transform: scale(1.25); } 100% { transform: scale(1); } }
+.step-row { display: flex; gap: 10px; align-items: flex-start; padding: 7px 0; border-bottom: 1px solid var(--border-2); }
+.step-row.done .title { text-decoration: line-through; color: var(--muted); }
+.step-row .title { font-weight: 600; }
+.step-row .meta { font-size: 12px; color: var(--muted); }
+.step-group { margin: 12px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; font-weight: 800; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.step-group .frac { font-weight: 700; }
+.confetti { position: fixed; inset: 0; pointer-events: none; z-index: 50; overflow: hidden; }
+.confetti i { position: absolute; top: -12px; width: 9px; height: 14px; border-radius: 2px; animation: confetti-fall linear forwards; }
+@keyframes confetti-fall { 0% { transform: translate3d(0, 0, 0) rotate(0deg); opacity: 1; } 100% { transform: translate3d(var(--dx, 0), 105vh, 0) rotate(720deg); opacity: .9; } }
+.ring { position: relative; width: 44px; height: 44px; border-radius: 50%; background: conic-gradient(var(--good) calc(var(--p, 0) * 1%), var(--surface-2) 0); display: inline-flex; align-items: center; justify-content: center; flex: none; }
+.ring::after { content: attr(data-label); position: absolute; inset: 5px; border-radius: 50%; background: var(--surface); display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800; }
+.target-steps li, .target-blockers li { margin-bottom: 3px; }
+.win-badge { display: inline-flex; align-items: center; gap: 6px; font-weight: 800; color: var(--good-ink); background: var(--good-bg); border: 1px solid var(--good-border); border-radius: 999px; padding: 2px 10px; animation: tick-pop .5s cubic-bezier(.2,1.4,.4,1); }

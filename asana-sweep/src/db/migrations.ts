@@ -1570,6 +1570,43 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 41,
+    name: 'Onboarding: lead targets and onboarding checklists',
+    up(db) {
+      db.exec(`
+        CREATE TABLE lead_targets (
+          lead_id INTEGER PRIMARY KEY REFERENCES leads(id) ON DELETE CASCADE,
+          status TEXT NOT NULL DEFAULT 'open',
+          am_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+          analysis_json TEXT,
+          analysis_at TEXT,
+          ready_at TEXT,
+          ready_by TEXT,
+          lost_at TEXT,
+          seen_at TEXT,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE onboardings (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          lead_id INTEGER UNIQUE REFERENCES leads(id) ON DELETE SET NULL,
+          account_id INTEGER REFERENCES accounts(id) ON DELETE SET NULL,
+          name TEXT NOT NULL,
+          markets TEXT,
+          am_person_id INTEGER REFERENCES people(id) ON DELETE SET NULL,
+          status TEXT NOT NULL DEFAULT 'active',
+          steps_json TEXT NOT NULL DEFAULT '[]',
+          terms_json TEXT NOT NULL DEFAULT '{}',
+          context_json TEXT NOT NULL DEFAULT '{}',
+          notes TEXT,
+          created_by TEXT,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          completed_at TEXT
+        );
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

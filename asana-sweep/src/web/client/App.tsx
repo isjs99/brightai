@@ -19,13 +19,15 @@ import InquiriesPage from './pages/Inquiries';
 import MonitorPage from './pages/Monitor';
 import StockPage from './pages/Stock';
 import PnlPage from './pages/Pnl';
+import TargetsPage from './pages/Targets';
+import OnboardingPage from './pages/Onboarding';
 import ReportsPage from './pages/Reports';
 import CruvaPage from './pages/Cruva';
 import CopilotPage from './pages/Copilot';
 import ChecklistTemplatePage from './pages/ChecklistTemplate';
 import ConnectionsPage from './pages/Connections';
 import TodayPage from './pages/Today';
-import { AccountHub, GROWTH_TABS, Hub, INBOX_TABS, PERFORMANCE_TABS, SETTINGS_TABS } from './hubs';
+import { AccountHub, GROWTH_TABS, Hub, INBOX_TABS, ONBOARDING_TABS, PERFORMANCE_TABS, SETTINGS_TABS } from './hubs';
 
 type Theme = 'system' | 'light' | 'dark';
 
@@ -108,6 +110,7 @@ function Login({ onDone }: { onDone: (role: Role) => void }) {
 const NAV: { to: string; label: string; paths: string[] }[] = [
   { to: '/today', label: 'Today', paths: ['/today'] },
   { to: '/monitor', label: 'Accounts', paths: ['/monitor', '/checklists', '/calendar', '/promotions', '/gmv-max', '/stock', '/pnl', '/cruva', '/playbook', '/creators', '/customer-service', '/reports', '/copilot'] },
+  { to: '/targets', label: 'Onboarding', paths: ['/targets', '/onboarding'] },
   { to: '/inquiries', label: 'Enquiries', paths: ['/inquiries', '/inbox'] },
   { to: '/bd', label: 'Growth', paths: ['/bd', '/outreach', '/leads'] },
   { to: '/gmv', label: 'Performance', paths: ['/gmv', '/analytics'] },
@@ -193,6 +196,8 @@ export default function App() {
               <Route path="/creators" element={<AccountHub><RepliesPage channel="affiliate" /></AccountHub>} />
               <Route path="/customer-service" element={<AccountHub><RepliesPage channel="cs" /></AccountHub>} />
               <Route path="/inbox" element={<Navigate to="/creators" replace />} />
+              <Route path="/targets" element={<Hub title="Onboarding" tabs={ONBOARDING_TABS}><TargetsPage /></Hub>} />
+              <Route path="/onboarding" element={<Hub title="Onboarding" tabs={ONBOARDING_TABS}><OnboardingPage /></Hub>} />
               <Route path="/inquiries" element={<Hub title="Enquiries" tabs={INBOX_TABS}><InquiriesPage /></Hub>} />
               <Route path="/bd" element={<Hub title="Growth" tabs={GROWTH_TABS}><BdPage /></Hub>} />
               <Route path="/outreach" element={<Hub title="Growth" tabs={GROWTH_TABS}><OutreachPage /></Hub>} />

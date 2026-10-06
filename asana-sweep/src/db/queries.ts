@@ -53,6 +53,11 @@ import type {
   PnlSkuCogs,
   ClientTask,
   ReportSchedule,
+  Onboarding,
+  OnboardingContext,
+  OnboardingStep,
+  OnboardingTerms,
+  TargetAnalysis,
   ReplyEvent,
   ReplyDecision,
   InboxChannel,
@@ -2415,6 +2420,85 @@ export class Queries {
 
   deleteClientTask(id: number): boolean {
     return this.db.prepare('DELETE FROM client_tasks WHERE id = ?').run(id).changes > 0;
+  }
+
+  // ---- Onboarding: targets ----
+
+  getTargetState(leadId: number): { status: 'open' | 'ready' | 'lost'; am_person_id: number | null; analysis: TargetAnalysis | null; analysis_at: string | null; ready_at: string | null; ready_by: string | null; lost_at: string | null; seen_at: string | null } | null {
+    const r = this.db.prepare('SELECT * FROM lead_targets WHERE lead_id = ?').get(leadId) as Row | undefined;
+    if (!r) return null;
+    return { status: (r.status as 'open' | 'ready' | 'lost') ?? 'open', am_person_id: (r.am_person_id as number | null) ?? null, analysis: r.analysis_json ? parseJson<TargetAnalysis | null>(r.analysis_json, null) : null, analysis_at: (r.analysis_at as string | null) ?? null, ready_at: (r.ready_at as string | null) ?? null, ready_by: (r.ready_by as string | null) ?? null, lost_at: (r.lost_at as string | null) ?? null, seen_at: (r.seen_at as string | null) ?? null };
+  }
+
+  listTargetStates(): Map<number, NonNullable<ReturnType<Queries['getTargetState']>>> {
+    const out = new Map<number, NonNullable<ReturnType<Queries['getTargetState']>>>();
+    for (const r of this.db.prepare('SELECT lead_id FROM lead_targets').all() as { lead_id: number }[]) { const st = this.getTargetState(r.lead_id); if (st) out.set(r.lead_id, st); }
+    return out;
+  }
+
+  saveTargetState(leadId: number, patch: Partial<{ status: 'open' | 'ready' | 'lost'; am_person_id: number | null; analysis: TargetAnalysis | null; analysis_at: string | null; ready_at: string | null; ready_by: string | null; lost_at: string | null; seen_at: string | null }>): void {
+    const now = new Date().toISOString();
+    this.db.prepare('INSERT OR IGNORE INTO lead_targets (lead_id, updated_at) VALUES (?, ?)').run(leadId, now);
+    const sets: string[] = [];
+    const params: Record<string, unknown> = { lead_id: leadId, updated_at: now };
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined) continue;
+      if (k === 'analysis') { sets.push('analysis_json = @analysis_json'); params.analysis_json = v === null ? null : JSON.stringify(v); continue; }
+      sets.push(`${k} = @${k}`); params[k] = v;
+    }
+    this.db.prepare(`UPDATE lead_targets SET ${[...sets, 'updated_at = @updated_at'].join(', ')} WHERE lead_id = @lead_id`).run(params);
+  }
+
+  // ---- Onboarding: checklists ----
+
+  private rowToOnboarding(r: Row): Onboarding {
+    const steps = parseJson<OnboardingStep[]>(r.steps_json, []);
+    return {
+      id: r.id as number, lead_id: (r.lead_id as number | null) ?? null, lead_name: (r.lead_name as string | null) ?? null, account_id: (r.account_id as number | null) ?? null, account_name: (r.account_name as string | null) ?? null,
+      name: r.name as string, markets: (r.markets as string | null) ?? null, am_person_id: (r.am_person_id as number | null) ?? null, am_name: (r.am_name as string | null) ?? null, status: r.status === 'done' ? 'done' : 'active',
+      steps, terms: { retainer: null, currency: 'EUR', commission_pct: null, commission_basis: 'gmv', settlement_pct: 100, term_months: 3, notice_months: 1, start_date: null, markets: '', billing_entity: '', notes: '', ...parseJson<Partial<OnboardingTerms>>(r.terms_json, {}) },
+      context: { summary: null, sources: [], poc: null, country: null, est_value: null, analysed_at: null, ...parseJson<Partial<OnboardingContext>>(r.context_json, {}) },
+      notes: (r.notes as string | null) ?? null, created_by: (r.created_by as string | null) ?? null, created_at: r.created_at as string, updated_at: r.updated_at as string, completed_at: (r.completed_at as string | null) ?? null,
+      done: steps.filter((st) => st.done_at).length, total: steps.length,
+    };
+  }
+
+  private static ONB_SELECT = 'SELECT o.*, l.name AS lead_name, a.name AS account_name, p.name AS am_name FROM onboardings o LEFT JOIN leads l ON l.id = o.lead_id LEFT JOIN accounts a ON a.id = o.account_id LEFT JOIN people p ON p.id = o.am_person_id';
+
+  listOnboardings(): Onboarding[] {
+    return (this.db.prepare(`${Queries.ONB_SELECT} ORDER BY CASE o.status WHEN 'active' THEN 0 ELSE 1 END, o.updated_at DESC`).all() as Row[]).map((r) => this.rowToOnboarding(r));
+  }
+
+  getOnboarding(id: number): Onboarding | null {
+    const r = this.db.prepare(`${Queries.ONB_SELECT} WHERE o.id = ?`).get(id) as Row | undefined;
+    return r ? this.rowToOnboarding(r) : null;
+  }
+
+  onboardingForLead(leadId: number): Onboarding | null {
+    const r = this.db.prepare(`${Queries.ONB_SELECT} WHERE o.lead_id = ?`).get(leadId) as Row | undefined;
+    return r ? this.rowToOnboarding(r) : null;
+  }
+
+  createOnboarding(i: { lead_id?: number | null; account_id?: number | null; name: string; markets?: string | null; am_person_id?: number | null; steps: OnboardingStep[]; terms?: Partial<OnboardingTerms>; context?: Partial<OnboardingContext>; created_by?: string | null }): Onboarding {
+    const res = this.db.prepare('INSERT INTO onboardings (lead_id, account_id, name, markets, am_person_id, steps_json, terms_json, context_json, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(i.lead_id ?? null, i.account_id ?? null, i.name, i.markets ?? null, i.am_person_id ?? null, JSON.stringify(i.steps), JSON.stringify(i.terms ?? {}), JSON.stringify(i.context ?? {}), i.created_by ?? null);
+    return this.getOnboarding(Number(res.lastInsertRowid))!;
+  }
+
+  updateOnboarding(id: number, patch: Partial<{ name: string; markets: string | null; am_person_id: number | null; status: 'active' | 'done'; steps: OnboardingStep[]; terms: OnboardingTerms; context: OnboardingContext; notes: string | null; account_id: number | null; completed_at: string | null }>): Onboarding | null {
+    const sets: string[] = [];
+    const params: Record<string, unknown> = { id };
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined) continue;
+      if (k === 'steps' || k === 'terms' || k === 'context') { sets.push(`${k}_json = @${k}_json`); params[`${k}_json`] = JSON.stringify(v); continue; }
+      sets.push(`${k} = @${k}`); params[k] = v;
+    }
+    if (sets.length) this.db.prepare(`UPDATE onboardings SET ${sets.join(', ')}, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = @id`).run(params);
+    return this.getOnboarding(id);
+  }
+
+  deleteOnboarding(id: number): boolean {
+    return this.db.prepare('DELETE FROM onboardings WHERE id = ?').run(id).changes > 0;
   }
 
   getFbtProfile(accountId: number, market: string): Partial<FbtProfile> & { updated_at: string | null } {

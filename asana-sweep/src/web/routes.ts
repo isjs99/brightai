@@ -53,7 +53,7 @@ import { columnsFromHeader, FBT_FIELDS, fbtManifestCsv, fbtPlan, fbtProfile, fbt
 import { currentMonth as pnlCurrentMonth, pnlCsv, pnlData, pnlSummary } from '../pnl/index.js';
 import { syncStatus } from '../scheduler/sync-status.js';
 import { inboxSettings as inboxSettingsOf } from '../inbox/sync.js';
-import type { FbtField, FbtProfile, PnlForecastInputs, PnlInputs, ReportSchedule } from '../sweep/types.js';
+import type { FbtField, FbtProfile, OnboardingTerms, PnlForecastInputs, PnlInputs, ReportSchedule } from '../sweep/types.js';
 import { periodBounds } from '../reports/client.js';
 import type { IngestPayload } from '../health/index.js';
 import { THRESHOLD_LABELS } from '../health/rules.js';
@@ -2878,6 +2878,112 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (!q.deleteClientTask(idParam(req))) throw new HttpError(404, 'Task not found');
     liveEvents.emitUpdate({ kind: 'check' });
     res.json(clientTasks.data({ from: dateParam(req.query.from, 'from'), to: dateParam(req.query.to, 'to') }));
+  });
+
+  // ---- Onboarding: targets and onboarding steps ----
+  const targets = scheduler.targets;
+  const onboardings = scheduler.onboardings;
+  const leadParam = (req: Request) => { const l = q.listLeads(true).find((x) => x.id === Number(req.params.leadId)); if (!l) throw new HttpError(404, 'Lead not found'); return l; };
+  r.get('/targets', (req, res) => {
+    const month = optText(req.query.month);
+    if (month && !/^\d{4}-\d{2}$/.test(month)) throw new HttpError(400, 'month must be YYYY-MM.');
+    res.json(targets.data(month, actorOf(req)));
+  });
+  r.post('/targets/seen', (req, res) => { targets.markSeen(actorOf(req)); res.json(targets.data(optText(req.body?.month), actorOf(req))); });
+  r.post('/targets/refresh', async (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const r2 = await targets.refresh({ leadId: b.lead_id !== undefined ? Number(b.lead_id) : undefined, useLlm: b.use_llm === undefined ? undefined : bool(b.use_llm, true) });
+    res.json({ ...r2, ...targets.data(optText(b.month), actorOf(req)) });
+  });
+  r.post('/targets/:leadId/analyse', async (req, res) => {
+    const lead = leadParam(req);
+    const analysis = await targets.analyse(lead);
+    res.json({ analysis, ...targets.data(optText(req.body?.month), actorOf(req)) });
+  });
+  r.put('/targets/:leadId', (req, res) => {
+    const lead = leadParam(req);
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const patch: Parameters<Queries['saveTargetState']>[1] = {};
+    if (b.am_person_id !== undefined) { const id = b.am_person_id === null || b.am_person_id === '' ? null : Number(b.am_person_id); if (id !== null && !q.getPerson(id)) throw new HttpError(400, 'Unknown team member'); patch.am_person_id = id; q.patchLead(lead.id, { onboarding_id: id }); }
+    if (b.status !== undefined) {
+      const st = String(b.status);
+      if (!['open', 'lost'].includes(st)) throw new HttpError(400, 'status must be open or lost (use /ready to mark ready to sign).');
+      patch.status = st as 'open' | 'lost';
+      patch.lost_at = st === 'lost' ? new Date().toISOString() : null;
+    }
+    q.saveTargetState(lead.id, patch);
+    liveEvents.emitUpdate({ kind: 'leads' });
+    res.json(targets.data(optText(b.month), actorOf(req)));
+  });
+  r.post('/targets/:leadId/ready', (req, res) => {
+    const lead = leadParam(req);
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const st = q.getTargetState(lead.id);
+    q.saveTargetState(lead.id, { status: 'ready', ready_at: new Date().toISOString(), ready_by: actorOf(req) });
+    const onboarding = onboardings.start({ lead, am_person_id: st?.am_person_id ?? lead.onboarding_id ?? null, actor: actorOf(req) });
+    res.status(201).json({ onboarding, ...targets.data(optText(b.month), actorOf(req)) });
+  });
+  r.post('/targets/:leadId/reopen', (req, res) => {
+    const lead = leadParam(req);
+    q.saveTargetState(lead.id, { status: 'open', ready_at: null, ready_by: null, lost_at: null });
+    liveEvents.emitUpdate({ kind: 'leads' });
+    res.json(targets.data(optText(req.body?.month), actorOf(req)));
+  });
+
+  r.get('/onboarding', (_req, res) => res.json(onboardings.data()));
+  r.post('/onboarding', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    try {
+      const lead = b.lead_id ? q.listLeads(true).find((x) => x.id === Number(b.lead_id)) ?? null : null;
+      const o = onboardings.start({ lead, account_id: b.account_id ? Number(b.account_id) : null, name: optText(b.name), am_person_id: b.am_person_id ? Number(b.am_person_id) : null, actor: actorOf(req) });
+      res.status(201).json({ onboarding: o, ...onboardings.data() });
+    } catch (err) { throw new HttpError(400, (err as Error).message); }
+  });
+  r.put('/onboarding/:id', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const patch: Parameters<Queries['updateOnboarding']>[1] = {};
+    if (b.name !== undefined) { const v = optText(b.name); if (!v) throw new HttpError(400, 'Name cannot be empty.'); patch.name = v; }
+    if (b.markets !== undefined) patch.markets = optText(b.markets);
+    if (b.notes !== undefined) patch.notes = optText(b.notes);
+    if (b.am_person_id !== undefined) { const id = b.am_person_id === null || b.am_person_id === '' ? null : Number(b.am_person_id); if (id !== null && !q.getPerson(id)) throw new HttpError(400, 'Unknown team member'); patch.am_person_id = id; }
+    if (b.account_id !== undefined) { const id = b.account_id === null || b.account_id === '' ? null : Number(b.account_id); if (id !== null && !q.getAccount(id)) throw new HttpError(400, 'Unknown account'); patch.account_id = id; }
+    const o = q.updateOnboarding(idParam(req), patch);
+    if (!o) throw new HttpError(404, 'Onboarding not found');
+    liveEvents.emitUpdate({ kind: 'leads' });
+    res.json({ onboarding: o, ...onboardings.data() });
+  });
+  r.put('/onboarding/:id/steps/:key', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    try { const o = onboardings.tick(idParam(req), String(req.params.key), bool(b.done, true), actorOf(req), b.note === undefined ? undefined : optText(b.note)); res.json({ onboarding: o, ...onboardings.data() }); } catch (err) { throw new HttpError(400, (err as Error).message); }
+  });
+  r.post('/onboarding/:id/steps', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const title = optText(b.title);
+    if (!title) throw new HttpError(400, 'Give the step a title.');
+    try { const o = onboardings.addStep(idParam(req), optText(b.group) ?? '6. Launch', title, optText(b.help)); liveEvents.emitUpdate({ kind: 'leads' }); res.status(201).json({ onboarding: o, ...onboardings.data() }); } catch (err) { throw new HttpError(400, (err as Error).message); }
+  });
+  r.delete('/onboarding/:id/steps/:key', (req, res) => {
+    try { const o = onboardings.removeStep(idParam(req), String(req.params.key)); liveEvents.emitUpdate({ kind: 'leads' }); res.json({ onboarding: o, ...onboardings.data() }); } catch (err) { throw new HttpError(400, (err as Error).message); }
+  });
+  r.put('/onboarding/:id/terms', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const t: Partial<OnboardingTerms> = {};
+    const numOrNull = (k: string) => { const v = b[k]; if (v === undefined) return undefined; if (v === null || v === '') return null; const n = Number(v); if (!Number.isFinite(n) || n < 0) throw new HttpError(400, `${k} must be a positive number.`); return n; };
+    for (const k of ['retainer', 'commission_pct', 'term_months', 'notice_months'] as const) { const v = numOrNull(k); if (v !== undefined) (t as Record<string, unknown>)[k] = v; }
+    if (b.settlement_pct !== undefined) { const v = numOrNull('settlement_pct'); t.settlement_pct = v ?? 100; }
+    if (b.currency !== undefined) t.currency = (optText(b.currency) ?? 'EUR').toUpperCase().slice(0, 3);
+    if (b.commission_basis !== undefined) t.commission_basis = b.commission_basis === 'mor' ? 'mor' : 'gmv';
+    if (b.start_date !== undefined) { const v = optText(b.start_date); if (v && !/^\d{4}-\d{2}-\d{2}$/.test(v)) throw new HttpError(400, 'start_date must be YYYY-MM-DD.'); t.start_date = v; }
+    for (const k of ['markets', 'billing_entity', 'notes'] as const) if (b[k] !== undefined) t[k] = optText(b[k]) ?? '';
+    try { const o = onboardings.setTerms(idParam(req), t); liveEvents.emitUpdate({ kind: 'leads' }); res.json({ onboarding: o, ...onboardings.data() }); } catch (err) { throw new HttpError(400, (err as Error).message); }
+  });
+  r.post('/onboarding/:id/complete', (req, res) => {
+    try { const o = onboardings.complete(idParam(req), actorOf(req)); res.json({ onboarding: o, ...onboardings.data() }); } catch (err) { throw new HttpError(400, (err as Error).message); }
+  });
+  r.delete('/onboarding/:id', (req, res) => {
+    if (!q.deleteOnboarding(idParam(req))) throw new HttpError(404, 'Onboarding not found');
+    liveEvents.emitUpdate({ kind: 'leads' });
+    res.json(onboardings.data());
   });
 
   // ---- Incidents (instant issue alerts to Slack) ----

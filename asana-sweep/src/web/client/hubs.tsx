@@ -58,6 +58,10 @@ export const ACCOUNT_TABS: HubTab[] = [
   { to: '/reports', label: 'Reports' },
   { to: '/copilot', label: 'Ask' },
 ];
+export const ONBOARDING_TABS: HubTab[] = [
+  { to: '/targets', label: 'Targets' },
+  { to: '/onboarding', label: 'Onboarding steps' },
+];
 export const INBOX_TABS: HubTab[] = [
   { to: '/inquiries', label: 'Website enquiries' },
 ];

@@ -1719,6 +1719,113 @@ export interface SyncFeed {
 }
 export interface SyncStatus { timezone: string; now: string; feeds: SyncFeed[] }
 
+
+// ---- Onboarding: targets (deals in the pipeline) and onboarding steps ----
+
+export type TargetLight = 'red' | 'amber' | 'green' | 'grey';
+export interface TargetSource { kind: string; title: string; occurred_at: string | null; url: string | null; snippet: string }
+export interface TargetAnalysis {
+  light: TargetLight;
+  /** How far along the deal is, 0 to 100. */
+  progress_pct: number;
+  stage_label: string;
+  summary: string;
+  next_steps: string[];
+  blockers: string[];
+  signals: string[];
+  sources: TargetSource[];
+  generator: 'claude' | 'rules';
+  analysed_at: string;
+}
+export interface TargetRow {
+  lead: Lead;
+  status: 'open' | 'ready' | 'lost';
+  am_person_id: number | null;
+  am_name: string | null;
+  analysis: TargetAnalysis | null;
+  /** First seen in the last two days, or changed since the team last looked. */
+  is_new: boolean;
+  ready_at: string | null;
+  ready_by: string | null;
+  lost_at: string | null;
+  onboarding_id: number | null;
+  /** Closed (signed) or lost in the month shown, for the history view. */
+  closed_in_month: 'won' | 'lost' | null;
+}
+export interface TargetsData {
+  month: string;
+  today: string;
+  rows: TargetRow[];
+  people: Person[];
+  totals: { open: number; ready: number; won: number; lost: number; pipeline_value: number; won_value: number; new: number };
+  last_refresh_at: string | null;
+  last_refresh_error: string | null;
+  refreshing: boolean;
+  llm_configured: boolean;
+  currency: string;
+}
+export interface OnboardingStep {
+  key: string;
+  group: string;
+  title: string;
+  help: string | null;
+  /** A link to the template or the place to do it, when there is one. */
+  link: string | null;
+  done_at: string | null;
+  done_by: string | null;
+  note: string | null;
+  custom: boolean;
+}
+export interface OnboardingTerms {
+  retainer: number | null;
+  currency: string;
+  commission_pct: number | null;
+  commission_basis: 'gmv' | 'mor';
+  settlement_pct: number;
+  term_months: number | null;
+  notice_months: number | null;
+  start_date: string | null;
+  markets: string;
+  billing_entity: string;
+  notes: string;
+}
+export interface OnboardingContext {
+  summary: string | null;
+  sources: TargetSource[];
+  poc: string | null;
+  country: string | null;
+  est_value: number | null;
+  analysed_at: string | null;
+}
+export interface Onboarding {
+  id: number;
+  lead_id: number | null;
+  lead_name: string | null;
+  account_id: number | null;
+  account_name: string | null;
+  name: string;
+  markets: string | null;
+  am_person_id: number | null;
+  am_name: string | null;
+  status: 'active' | 'done';
+  steps: OnboardingStep[];
+  terms: OnboardingTerms;
+  context: OnboardingContext;
+  notes: string | null;
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+  done: number;
+  total: number;
+}
+export interface OnboardingsData {
+  onboardings: Onboarding[];
+  people: Person[];
+  accounts: { id: number; name: string }[];
+  templates: { key: string; label: string; url: string; kind: string }[];
+}
+
 // ---- Stock ----
 
 export interface StockSku {
