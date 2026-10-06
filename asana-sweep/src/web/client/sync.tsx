@@ -17,7 +17,7 @@ const FEEDS_BY_TAB: Record<string, string[]> = {
   '/pnl': ['gmv', 'cruva', 'stock'],
   '/cruva': ['cruva', 'playbook'],
   '/playbook': ['cruva', 'playbook'],
-  '/creators': ['inbox', 'replies_digest', 'cruva'],
+  '/creators': ['cruva_inbox', 'inbox', 'replies_digest', 'cruva'],
   '/customer-service': ['inbox', 'replies_digest'],
   '/reports': ['reports_queue', 'copilot', 'tldv', 'gmv', 'cruva'],
   '/copilot': ['copilot', 'tldv', 'inbox'],

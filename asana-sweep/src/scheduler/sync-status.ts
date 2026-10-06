@@ -17,6 +17,7 @@ export interface SyncSources {
   inbox: { configured: boolean; last_sync_at: string | null; last_sync_error: string | null; poll_seconds: number };
   copilot: { configured: boolean; last_index_at: string | null; last_index_error: string | null };
   clientTasks: { last_scan_at: string | null; last_scan_error: string | null; scanning: boolean };
+  cruvaInbox: { configured: boolean; last_sync_at: string | null; last_sync_error: string | null; every_minutes: number };
   reportsQueue: { last_tick_at: string | null };
   windsor: { configured: boolean; last_sync_at: string | null; last_error: string | null };
   tldv: { configured: boolean; last_check_at: string | null };
@@ -44,6 +45,7 @@ export function syncStatus(q: Queries, s: SyncSources, now = new Date()): SyncSt
     cronFeed('checklist', 'Checklist lock', 'The day’s record and the Slack digest', q.getSetting('check_cron', '0 16 * * 1-5'), q.getSetting('check_last_run_at', '') || null, null, false, q.getSetting('check_enabled', '1') !== '0'),
     cronFeed('reminder', 'AM reminder', 'Slack nudge for unticked lines', q.getSetting('reminder_cron', '0 14 * * 1-5'), q.getSetting('reminder_last_run_at', '') || null, null, false),
     intervalFeed('inbox', 'Creator & CS inbox', 'Creators and Customer service threads and replies', Math.max(1, Math.round(s.inbox.poll_seconds / 60)), s.inbox.last_sync_at, s.inbox.last_sync_error, false, s.inbox.configured),
+    intervalFeed('cruva_inbox', 'Creator inbox (Cruva)', 'Creators: every linked Cruva shop\u2019s creator DMs, drafts and auto-replies', s.cruvaInbox.every_minutes, s.cruvaInbox.last_sync_at, s.cruvaInbox.last_sync_error, false, s.cruvaInbox.configured),
     cronFeed('replies_digest', 'Replies digest', 'Monday summary of creator and CS replies', '50 8 * * 1', q.getSetting('replies_digest_last_at', '') || null, null, false),
     intervalFeed('copilot', 'Evidence index', 'Ask, Reports context and client tasks: calls, emails, client Slack, SOPs', 5, s.copilot.last_index_at, s.copilot.last_index_error, false, s.copilot.configured),
     intervalFeed('tldv', 'tl;dv calls', 'Call notes and transcripts', 30, s.tldv.last_check_at, null, false, s.tldv.configured),
@@ -64,7 +66,7 @@ export const FEEDS_BY_TAB: Record<string, string[]> = {
   '/pnl': ['gmv', 'cruva', 'stock'],
   '/cruva': ['cruva', 'playbook'],
   '/playbook': ['cruva', 'playbook'],
-  '/creators': ['inbox', 'replies_digest', 'cruva'],
+  '/creators': ['cruva_inbox', 'inbox', 'replies_digest', 'cruva'],
   '/customer-service': ['inbox', 'replies_digest'],
   '/reports': ['reports_queue', 'copilot', 'tldv', 'gmv', 'cruva'],
   '/copilot': ['copilot', 'tldv', 'inbox'],

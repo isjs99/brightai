@@ -1361,7 +1361,10 @@ export type InboxStatus = 'open' | 'replied' | 'auto_replied' | 'closed';
 
 export interface InboxConversation {
   id: number;
+  /** The TikTok shop id, or the Cruva shop id when the thread is read through Cruva. */
   tts_shop_id: string;
+  /** tts: TikTok affiliate / CS API; cruva: the creator inbox read and answered through Cruva. */
+  source: 'tts' | 'cruva';
   shop_name: string;
   account_id: number | null;
   account_name: string | null;
@@ -1547,7 +1550,7 @@ export interface RepliesData {
   /** Channel readiness: the TikTok scope and shops behind it. */
   channel_ready: boolean;
   channel_note: string | null;
-  shops: { id: string; name: string; market: string | null; token_ok: boolean; off: boolean; language: string | null }[];
+  shops: { id: string; name: string; market: string | null; token_ok: boolean; off: boolean; language: string | null; source: 'tts' | 'cruva' }[];
   counts: { replied_today: number; auto_today: number; manual_today: number; cap: number | null; waiting: number; escalated: number; drafts: number; skipped_today: number; median_minutes: number | null; wrong_7d: number };
   waiting: (InboxConversation & { event: ReplyEvent | null; draft: InboxReply | null })[];
   log: ReplyEvent[];
@@ -1568,7 +1571,7 @@ export interface AlertCalendar { month: string; today: string; days: AlertDay[];
 
 export interface SlackChannel { id: string; name: string; is_private: boolean; is_member: boolean; num_members: number | null }
 
-export interface RepliesSummaryRow { account_id: number; account_name: string; am_name: string | null; channel: InboxChannel; mode: ReplyMode; waiting: number; escalated: number; auto_today: number; cap: number | null; ready: boolean; note: string | null; shops: { id: string; name: string; market: string | null; token_ok: boolean; off: boolean; language: string | null }[] }
+export interface RepliesSummaryRow { account_id: number; account_name: string; am_name: string | null; channel: InboxChannel; mode: ReplyMode; waiting: number; escalated: number; auto_today: number; cap: number | null; ready: boolean; note: string | null; shops: { id: string; name: string; market: string | null; token_ok: boolean; off: boolean; language: string | null; source: 'tts' | 'cruva' }[] }
 
 // ---- FBT paperwork ----
 

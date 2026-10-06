@@ -350,6 +350,10 @@ Creator DMs and buyer chats are answered per account, not from a shared inbox. B
 - **Bookkeeping**: every decision (auto_sent, drafted, escalated, skipped, capped, quiet, error) is stored once per message, so a re-sync never answers twice. Today shows who is waiting across accounts; a Monday 08:50 Slack digest (incidents default channel) sums up the week per account.
 - **Model**: Anthropic API (`ANTHROPIC_API_KEY`, `REPLY_MODEL`, default claude-sonnet-5). Cruva outreach notes can still be imported with `POST /api/inbox/cruva-outreach/import`.
 
+### Creators through Cruva
+
+The creator inbox no longer depends on the TikTok affiliate app: every Cruva shop linked to an account (Cruva › Link shops) has its creator DMs read through the Cruva API every 10 minutes (`cruva_inbox_every_minutes`): the threads waiting on us first, then the recent ones; new or unread threads are read in full, stored next to the TikTok threads (marked "via Cruva" in the country rows), run through the same Draft / Automatic policy, and answered through Cruva's send_dm. A market the TikTok affiliate app already covers stays on TikTok; Cruva fills every other one. "Sync now" on the page runs both. Cruva documents the inbox tools as US and UK only; in practice the EU shops return their inbox too, so every linked shop is tried and any that Cruva refuses shows its error in the scan strip.
+
 ## Slack notifications
 
 With `SLACK_BOT_TOKEN` set: AM reminders and the "missed" note at the lock go as DMs, incidents post to the account channel, client reports and copilot replies go to the shared client channel. With a webhook under Checklists › Settings, the daily digest is posted after each lock.

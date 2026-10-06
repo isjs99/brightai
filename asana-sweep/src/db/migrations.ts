@@ -10,6 +10,8 @@ interface Migration {
   version: number;
   name: string;
   up: (db: Database.Database) => void;
+  /** Runs outside a transaction with foreign keys off: for table rebuilds that other tables reference. */
+  rebuild?: boolean;
 }
 
 const migrations: Migration[] = [
@@ -1534,6 +1536,40 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 40,
+    name: 'Inbox conversations from Cruva shops (no tts_shops foreign key, source column)',
+    rebuild: true,
+    up(db) {
+      db.exec(`
+        CREATE TABLE inbox_conversations_new (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          tts_shop_id TEXT NOT NULL,
+          channel TEXT NOT NULL,
+          conversation_id TEXT NOT NULL,
+          counterpart_name TEXT,
+          counterpart_id TEXT,
+          unread_count INTEGER NOT NULL DEFAULT 0,
+          last_message_at TEXT,
+          last_message_text TEXT,
+          last_sender TEXT,
+          last_message_id TEXT,
+          can_send INTEGER NOT NULL DEFAULT 1,
+          status TEXT NOT NULL DEFAULT 'open',
+          language TEXT,
+          synced_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          source TEXT NOT NULL DEFAULT 'tts',
+          UNIQUE(tts_shop_id, channel, conversation_id)
+        );
+        INSERT INTO inbox_conversations_new (id, tts_shop_id, channel, conversation_id, counterpart_name, counterpart_id, unread_count, last_message_at, last_message_text, last_sender, last_message_id, can_send, status, language, synced_at, updated_at)
+          SELECT id, tts_shop_id, channel, conversation_id, counterpart_name, counterpart_id, unread_count, last_message_at, last_message_text, last_sender, last_message_id, can_send, status, language, synced_at, updated_at FROM inbox_conversations;
+        DROP TABLE inbox_conversations;
+        ALTER TABLE inbox_conversations_new RENAME TO inbox_conversations;
+        CREATE INDEX inbox_conversations_recent ON inbox_conversations(last_message_at DESC);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {
@@ -1541,6 +1577,16 @@ export function runMigrations(db: Database.Database): void {
   const applied = new Set(db.prepare('SELECT version FROM schema_migrations').all().map((r) => (r as { version: number }).version));
   for (const m of migrations) {
     if (applied.has(m.version)) continue;
+    if (m.rebuild) {
+      db.pragma('foreign_keys = OFF');
+      try {
+        m.up(db);
+        db.prepare('INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)').run(m.version, m.name, new Date().toISOString());
+      } finally {
+        db.pragma('foreign_keys = ON');
+      }
+      continue;
+    }
     db.transaction(() => {
       m.up(db);
       db.prepare('INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)').run(m.version, m.name, new Date().toISOString());

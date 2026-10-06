@@ -27,7 +27,7 @@ const ORDER_ID = /\b\d{15,20}\b/g;
 export async function buildContext(q: Queries, c: InboxConversation, messages: InboxMessage[], overrideLanguage?: string | null, rest: CruvaRest = cruvaRest): Promise<ReplyContext> {
   const base = buildContextSync(q, c, messages, overrideLanguage);
   if (c.channel !== 'affiliate') return base;
-  const shopId = cruvaShopFor(q, c.account_id, c.market);
+  const shopId = c.source === 'cruva' ? c.tts_shop_id : cruvaShopFor(q, c.account_id, c.market);
   if (!shopId) { base.notes.push('No Cruva shop linked to this account yet (Cruva › Link shops), so creator history comes from TikTok only.'); return base; }
   if (!rest.configured) { base.notes.push('CRUVA_API_KEY not set, so the creator CRM, samples and campaigns are missing.'); return base; }
   const cx = await rest.creatorContext(shopId, c.counterpart_name);

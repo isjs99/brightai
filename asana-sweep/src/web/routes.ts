@@ -31,6 +31,7 @@ import { mineTiktokContacts } from '../bd/tts-directory.js';
 import { draftCallFollowups, tldv } from '../bd/tldv.js';
 import type { BdContact, BdFollowup, TtsContact } from '../sweep/types.js';
 import { inboxSettings, sendReply, syncInbox } from '../inbox/sync.js';
+import { syncCruvaInbox } from '../inbox/cruva-inbox.js';
 import { cruvaMcp } from '../cruva/mcp.js';
 import { feedback as replyFeedback, repliesData, replyBlocker, sampleThread, savePolicy, summary as repliesSummary, waitingAll } from '../inbox/replies.js';
 import { buildContext, renderPrompt } from '../inbox/context.js';
@@ -2405,10 +2406,19 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
 
   r.get('/inbox', (_req, res) => res.json({ ...inboxData(), languages: LANGUAGE_NAMES }));
 
-  r.post('/inbox/sync', async (_req, res) => {
-    const result = await syncInbox(q);
-    if (!result.ok) return res.status(502).json({ error: result.error, result, ...inboxData() });
-    res.json({ result, ...inboxData() });
+  r.post('/inbox/sync', async (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    // TikTok first (when the app is configured), then the creator inbox through Cruva for every linked shop.
+    const result = tts.configured ? await syncInbox(q) : { ok: true, conversations: 0, new_messages: 0, auto_replies: 0, error: undefined as string | undefined };
+    const cr = await syncCruvaInbox(q, { accountId: b.account_id !== undefined ? Number(b.account_id) || undefined : undefined });
+    const merged = { ok: result.ok || cr.ok, error: [result.error, ...cr.errors].filter(Boolean).join(' | ') || undefined, conversations: result.conversations + cr.conversations, new_messages: result.new_messages + cr.new_messages, auto_replies: result.auto_replies + cr.auto_replies, cruva: cr };
+    if (!merged.ok) return res.status(502).json({ error: merged.error, result: merged, ...inboxData() });
+    res.json({ result: merged, ...inboxData() });
+  });
+  r.post('/inbox/cruva-sync', async (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const cr = await syncCruvaInbox(q, { shopId: optText(b.shop_id) ?? undefined, accountId: b.account_id !== undefined ? Number(b.account_id) || undefined : undefined });
+    res.json({ result: cr, ...inboxData() });
   });
 
   r.put('/inbox/settings', (req, res) => {
@@ -2812,6 +2822,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
       inbox: { configured: ib.inbox_enabled, last_sync_at: ib.last_sync_at, last_sync_error: ib.last_sync_error, poll_seconds: ib.poll_seconds },
       copilot: { configured: co.slack_configured || co.gmail_connected || co.tldv_configured, last_index_at: co.last_index_at, last_index_error: co.last_index_error },
       clientTasks: scheduler.clientTasks.status(),
+      cruvaInbox: scheduler.cruvaInbox.status(),
       reportsQueue: { last_tick_at: q.getSetting('reports_queue_last_tick_at', '') || null },
       windsor: { configured: w.configured, last_sync_at: w.last_sync_at, last_error: w.last_error },
       tldv: { configured: co.tldv_configured, last_check_at: q.getSetting('tldv_last_check_at', '') || null },

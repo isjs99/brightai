@@ -70,11 +70,11 @@ function Summary({ channel }: { channel: InboxChannel }) {
                   <AccountGroup key={r.account_id} light={lightOf(r)} name={r.account_name} sub={`${r.am_name ?? ''}${r.shops.length ? ` · ${r.shops.map((s) => s.market ?? '?').join(' ')}` : ''}`} open={groups.isOpen(r.account_id)} onToggle={() => groups.toggle(r.account_id)}
                     summary={r.mode === 'off' ? `Off${r.note ? ` · ${r.note}` : ''}` : r.escalated ? `${r.escalated} thread${r.escalated === 1 ? '' : 's'} need a human` : r.waiting ? `${r.waiting} draft${r.waiting === 1 ? '' : 's'} waiting for approval` : r.ready ? `${MODE_LABEL[r.mode]} · running` : (r.note ?? 'Channel not connected')}
                     nums={<><span className="num"><span className="k">Waiting</span><span className="v">{r.waiting}</span></span><span className="num"><span className="k">Sent today</span><span className="v">{r.auto_today}{r.cap !== null ? ` / ${r.cap}` : ''}</span></span></>}
-                    right={<><span className={`badge ${r.mode === 'auto' ? 'good' : r.mode === 'draft' ? 'accent' : 'muted'}`}>{MODE_LABEL[r.mode]}</span><span className={`badge ${r.ready ? 'good' : 'muted'}`}>{r.ready ? 'connected' : channel === 'cs' ? 'scope pending' : 'not connected'}</span><Link to={`${channel === 'cs' ? '/customer-service' : '/creators'}?account=${r.account_id}`} className="button small" onClick={(e) => e.stopPropagation()}>Open ▸</Link></>}>
+                    right={<><span className={`badge ${r.mode === 'auto' ? 'good' : r.mode === 'draft' ? 'accent' : 'muted'}`}>{MODE_LABEL[r.mode]}</span><span className={`badge ${r.ready ? 'good' : 'muted'}`}>{r.ready ? (r.shops.some((s) => s.source === 'cruva' && s.token_ok) && !r.shops.some((s) => s.source === 'tts' && s.token_ok) ? 'connected via Cruva' : 'connected') : channel === 'cs' ? 'scope pending' : 'not connected'}</span><Link to={`${channel === 'cs' ? '/customer-service' : '/creators'}?account=${r.account_id}`} className="button small" onClick={(e) => e.stopPropagation()}>Open ▸</Link></>}>
                     <div className="sub" style={{ marginBottom: 6 }}>{label(other)}: {o ? `${MODE_LABEL[o.mode]}${o.waiting ? ` · ${o.waiting} waiting` : ''}` : '–'}</div>
                     {r.shops.length === 0 ? <div className="sub">No TikTok shop linked to this account.</div> : (
                       <div className="grid-wrap"><table><thead><tr><th>Country</th><th>Shop</th><th>Replies</th><th>Language</th><th>Authorised</th></tr></thead><tbody>
-                        {r.shops.map((s) => <tr key={s.id}><td><b>{s.market ?? '–'}</b></td><td>{s.name}</td><td><span className={`badge ${r.mode === 'off' || s.off ? 'muted' : 'good'}`}>{r.mode === 'off' ? 'off (account)' : s.off ? 'off' : 'on'}</span></td><td className="sub">{s.language ? (languagesOf(s.language)) : 'detect, then market'}</td><td>{s.token_ok ? <span className="badge good">yes</span> : <span className="badge warn">no</span>}</td></tr>)}
+                        {r.shops.map((s) => <tr key={s.id}><td><b>{s.market ?? '–'}</b></td><td>{s.name}{s.source === 'cruva' ? <span className="badge accent" style={{ marginLeft: 6 }}>via Cruva</span> : null}</td><td><span className={`badge ${r.mode === 'off' || s.off ? 'muted' : 'good'}`}>{r.mode === 'off' ? 'off (account)' : s.off ? 'off' : 'on'}</span></td><td className="sub">{s.language ? (languagesOf(s.language)) : 'detect, then market'}</td><td>{s.token_ok ? <span className="badge good">yes</span> : <span className="badge warn">no</span>}</td></tr>)}
                       </tbody></table></div>
                     )}
                   </AccountGroup>
@@ -205,14 +205,14 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
           )}
         </div>
         <div className="policy-foot">
-          <div className="lbl">Countries (one TikTok shop each)</div>
-          {data.shops.length === 0 ? <div className="sub">No TikTok shop linked to this account yet.</div> : (
+          <div className="lbl">Countries (one shop each: TikTok, or Cruva)</div>
+          {data.shops.length === 0 ? <div className="sub">No TikTok shop or Cruva shop linked to this account yet.</div> : (
             <div className="shop-switches">
               {data.shops.map((s) => (
                 <div key={s.id} className={`shop-switch ${s.off ? 'off' : ''}`}>
                   <button className={`switch small ${!s.off ? 'on' : ''}`} disabled={!isAdmin || busy === 'policy' || policy.mode === 'off'} title={policy.mode === 'off' ? 'Switch the account on first' : s.off ? 'Switch this country on' : 'Switch this country off'} onClick={() => save({ shops_off: s.off ? policy.shops_off.filter((x) => x !== s.id) : [...policy.shops_off, s.id] })}><span className="knob" /> {s.off ? 'OFF' : 'ON'}</button>
                   <b>{s.market ?? '–'}</b>
-                  <span className="sub">{s.name}{s.token_ok ? '' : ' · not authorised'}</span>
+                  <span className="sub">{s.name}{s.source === 'cruva' ? <span className="badge accent" style={{ marginLeft: 6 }} title="Creator DMs read and answered through Cruva">via Cruva</span> : null}{s.token_ok ? '' : s.source === 'cruva' ? ' · CRUVA_API_KEY not set' : ' · not authorised'}</span>
                   <select value={s.language ?? ''} disabled={!isAdmin} onChange={(e) => save({ languages: { ...policy.languages, [s.id]: e.target.value } })} aria-label={`Reply language for ${s.name}`}>
                     <option value="">Language: detect, then market</option>
                     {Object.entries(data.languages).filter(([k]) => k !== '*').map(([k, v]) => <option key={k} value={k}>Always {v}</option>)}

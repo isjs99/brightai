@@ -99,6 +99,7 @@ describe('report queue and schedules', () => {
       inbox: { configured: true, last_sync_at: null, last_sync_error: null, poll_seconds: 120 },
       copilot: { configured: true, last_index_at: null, last_index_error: null },
       clientTasks: { last_scan_at: null, last_scan_error: null, scanning: false },
+      cruvaInbox: { configured: true, last_sync_at: null, last_sync_error: null, every_minutes: 10 },
       reportsQueue: { last_tick_at: null }, windsor: { configured: true, last_sync_at: null, last_error: null }, tldv: { configured: false, last_check_at: null },
     }, new Date('2026-10-05T07:10:00Z'));
     const by = Object.fromEntries(s.feeds.map((f) => [f.key, f]));

@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { marketOfShopName } from '../gmv/market.js';
 import type {
   ChecklistItem,
   ChecklistItemInput,
@@ -1734,7 +1735,8 @@ export class Queries {
       shop_name: (r.shop_name as string) ?? '',
       account_id: (r.account_id as number | null) ?? null,
       account_name: (r.account_name as string | null) ?? null,
-      market: (r.market as string | null) ?? null,
+      market: (r.market as string | null) ?? (r.source === 'cruva' ? marketOfShopName(String(r.shop_name ?? '')) : null),
+      source: r.source === 'cruva' ? 'cruva' : 'tts',
       channel,
       conversation_id: r.conversation_id as string,
       counterpart_name: (r.counterpart_name as string | null) ?? null,
@@ -1754,8 +1756,9 @@ export class Queries {
     };
   }
 
-  private static CONV_SELECT = `SELECT c.*, s.name AS shop_name, s.account_id, s.market, a.name AS account_name, a.auto_reply_cs, a.auto_reply_affiliate
-    FROM inbox_conversations c JOIN tts_shops s ON s.id = c.tts_shop_id LEFT JOIN accounts a ON a.id = s.account_id`;
+  /** A conversation belongs to a TikTok shop (tts_shops) or, when read through Cruva, to a linked Cruva shop (account_shops). */
+  private static CONV_SELECT = `SELECT c.*, COALESCE(s.name, cs.shop_name) AS shop_name, COALESCE(s.account_id, cs.account_id) AS account_id, s.market, a.name AS account_name, a.auto_reply_cs, a.auto_reply_affiliate
+    FROM inbox_conversations c LEFT JOIN tts_shops s ON s.id = c.tts_shop_id LEFT JOIN account_shops cs ON cs.shop_id = c.tts_shop_id LEFT JOIN accounts a ON a.id = COALESCE(s.account_id, cs.account_id)`;
 
   listConversations(opts: { channel?: InboxConversation['channel']; accountId?: number; limit?: number } = {}): InboxConversation[] {
     const where: string[] = [];
@@ -1765,7 +1768,7 @@ export class Queries {
       params.push(opts.channel);
     }
     if (opts.accountId) {
-      where.push('s.account_id = ?');
+      where.push('COALESCE(s.account_id, cs.account_id) = ?');
       params.push(opts.accountId);
     }
     const sql = `${Queries.CONV_SELECT} ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY c.last_message_at DESC NULLS LAST, c.id DESC LIMIT ?`;
@@ -1779,14 +1782,14 @@ export class Queries {
   }
 
   /** Insert or refresh a conversation from a TikTok listing. Returns its row id and whether the newest message changed. */
-  upsertConversation(c: { tts_shop_id: string; channel: InboxConversation['channel']; conversation_id: string; counterpart_name?: string | null; counterpart_id?: string | null; unread_count?: number; can_send?: boolean; last_message_at?: string | null; last_message_text?: string | null; last_sender?: InboxConversation['last_sender']; last_message_id?: string | null }, now = new Date().toISOString()): { id: number; changed: boolean } {
+  upsertConversation(c: { tts_shop_id: string; channel: InboxConversation['channel']; conversation_id: string; counterpart_name?: string | null; counterpart_id?: string | null; unread_count?: number; can_send?: boolean; last_message_at?: string | null; last_message_text?: string | null; last_sender?: InboxConversation['last_sender']; last_message_id?: string | null; source?: 'tts' | 'cruva' }, now = new Date().toISOString()): { id: number; changed: boolean } {
     const prev = this.db.prepare('SELECT id, last_message_id, status FROM inbox_conversations WHERE tts_shop_id = ? AND channel = ? AND conversation_id = ?').get(c.tts_shop_id, c.channel, c.conversation_id) as { id: number; last_message_id: string | null; status: string } | undefined;
     const changed = !prev || (c.last_message_id !== undefined && c.last_message_id !== prev.last_message_id);
     if (!prev) {
       const info = this.db
-        .prepare(`INSERT INTO inbox_conversations (tts_shop_id, channel, conversation_id, counterpart_name, counterpart_id, unread_count, can_send, last_message_at, last_message_text, last_sender, last_message_id, status, synced_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)`)
-        .run(c.tts_shop_id, c.channel, c.conversation_id, c.counterpart_name ?? null, c.counterpart_id ?? null, c.unread_count ?? 0, c.can_send === false ? 0 : 1, c.last_message_at ?? null, c.last_message_text ?? null, c.last_sender ?? null, c.last_message_id ?? null, now, now);
+        .prepare(`INSERT INTO inbox_conversations (tts_shop_id, channel, conversation_id, counterpart_name, counterpart_id, unread_count, can_send, last_message_at, last_message_text, last_sender, last_message_id, status, synced_at, updated_at, source)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)`)
+        .run(c.tts_shop_id, c.channel, c.conversation_id, c.counterpart_name ?? null, c.counterpart_id ?? null, c.unread_count ?? 0, c.can_send === false ? 0 : 1, c.last_message_at ?? null, c.last_message_text ?? null, c.last_sender ?? null, c.last_message_id ?? null, now, now, c.source ?? 'tts');
       return { id: Number(info.lastInsertRowid), changed: true };
     }
     // A new message from the other side re-opens a replied / closed thread.
@@ -2318,7 +2321,7 @@ export class Queries {
 
   /** Replies sent from the dashboard today (manual + auto), per account and channel. */
   countRepliesSentSince(accountId: number, channel: InboxChannel, since: string): { auto: number; manual: number } {
-    const rows = this.db.prepare(`SELECT r.mode AS mode, COUNT(*) AS n FROM inbox_replies r JOIN inbox_conversations c ON c.id = r.conversation_ref JOIN tts_shops s ON s.id = c.tts_shop_id WHERE s.account_id = ? AND c.channel = ? AND r.sent_at >= ? GROUP BY r.mode`).all(accountId, channel, since) as { mode: string; n: number }[];
+    const rows = this.db.prepare(`SELECT r.mode AS mode, COUNT(*) AS n FROM inbox_replies r JOIN inbox_conversations c ON c.id = r.conversation_ref LEFT JOIN tts_shops s ON s.id = c.tts_shop_id LEFT JOIN account_shops cs ON cs.shop_id = c.tts_shop_id WHERE COALESCE(s.account_id, cs.account_id) = ? AND c.channel = ? AND r.sent_at >= ? GROUP BY r.mode`).all(accountId, channel, since) as { mode: string; n: number }[];
     return { auto: rows.find((r) => r.mode === 'auto')?.n ?? 0, manual: rows.filter((r) => r.mode !== 'auto').reduce((n, r) => n + r.n, 0) };
   }
 

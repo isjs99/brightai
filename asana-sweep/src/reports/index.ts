@@ -153,11 +153,8 @@ export function shopsForGmv<T extends { shop_id: string; shop_name: string; sour
   return mine.filter((s) => s.source === 'windsor' || (!covered.has('*') && !covered.has(marketOfShopName(s.shop_name) ?? '*')));
 }
 
-/** "Kijimea IT", "TBC (DE)", "Vaseline - FR" → the two-letter market at the end of a shop name, or null. */
-export function marketOfShopName(name: string): string | null {
-  const m = name.trim().match(/(?:^|[\s(\-_])([A-Z]{2})\)?(?:\s*\[[^\]]*\])?$/);
-  return m ? (m[1] === 'GB' ? 'UK' : m[1]) : null;
-}
+import { marketOfShopName } from '../gmv/market.js';
+export { marketOfShopName };
 
 export function buildGmv(q: Queries, month: string): GmvData {
   const tz = q.getSetting('check_timezone', 'Europe/Madrid');

@@ -1,6 +1,7 @@
 import { Queries } from '../db/queries.js';
 import { log } from '../logger.js';
 import { liveEvents } from '../live/events.js';
+import { sendCruvaDm } from './cruva-inbox.js';
 import { tts, TtsClient, ttsAffiliate } from '../tts/client.js';
 import { appCredentials, shopCredentials } from '../tts/promotions.js';
 import { config } from '../config.js';
@@ -174,15 +175,19 @@ export async function syncInbox(q: Queries, client: TtsClient = tts): Promise<{ 
 /** Send a stored reply through TikTok and record the outcome. */
 export async function sendReply(q: Queries, c: InboxConversation, replyId: number, text: string, client: TtsClient = tts): Promise<{ message_id: string }> {
   try {
-    const creds = await shopCredentials(q, c.tts_shop_id, client);
-    const aff = c.channel === 'cs' ? null : await affiliateVia(q, c.tts_shop_id, client, creds);
-    const res = c.channel === 'cs' ? await client.csSendText(creds, c.conversation_id, text) : await aff!.client.affSendText(aff!.creds, c.conversation_id, text);
+    let res: { message_id: string };
+    if (c.source === 'cruva') res = await sendCruvaDm(c.tts_shop_id, c.conversation_id, c.counterpart_name, text);
+    else {
+      const creds = await shopCredentials(q, c.tts_shop_id, client);
+      const aff = c.channel === 'cs' ? null : await affiliateVia(q, c.tts_shop_id, client, creds);
+      res = c.channel === 'cs' ? await client.csSendText(creds, c.conversation_id, text) : await aff!.client.affSendText(aff!.creds, c.conversation_id, text);
+    }
     q.markReplySent(replyId, res.message_id, null);
     const reply = q.getReply(replyId)!;
     q.upsertMessages(c.id, [{ message_id: res.message_id, sender_role: 'us', sender_name: reply.mode === 'auto' ? 'auto-reply' : (reply.created_by ?? 'dashboard'), type: 'TEXT', text, created_at: new Date().toISOString() }]);
     q.upsertConversation({ tts_shop_id: c.tts_shop_id, channel: c.channel, conversation_id: c.conversation_id, last_message_at: new Date().toISOString(), last_message_text: text, last_sender: 'us', last_message_id: res.message_id, unread_count: 0 });
     q.setConversationStatus(c.id, reply.mode === 'auto' ? 'auto_replied' : 'replied');
-    if (c.channel === 'cs') await client.csMarkRead(creds, c.conversation_id).catch(() => undefined);
+    if (c.channel === 'cs' && c.source !== 'cruva') { const creds = await shopCredentials(q, c.tts_shop_id, client); await client.csMarkRead(creds, c.conversation_id).catch(() => undefined); }
     liveEvents.emitUpdate({ kind: 'inbox' });
     return res;
   } catch (err) {

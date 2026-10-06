@@ -29,6 +29,7 @@ import { PlaybookEngine } from '../playbook/index.js';
 import { CruvaPuller } from '../cruva/pull.js';
 import { Copilot } from '../copilot/index.js';
 import { ClientTasks } from '../tasks/client-tasks.js';
+import { CruvaInboxWatcher } from '../inbox/cruva-inbox.js';
 import { slackBot } from '../notify/slackbot.js';
 import { apollo } from '../bd/apollo.js';
 import { nextRun } from './describe.js';
@@ -67,6 +68,7 @@ export class Scheduler {
   private repliesDigestTask: ScheduledTask | null = null;
   readonly copilot: Copilot;
   readonly clientTasks: ClientTasks;
+  readonly cruvaInbox: CruvaInboxWatcher;
   private reportsTask: ScheduledTask | null = null;
   private tldvTask: ScheduledTask | null = null;
   private apolloTask: ScheduledTask | null = null;
@@ -91,6 +93,7 @@ export class Scheduler {
     this.stock.cruvaRefresh = (shopId) => this.cruvaPull.run(shopId);
     this.copilot = new Copilot(q, { gmail: this.gmail });
     this.clientTasks = new ClientTasks(q);
+    this.cruvaInbox = new CruvaInboxWatcher(q);
     this.monitor.afterScan = async () => { await this.incidents.scan(); };
   }
 
@@ -141,6 +144,8 @@ export class Scheduler {
     this.copilot.start();
     // Ad hoc client tasks from the client channel, emails and calls, every 30 minutes.
     this.clientTasks.start();
+    // Creator inbox through Cruva for every linked shop.
+    this.cruvaInbox.start();
     // Report queue: scheduled reports and approved autosends, every 10 minutes.
     this.reportsTask = cron.schedule('*/10 * * * *', () => void this.reports.tick().catch((err) => log.warn(`Report queue: ${(err as Error).message}`)));
     // tl;dv: every 30 minutes, draft follow-ups for calls that just ended.
@@ -362,6 +367,7 @@ export class Scheduler {
     this.stock.stop();
     this.copilot.stop();
     this.clientTasks.stop();
+    this.cruvaInbox.stop();
     this.reportsTask?.destroy();
     this.reportsTask = null;
     this.apolloTask?.destroy();

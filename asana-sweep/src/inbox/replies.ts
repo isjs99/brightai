@@ -4,6 +4,8 @@ import { log } from '../logger.js';
 import { liveEvents } from '../live/events.js';
 import type { Account, InboxChannel, InboxConversation, InboxMessage, InboxReply, RepliesData, RepliesSummaryRow, ReplyContext, ReplyDecision, ReplyEvent, ReplyPolicy } from '../sweep/types.js';
 import { buildContext, cruvaShopFor, renderPrompt } from './context.js';
+import { cruvaMcp } from '../cruva/mcp.js';
+import { marketOfShopName } from '../gmv/market.js';
 import { draftWithClaude } from './llm.js';
 import { LANGUAGE_NAMES } from './language.js';
 import { tts, ttsAffiliate, TtsClient } from '../tts/client.js';
@@ -280,17 +282,29 @@ export function replyBlocker(q: Queries, c: InboxConversation, now = Date.now())
 
 const dayAgo = (n: number, now = Date.now()) => new Date(now - n * 86400000).toISOString();
 
-export function channelReadiness(q: Queries, accountId: number, channel: InboxChannel, scopeLive: (scope: 'customer_service' | 'affiliate_seller') => boolean, apps: { main: boolean; affiliate: boolean } = { main: tts.configured, affiliate: ttsAffiliate.configured }): { ready: boolean; note: string | null; shops: RepliesData['shops'] } {
+export function channelReadiness(q: Queries, accountId: number, channel: InboxChannel, scopeLive: (scope: 'customer_service' | 'affiliate_seller') => boolean, apps: { main: boolean; affiliate: boolean; cruva?: boolean } = { main: tts.configured, affiliate: ttsAffiliate.configured, cruva: cruvaMcp.configured }): { ready: boolean; note: string | null; shops: RepliesData['shops'] } {
   const shops = q.listTtsShops().filter((s) => s.account_id === accountId);
   const policy = getPolicy(q, accountId, channel);
-  const rows = shops.map((s) => ({ id: s.id, name: s.name, market: s.market, token_ok: channel === 'affiliate' ? (apps.affiliate ? s.affiliate_token_ok : s.token_ok) : s.token_ok, off: policy.shops_off.includes(s.id), language: policy.languages[s.id] ?? null }));
-  if (!shops.length) return { ready: false, note: 'No TikTok shop linked to this account yet (Promotions › Connection).', shops: rows };
+  const rows: RepliesData['shops'] = shops.map((s) => ({ id: s.id, name: s.name, market: s.market, token_ok: channel === 'affiliate' ? (apps.affiliate ? s.affiliate_token_ok : s.token_ok) : s.token_ok, off: policy.shops_off.includes(s.id), language: policy.languages[s.id] ?? null, source: 'tts' as const }));
   if (channel === 'affiliate') {
-    if (!apps.affiliate && !apps.main) return { ready: false, note: 'TikTok app not configured on the server.', shops: rows };
-    if (apps.affiliate && !rows.some((r) => r.token_ok)) return { ready: false, note: 'No shop on this account has authorised the affiliate app yet (Promotions › Connection › Affiliate app).', shops: rows };
-    if (!apps.affiliate && !scopeLive('affiliate_seller')) return { ready: false, note: 'The affiliate scope is not live on the main app; add the affiliate app under Promotions › Connection.', shops: rows };
+    // Creators: every linked Cruva shop reads and answers its creator inbox through Cruva, whether or not the TikTok affiliate app is authorised.
+    const cruvaOn = apps.cruva ?? cruvaMcp.configured;
+    const cruvaShops = q.listShops('cruva').filter((s) => s.account_id === accountId);
+    for (const s of cruvaShops) {
+      const market = marketOfShopName(s.shop_name);
+      // A market the TikTok affiliate app already covers stays on TikTok; Cruva fills the rest.
+      if (rows.some((r) => r.source === 'tts' && r.token_ok && apps.affiliate && (r.market ?? '').toUpperCase() === (market ?? '').toUpperCase())) continue;
+      rows.push({ id: s.shop_id, name: s.shop_name, market, token_ok: cruvaOn, off: policy.shops_off.includes(s.shop_id), language: policy.languages[s.shop_id] ?? null, source: 'cruva' });
+    }
+    if (!rows.length) return { ready: false, note: 'No TikTok shop or Cruva shop linked to this account yet (Cruva › Link shops, or Promotions › Connection).', shops: rows };
+    if (rows.some((r) => r.source === 'cruva' && r.token_ok)) return { ready: true, note: rows.some((r) => r.source === 'tts' && r.token_ok) ? null : null, shops: rows };
+    if (rows.some((r) => r.source === 'cruva') && !cruvaOn) return { ready: false, note: 'Cruva shops linked but CRUVA_API_KEY is not set (Settings › Connections), so the creator inbox cannot be read.', shops: rows };
+    if (!apps.affiliate && !apps.main) return { ready: false, note: 'TikTok app not configured on the server and no Cruva shop linked.', shops: rows };
+    if (apps.affiliate && !rows.some((r) => r.token_ok)) return { ready: false, note: 'No shop on this account has authorised the affiliate app yet (Promotions › Connection › Affiliate app), and no Cruva shop is linked.', shops: rows };
+    if (!apps.affiliate && !scopeLive('affiliate_seller')) return { ready: false, note: 'The affiliate scope is not live on the main app; add the affiliate app under Promotions › Connection, or link the Cruva shop.', shops: rows };
     return { ready: true, note: null, shops: rows };
   }
+  if (!shops.length) return { ready: false, note: 'No TikTok shop linked to this account yet (Promotions › Connection).', shops: rows };
   if (!apps.main) return { ready: false, note: 'TikTok app not configured on the server.', shops: rows };
   if (!scopeLive('customer_service')) return { ready: false, note: 'Customer service scope is still under review with TikTok. Draft mode works on sample threads; live buyer chats arrive once the scope is approved and the shops are re-authorised.', shops: rows };
   if (!rows.some((r) => r.token_ok)) return { ready: false, note: 'No shop on this account is authorised (Promotions › Connection).', shops: rows };
