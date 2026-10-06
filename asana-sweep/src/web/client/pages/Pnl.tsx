@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { PnlData, PnlForecastInputs, PnlInputs, PnlLine, PnlSummaryRow } from '../../../sweep/types';
 import { api, currentMonth, fmtMoney, fmtRelative, monthLabel, shiftMonth, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
-import { useAccountScope } from '../hubs';
+import { useAccountScope, useAllowedAccounts, useInScope } from '../hubs';
 import { AccountGroup, GroupsHead, useOpenGroups, type GroupLight } from '../groups';
 import { LineChart, StackedBars } from '../charts';
 
@@ -22,11 +22,13 @@ export default function PnlPage() {
   const [error, setError] = useState<string | null>(null);
   const groups = useOpenGroups('pnl');
   const scope = useAccountScope();
+  const inScope = useInScope();
+  const allowed = useAllowedAccounts();
   const load = useCallback(() => api.pnlSummary(month).then((r) => { setRows(r.rows); setCurrentM(r.current_month); }).catch((e) => setError((e as Error).message)), [month]);
   useEffect(() => { load(); }, [load]);
   useLiveUpdates((e) => { if (e.kind === 'reports' || e.kind === 'cruva') load(); });
   if (!rows) return <p>{error ?? 'Loading…'}</p>;
-  const mine = rows.filter((r) => scope === null || r.account_id === scope);
+  const mine = rows.filter((r) => inScope(r.account_id));
   const order: GroupLight[] = ['red', 'amber', 'green', 'grey'];
   const sorted = [...mine].sort((a, b) => order.indexOf(a.light) - order.indexOf(b.light) || b.gmv - a.gmv || a.account_name.localeCompare(b.account_name));
   const cur = mine[0]?.currency ?? 'EUR';

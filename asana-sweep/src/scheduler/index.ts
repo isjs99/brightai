@@ -28,6 +28,7 @@ import { ClientReports } from '../reports/client.js';
 import { PlaybookEngine } from '../playbook/index.js';
 import { CruvaPuller } from '../cruva/pull.js';
 import { Copilot } from '../copilot/index.js';
+import { ClientTasks } from '../tasks/client-tasks.js';
 import { slackBot } from '../notify/slackbot.js';
 import { apollo } from '../bd/apollo.js';
 import { nextRun } from './describe.js';
@@ -65,6 +66,8 @@ export class Scheduler {
   private cruvaTask: ScheduledTask | null = null;
   private repliesDigestTask: ScheduledTask | null = null;
   readonly copilot: Copilot;
+  readonly clientTasks: ClientTasks;
+  private reportsTask: ScheduledTask | null = null;
   private tldvTask: ScheduledTask | null = null;
   private apolloTask: ScheduledTask | null = null;
   private followupTask: ScheduledTask | null = null;
@@ -87,6 +90,7 @@ export class Scheduler {
     this.cruvaPull = new CruvaPuller(q);
     this.stock.cruvaRefresh = (shopId) => this.cruvaPull.run(shopId);
     this.copilot = new Copilot(q, { gmail: this.gmail });
+    this.clientTasks = new ClientTasks(q);
     this.monitor.afterScan = async () => { await this.incidents.scan(); };
   }
 
@@ -135,6 +139,10 @@ export class Scheduler {
     this.cruvaPull.start();
     this.playbook.seed();
     this.copilot.start();
+    // Ad hoc client tasks from the client channel, emails and calls, every 30 minutes.
+    this.clientTasks.start();
+    // Report queue: scheduled reports and approved autosends, every 10 minutes.
+    this.reportsTask = cron.schedule('*/10 * * * *', () => void this.reports.tick().catch((err) => log.warn(`Report queue: ${(err as Error).message}`)));
     // tl;dv: every 30 minutes, draft follow-ups for calls that just ended.
     this.tldvTask = cron.schedule('*/30 * * * *', () => this.checkCalls());
     setTimeout(() => this.checkCalls(), 30000);
@@ -213,11 +221,12 @@ export class Scheduler {
     if (!text || !slackBot.configured) return;
     const channel = incidentSettings(this.q).default_channel;
     if (!channel) return;
-    try { await slackBot.post(await slackBot.channelId(channel), text); } catch (err) { log.warn(`Replies digest: ${(err as Error).message}`); }
+    try { await slackBot.post(await slackBot.channelId(channel), text); this.q.setSetting('replies_digest_last_at', new Date().toISOString()); } catch (err) { log.warn(`Replies digest: ${(err as Error).message}`); }
   }
 
   checkCalls(): void {
     if (!tldv.configured || !config.anthropicApiKey || this.q.getSetting('tldv_auto_draft', '1') !== '1') return;
+    this.q.setSetting('tldv_last_check_at', new Date().toISOString());
     void draftCallFollowups(this.q, { gmail: this.gmail }).catch((err) => log.error(`tl;dv check failed: ${(err as Error).message}`));
   }
 
@@ -352,6 +361,9 @@ export class Scheduler {
     this.inbox.stop();
     this.stock.stop();
     this.copilot.stop();
+    this.clientTasks.stop();
+    this.reportsTask?.destroy();
+    this.reportsTask = null;
     this.apolloTask?.destroy();
     this.apolloTask = null;
     this.sendTask?.destroy();

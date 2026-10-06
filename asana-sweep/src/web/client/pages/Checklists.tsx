@@ -3,7 +3,8 @@ import { Link } from 'react-router-dom';
 import type { AccountStatusRow, Check, CheckItem, CheckSettings, CheckWithItems, MonitorData, MonitorFlag } from '../../../sweep/types';
 import { api, currentActor, fmtDate, fmtRelative, useActor, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
-import { useAccountScope } from '../hubs';
+import { useAccountScope, useAllowedAccounts, useInScope } from '../hubs';
+import ClientTasksView from './ClientTasks';
 
 function Frac({ done, total, complete }: { done: number; total: number; complete: boolean }) {
   if (total === 0) return <span className="frac sub">0/0</span>;
@@ -188,6 +189,7 @@ export default function Checklists() {
   useEffect(() => { setFilterAm(actor); }, [actor]);
   const [version, setVersion] = useState(0);
   const [monitor, setMonitor] = useState<MonitorData | null>(null);
+  const [view, setView] = useState<'daily' | 'tasks'>(() => (new URLSearchParams(window.location.search).get('view') === 'tasks' ? 'tasks' : 'daily'));
 
   const load = useCallback(() => {
     api.listChecks(date).then((d) => { setData(d); setVersion((v) => v + 1); }).catch((e) => setError((e as Error).message));
@@ -206,13 +208,15 @@ export default function Checklists() {
   };
 
   const scope = useAccountScope();
+  const inScope = useInScope();
+  const allowed = useAllowedAccounts();
   const isToday = Boolean(data && data.date === data.today);
   const ams = useMemo(() => [...new Set((data?.rows ?? []).map((r) => r.account.am_name ?? 'Unassigned'))].sort(), [data]);
   const amFilter = ams.includes(filterAm) ? filterAm : ams.find((a) => filterAm && a.toLowerCase().startsWith(filterAm.toLowerCase().split(' ')[0])) ?? '';
   // Today shows the live picture (falls back to the recorded check); past days show the record.
   const rows = (data?.rows ?? [])
     .map((r) => ({ ...r, snapshot: r.check, check: isToday ? (r.live ?? r.check) : r.check }))
-    .filter((r) => r.account.enabled && (scope === null || r.account.id === scope) && (!amFilter || (r.account.am_name ?? 'Unassigned') === amFilter))
+    .filter((r) => r.account.enabled && inScope(r.account.id) && (!amFilter || (r.account.am_name ?? 'Unassigned') === amFilter))
     // Stable order (AM, then account) so rows do not jump around while someone is ticking.
     .sort((a, b) => (a.account.am_name ?? 'zz').localeCompare(b.account.am_name ?? 'zz') || a.account.name.localeCompare(b.account.name));
   const counted = rows.filter((r) => r.check && r.check.status !== 'unlinked' && r.check.status !== 'empty');
@@ -245,16 +249,21 @@ export default function Checklists() {
       {showSettings && settings && <SettingsPanel settings={settings} onSaved={setSettings} />}
 
       <div className="toolbar">
-        <select value={data?.date ?? ''} onChange={(e) => setDate(e.target.value || undefined)}>
+        <div className="presets" title="Daily check: the routine lines. Client tasks: the ad hoc asks agreed with each client">
+          <button className={view === 'daily' ? 'active' : ''} onClick={() => setView('daily')}>Daily check</button>
+          <button className={view === 'tasks' ? 'active' : ''} onClick={() => setView('tasks')}>Client tasks</button>
+        </div>
+        {view === 'daily' && <select value={data?.date ?? ''} onChange={(e) => setDate(e.target.value || undefined)}>
           {data && !data.dates.includes(data.today) && <option value={data.today}>{data.today} (today)</option>}
           {(data?.dates ?? []).map((d) => <option key={d} value={d}>{d}{d === data?.today ? ' (today)' : ''}</option>)}
-        </select>
+        </select>}
         <select value={amFilter} onChange={(e) => setFilterAm(e.target.value)} title="Pick your name top right and this follows you">
           <option value="">All AMs</option>
           {ams.map((a) => <option key={a} value={a}>{a}</option>)}
         </select>
-        {data && <span className="sub">{dayLabel}{!isToday ? ' · past day: the recorded status' : ''}</span>}
+        {view === 'daily' && data && <span className="sub">{dayLabel}{!isToday ? ' · past day: the recorded status' : ''}</span>}
       </div>
+      {view === 'tasks' ? <ClientTasksView amFilter={amFilter} /> : <>
 
       <div className="kpis">
         <div className="kpi"><div className="v">{complete}/{counted.length}</div><div className="k">accounts fully complete</div></div>
@@ -285,6 +294,7 @@ export default function Checklists() {
       <p className="hint" style={{ marginTop: 12 }}>
         AM = the account manager's daily checks. AA = the action items underneath (and the Affiliate lines). A check is done only when its box and every action item under it are ticked, and an account is complete when every box is. Weekly lines only appear on their day. Past days can be corrected by an admin.
       </p>
+      </>}
     </>
   );
 }

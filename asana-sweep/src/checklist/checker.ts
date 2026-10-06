@@ -71,6 +71,7 @@ export async function runAllChecks(
     const accounts = q.listAccounts().filter((a) => a.enabled);
     log.info(`Checklist check started (${opts.trigger}) for ${accounts.length} account(s)`);
     for (const account of accounts) results.push(checkAccount(q, account, { trigger: opts.trigger, tz, final: opts.final }));
+    q.setSetting(opts.final ? 'check_last_run_at' : 'reminder_last_run_at', new Date().toISOString());
     const complete = results.filter((r) => r.combined_complete).length;
     log.info(`Checklist check finished: ${complete}/${results.length} accounts complete`);
     const webhook = q.getSetting('check_slack_webhook', '');

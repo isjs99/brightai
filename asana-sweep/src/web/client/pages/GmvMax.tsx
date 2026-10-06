@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { GmvMaxPatch, GmvMaxRow } from '../../../sweep/types';
 import { api, fmtMoney, fmtRelative } from '../api';
 import { useIsAdmin } from '../session';
-import { useAccountScope } from '../hubs';
+import { useAccountScope, useAllowedAccounts, useInScope } from '../hubs';
 
 export default function GmvMaxPage() {
   const [rows, setRows] = useState<GmvMaxRow[] | null>(null);
@@ -19,7 +19,9 @@ export default function GmvMaxPage() {
   useEffect(() => { load(); }, [load]);
 
   const scope = useAccountScope();
-  const visible = (rows ?? []).filter((r) => (scope === null || r.account_id === scope) && (!filterAm || (r.am_name ?? 'Unassigned') === filterAm) && (!filterMarket || r.market === filterMarket));
+  const inScope = useInScope();
+  const allowed = useAllowedAccounts();
+  const visible = (rows ?? []).filter((r) => inScope(r.account_id) && (!filterAm || (r.am_name ?? 'Unassigned') === filterAm) && (!filterMarket || r.market === filterMarket));
   const ams = [...new Set((rows ?? []).map((r) => r.am_name ?? 'Unassigned'))].sort();
   const markets = [...new Set((rows ?? []).map((r) => r.market))].sort();
   const allVisibleSelected = visible.length > 0 && visible.every((r) => selected.has(r.id));

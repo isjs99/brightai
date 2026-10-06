@@ -9,6 +9,9 @@ import { money } from '../bd/outreach.js';
 import { projectRows, stockSettings } from '../stock/index.js';
 import { liveEvents } from '../live/events.js';
 import { log } from '../logger.js';
+import { markdownToSlack } from '../reports/client.js';
+import { gmvSettings, shopsForGmv } from '../reports/index.js';
+import { toReportCurrency } from '../gmv/currency.js';
 
 /**
  * Client question copilot. Every question a client asks (Slack channel, email, or typed in by the
@@ -58,6 +61,7 @@ export function searchEvidence(rows: { kind: string; title: string; text: string
 }
 
 export function renderAnswerPrompt(question: CopilotQuestion, account: Account | null, sources: CopilotSource[]): { system: string; user: string } {
+  if (question.audience === 'internal') return renderInternalPrompt(question, account, sources);
   const system = [
     `You are the account team's copilot at Brightform, a TikTok Shop Partner agency. A client${account ? ` (${account.name})` : ''} asked a question. Draft the reply the account manager will send, using only the evidence below.`,
     'British English, warm but direct, no exclamation marks, no hype. Two to six sentences. If the evidence answers it, say so plainly and cite the source in square brackets after the sentence, like [1] or [2][4]. If the evidence only partly answers it, answer the part you can and say what you will confirm and by when. If nothing in the evidence is relevant, say you will check and come back, and do not invent facts.',
@@ -65,6 +69,49 @@ export function renderAnswerPrompt(question: CopilotQuestion, account: Account |
   ].join('\n');
   const u = [`## Question${question.asked_by ? ` (from ${question.asked_by})` : ''}\n${question.question}`, '', '## Evidence', ...(sources.length ? sources.map((s, i) => `[${i + 1}] ${s.kind.toUpperCase()} · ${s.title}${s.occurred_at ? ` · ${s.occurred_at.slice(0, 10)}` : ''}\n${s.snippet}`) : ['(none found)']), '', 'Write the reply now.'];
   return { system, user: u.join('\n') };
+}
+
+/** The internal brief: facts for the account manager, written as a Slack message they can paste. */
+export function renderInternalPrompt(question: CopilotQuestion, account: Account | null, sources: CopilotSource[]): { system: string; user: string } {
+  const system = [
+    `You are the internal analyst for Brightform's account team (a TikTok Shop Partner agency). An account manager is asking about ${account ? `the client ${account.name}` : 'our accounts'}${question.as_of ? `, about ${question.as_of}` : ''}. Answer them directly, for internal use, from the evidence below.`,
+    'Write in Slack syntax (mrkdwn): *bold* for the key figures and names, bullet lines starting with "•", short lines, no headings with #, no markdown tables. British English, plain, no hype, no exclamation marks. Lead with the answer in one or two lines, then the supporting facts as bullets with dates and numbers, then "Next:" with what to do if anything needs doing. Cite sources in square brackets after the fact, like [1] or [2][4].',
+    'Use only the evidence. If it does not cover the question, say what is missing and where to look (Seller Center, Cruva, the client channel). Never invent numbers, names or dates. Keep it under 220 words. Output the message text only.',
+  ].join('\n');
+  const u = [`## Question${question.asked_by ? ` (from ${question.asked_by})` : ''}\n${question.question}`, '', '## Evidence', ...(sources.length ? sources.map((s, i) => `[${i + 1}] ${s.kind.toUpperCase()} · ${s.title}${s.occurred_at ? ` · ${s.occurred_at.slice(0, 10)}` : ''}\n${s.snippet}`) : ['(none found)']), '', 'Write the Slack message now.'];
+  return { system, user: u.join('\n') };
+}
+
+export function templateInternal(question: CopilotQuestion, sources: CopilotSource[]): string {
+  if (!sources.length) return `*${question.question.trim()}*\nNothing on record for this yet${question.as_of ? ` up to ${question.as_of}` : ''}. Check the client channel, the last call notes and Cruva, then add the answer to the context library so it is here next time.`;
+  const top = sources.slice(0, 4).map((s, i) => `• ${s.snippet.replace(/^…|…$/g, '').slice(0, 260)} _(${s.kind}${s.occurred_at ? `, ${s.occurred_at.slice(0, 10)}` : ''})_ [${i + 1}]`);
+  return [`*${question.question.trim()}*`, 'What we have on record:', ...top].join('\n');
+}
+
+/** The numbers and open items of one day for an account, so "what happened on Tuesday" has data behind it. */
+export function dayFacts(q: Queries, account: Account, date: string): { kind: string; title: string; text: string; url: string | null; occurred_at: string | null } | null {
+  const settings = gmvSettings(q);
+  const fx = settings.fx_to_eur;
+  const from = new Date(Date.parse(`${date}T00:00:00Z`) - 6 * 86400000).toISOString().slice(0, 10);
+  const rows = q.listGmvBetween(from, date);
+  const has = new Set(rows.map((r) => r.shop_id));
+  const shops = shopsForGmv(q.listShops().filter((sh) => sh.account_id === account.id), (id) => has.has(id));
+  const ids = new Map(shops.map((sh) => [sh.shop_id, sh]));
+  const lines: string[] = [];
+  const sum = (filter: (r: typeof rows[number]) => boolean) => rows.filter((r) => ids.has(r.shop_id) && filter(r)).reduce((acc, r) => { const sh = ids.get(r.shop_id)!; acc.gmv += toReportCurrency(r.total_gmv, sh.currency, fx); acc.aff += toReportCurrency(r.affiliate_gmv, sh.currency, fx); acc.units += r.units; return acc; }, { gmv: 0, aff: 0, units: 0 });
+  const day = sum((r) => r.date === date);
+  const week = sum(() => true);
+  const cur = settings.report_currency;
+  if (rows.some((r) => ids.has(r.shop_id) && r.date === date)) lines.push(`GMV on ${date}: ${money(day.gmv, cur)} (affiliate ${money(day.aff, cur)}, ${day.units} units). Seven days to ${date}: ${money(week.gmv, cur)} (affiliate ${money(week.aff, cur)}, ${week.units} units).`);
+  for (const sh of shops) { const r = rows.find((x) => x.shop_id === sh.shop_id && x.date === date); if (r) lines.push(`${sh.shop_name} on ${date}: ${money(toReportCurrency(r.total_gmv, sh.currency, fx), cur)} GMV, ${r.units} units.`); }
+  const incidents = q.listIncidentsBetween(from, date).filter((i) => i.account_id === account.id);
+  for (const i of incidents) lines.push(`Incident ${i.created_at.slice(0, 10)}: ${i.title} (${i.severity}${i.resolved_at ? `, resolved ${i.resolved_at.slice(0, 10)}` : ', open'}). ${i.message}`);
+  const flags = q.listFlags(true).filter((f) => f.account_id === account.id && f.first_seen_at.slice(0, 10) <= date && (!f.resolved_at || f.resolved_at.slice(0, 10) >= date));
+  for (const f of flags.slice(0, 12)) lines.push(`Flag open on ${date}: ${f.message} (${f.severity}, since ${f.first_seen_at.slice(0, 10)}).`);
+  const check = q.getCheckForDate(account.id, date);
+  if (check) lines.push(`Checklist on ${date}: ${check.status.replace('_', ' ')}, AM ${check.am_done}/${check.am_total}, AA ${check.aa_done}/${check.aa_total}.`);
+  if (!lines.length) return null;
+  return { kind: 'data', title: `${account.name}: the day ${date}`, text: lines.join('\n'), url: null, occurred_at: `${date}T12:00:00.000Z` };
 }
 
 export function templateAnswer(question: CopilotQuestion, sources: CopilotSource[]): string {
@@ -79,6 +126,8 @@ export interface CopilotDeps { gmail?: GmailClient | null; slack?: SlackBot; tld
 
 const QUESTION_RE = /\?\s*$|^\s*(what|when|where|why|how|who|which|can|could|would|will|is|are|do|does|did|should|any update|update on|status of|wann|wie|was|warum|wo|können|könnt|gibt es|quand|comment|pourquoi|est-ce|pouvez|cuándo|cómo|qué|por qué|pueden|quando|come|perché|potete|c'è)\b/i;
 export const looksLikeQuestion = (text: string): boolean => text.trim().length > 8 && QUESTION_RE.test(text.trim());
+
+export const withSlack = (qn: CopilotQuestion): CopilotQuestion => ({ ...qn, slack_text: qn.answer ? (qn.audience === 'internal' ? qn.answer : markdownToSlack(qn.answer)).replace(/\s?\[\d+\](\[\d+\])*/g, '') : null });
 
 export class Copilot {
   private indexing = false;
@@ -98,7 +147,7 @@ export class Copilot {
   data(): CopilotData {
     const counts = this.evidenceCountsByAccount();
     return {
-      questions: this.q.listQuestions(),
+      questions: this.q.listQuestions().map((qn) => withSlack(qn)),
       accounts: this.q.listAccounts().filter((a) => a.enabled).map((a) => ({ id: a.id, name: a.name, client_slack_channel: a.client_slack_channel, client_domain: a.client_domain, evidence: counts.get(a.id) ?? 0 })),
       settings: this.settings(), evidence_counts: this.q.evidenceCounts(), last_index_at: this.q.getSetting('copilot_last_index_at', '') || null, last_index_error: this.q.getSetting('copilot_last_index_error', '') || null,
       slack_configured: (this.deps.slack ?? slackBot).configured, gmail_connected: Boolean(this.deps.gmail?.connected), tldv_configured: (this.deps.tldv ?? tldv).configured, llm_configured: Boolean(this.llm),
@@ -231,8 +280,13 @@ export class Copilot {
     const qn = this.q.getQuestion(id);
     if (!qn) throw new Error('Question not found');
     const account = qn.account_id ? this.q.getAccount(qn.account_id) : null;
-    const rows = this.q.listEvidence({ accountId: qn.account_id ?? undefined });
-    const sources = searchEvidence(rows, qn.question);
+    const rows: { kind: string; title: string; text: string; url: string | null; occurred_at: string | null }[] = this.q.listEvidence({ accountId: qn.account_id ?? undefined, to: qn.as_of ?? undefined });
+    // A question about a day gets that day's numbers and open items as evidence, and the day's words in the search.
+    const facts = account && qn.as_of ? dayFacts(this.q, account, qn.as_of) : null;
+    if (facts) rows.unshift(facts);
+    let sources = searchEvidence(rows, qn.as_of ? `${qn.question} ${qn.as_of} ${account?.name ?? ''}` : qn.question);
+    if (facts && !sources.some((s) => s.title === facts.title)) sources = [{ kind: facts.kind, title: facts.title, snippet: facts.text.slice(0, 600), url: null, occurred_at: facts.occurred_at, score: 1 }, ...sources].slice(0, 8);
+    const fallback = () => (qn.audience === 'internal' ? templateInternal(qn, sources) : templateAnswer(qn, sources));
     let answer: string;
     let generator: CopilotQuestion['generator'] = 'template';
     const llm = this.llm;
@@ -243,16 +297,16 @@ export class Copilot {
         generator = 'claude';
       } catch (err) {
         log.warn(`Copilot draft failed: ${(err as Error).message}`);
-        answer = templateAnswer(qn, sources);
+        answer = fallback();
       }
-    } else answer = templateAnswer(qn, sources);
+    } else answer = fallback();
     const out = this.q.updateQuestion(id, { answer, sources, generator, status: 'drafted', answered_at: new Date().toISOString() })!;
     liveEvents.emitUpdate({ kind: 'copilot' });
-    return out;
+    return withSlack(out);
   }
 
-  async ask(input: { account_id: number | null; question: string; source?: CopilotQuestion['source']; asked_by?: string | null; channel?: string | null; thread_ts?: string | null; external_id?: string | null; created_by?: string | null }): Promise<CopilotQuestion | null> {
-    const created = this.q.createQuestion({ account_id: input.account_id, source: input.source ?? 'manual', question: input.question.trim(), asked_by: input.asked_by ?? null, channel: input.channel ?? null, thread_ts: input.thread_ts ?? null, external_id: input.external_id ?? null, created_by: input.created_by ?? null });
+  async ask(input: { account_id: number | null; question: string; source?: CopilotQuestion['source']; asked_by?: string | null; channel?: string | null; thread_ts?: string | null; external_id?: string | null; created_by?: string | null; audience?: CopilotQuestion['audience']; as_of?: string | null }): Promise<CopilotQuestion | null> {
+    const created = this.q.createQuestion({ account_id: input.account_id, source: input.source ?? 'manual', question: input.question.trim(), asked_by: input.asked_by ?? null, channel: input.channel ?? null, thread_ts: input.thread_ts ?? null, external_id: input.external_id ?? null, created_by: input.created_by ?? null, audience: input.audience ?? 'client', as_of: input.as_of ?? null });
     if (!created) return null;
     return this.answer(created.id);
   }

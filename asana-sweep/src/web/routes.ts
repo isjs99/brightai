@@ -50,7 +50,9 @@ import { BLOCK_SCOPES } from '../health/tts-pull.js';
 import { projectionCsv } from '../stock/index.js';
 import { columnsFromHeader, FBT_FIELDS, fbtManifestCsv, fbtPlan, fbtProfile, fbtSummary, fbtTemplateCsv } from '../stock/fbt.js';
 import { currentMonth as pnlCurrentMonth, pnlCsv, pnlData, pnlSummary } from '../pnl/index.js';
-import type { FbtField, FbtProfile, PnlForecastInputs, PnlInputs } from '../sweep/types.js';
+import { syncStatus } from '../scheduler/sync-status.js';
+import { inboxSettings as inboxSettingsOf } from '../inbox/sync.js';
+import type { FbtField, FbtProfile, PnlForecastInputs, PnlInputs, ReportSchedule } from '../sweep/types.js';
 import { periodBounds } from '../reports/client.js';
 import type { IngestPayload } from '../health/index.js';
 import { THRESHOLD_LABELS } from '../health/rules.js';
@@ -2791,6 +2793,82 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     res.json(d);
   });
 
+  // ---- What scans when (every Accounts tab) ----
+  r.get('/sync/status', (_req, res) => {
+    const m = scheduler.monitor.data();
+    const h = scheduler.health.data();
+    const cp = scheduler.cruvaPull.status();
+    const st = scheduler.stock.data();
+    const pb = scheduler.playbook.data();
+    const ib = inboxSettingsOf(q);
+    const co = scheduler.copilot.data();
+    const w = windsorStatus(q);
+    res.json(syncStatus(q, {
+      monitor: { last_scan_at: m.last_scan_at, last_scan_error: m.last_scan_error, scanning: m.scanning, interval_minutes: m.interval_minutes },
+      health: { configured: h.windsor_configured, last_pull_at: h.last_pull_at, last_pull_error: h.last_pull_error, pulling: h.pulling, tts_last_pull_at: h.tts_last_pull_at, tts_last_pull_error: h.tts_last_pull_error, pulling_tts: h.pulling_tts, tts_configured: m.tts_configured },
+      cruvaPull: { configured: cp.configured, running: cp.running, last_run_at: cp.last_run_at, last_error: cp.last_error },
+      stock: { last_scan_at: st.last_scan_at, last_scan_error: st.last_scan_error, scanning: st.scanning, configured: st.tts_configured || st.cruva_configured },
+      playbook: { configured: pb.mcp_configured || pb.cruva_configured, last_check_at: pb.last_check_at, last_error: pb.last_error, checking: pb.checking },
+      inbox: { configured: ib.inbox_enabled, last_sync_at: ib.last_sync_at, last_sync_error: ib.last_sync_error, poll_seconds: ib.poll_seconds },
+      copilot: { configured: co.slack_configured || co.gmail_connected || co.tldv_configured, last_index_at: co.last_index_at, last_index_error: co.last_index_error },
+      clientTasks: scheduler.clientTasks.status(),
+      reportsQueue: { last_tick_at: q.getSetting('reports_queue_last_tick_at', '') || null },
+      windsor: { configured: w.configured, last_sync_at: w.last_sync_at, last_error: w.last_error },
+      tldv: { configured: co.tldv_configured, last_check_at: q.getSetting('tldv_last_check_at', '') || null },
+    }));
+  });
+
+  // ---- Ad hoc client tasks ----
+  const clientTasks = scheduler.clientTasks;
+  const dateParam = (v: unknown, name: string): string | undefined => { if (v === undefined || v === '') return undefined; const t = String(v); if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) throw new HttpError(400, `${name} must be YYYY-MM-DD.`); return t; };
+  r.get('/client-tasks', (req, res) => {
+    const from = dateParam(req.query.from, 'from'), to = dateParam(req.query.to, 'to');
+    const accountId = req.query.account_id ? Number(req.query.account_id) : null;
+    res.json(clientTasks.data({ from: from ?? to, to: to ?? from, accountId }));
+  });
+  r.post('/client-tasks/scan', async (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const r2 = await clientTasks.scan({ sinceDays: b.since_days !== undefined ? Number(b.since_days) || undefined : undefined, accountId: b.account_id !== undefined ? Number(b.account_id) || undefined : undefined });
+    res.json({ ...r2, ...clientTasks.data({ from: dateParam(b.from, 'from'), to: dateParam(b.to, 'to') }) });
+  });
+  r.post('/client-tasks', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const accountId = Number(b.account_id);
+    if (!q.getAccount(accountId)) throw new HttpError(404, 'Account not found');
+    const title = optText(b.title);
+    if (!title) throw new HttpError(400, 'Give the task a title.');
+    const due = dateParam(b.due_date, 'due_date') ?? null;
+    const task = q.createClientTask({ account_id: accountId, title, detail: optText(b.detail) ?? '', source: 'manual', due_date: due, due_source: 'am', created_by: actorOf(req) });
+    liveEvents.emitUpdate({ kind: 'check' });
+    res.status(201).json({ task, ...clientTasks.data({ from: dateParam(b.from, 'from'), to: dateParam(b.to, 'to') }) });
+  });
+  r.put('/client-tasks/:id', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const cur = q.getClientTask(idParam(req));
+    if (!cur) throw new HttpError(404, 'Task not found');
+    const patch: Parameters<Queries['updateClientTask']>[1] = {};
+    if (b.title !== undefined) { const v = optText(b.title); if (!v) throw new HttpError(400, 'Title cannot be empty.'); patch.title = v; }
+    if (b.detail !== undefined) patch.detail = String(b.detail ?? '').trim();
+    if (b.due_date !== undefined) { patch.due_date = dateParam(b.due_date, 'due_date') ?? null; patch.due_source = 'am'; }
+    if (b.status !== undefined) {
+      const st = String(b.status);
+      if (!['open', 'done', 'dismissed'].includes(st)) throw new HttpError(400, 'status must be open, done or dismissed.');
+      patch.status = st as 'open' | 'done' | 'dismissed';
+      const now = new Date().toISOString();
+      patch.completed_at = st === 'done' ? now : null;
+      patch.completed_by = st === 'done' ? actorOf(req) : null;
+      patch.dismissed_at = st === 'dismissed' ? now : null;
+    }
+    const task = q.updateClientTask(cur.id, patch);
+    liveEvents.emitUpdate({ kind: 'check' });
+    res.json({ task, ...clientTasks.data({ from: dateParam(b.from, 'from'), to: dateParam(b.to, 'to') }) });
+  });
+  r.delete('/client-tasks/:id', (req, res) => {
+    if (!q.deleteClientTask(idParam(req))) throw new HttpError(404, 'Task not found');
+    liveEvents.emitUpdate({ kind: 'check' });
+    res.json(clientTasks.data({ from: dateParam(req.query.from, 'from'), to: dateParam(req.query.to, 'to') }));
+  });
+
   // ---- Incidents (instant issue alerts to Slack) ----
   const incidents = scheduler.incidents;
   r.get('/incidents', (_req, res) => res.json(incidents.data()));
@@ -2861,7 +2939,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const end = optText(b.end);
     if (end && !/^\d{4}-\d{2}-\d{2}$/.test(end)) throw new HttpError(400, 'End date must be YYYY-MM-DD.');
     try {
-      const report = await reports.generate(accountId, period, { endDate: end, instructions: optText(b.instructions), notes: Array.isArray(b.notes) ? (b.notes as unknown[]).map(String).filter(Boolean) : optText(b.notes) ? String(b.notes).split('\n').map((x) => x.trim()).filter(Boolean) : [], actor: actorOf(req) });
+      const report = await reports.generate(accountId, period, { endDate: end, instructions: optText(b.instructions), notes: Array.isArray(b.notes) ? (b.notes as unknown[]).map(String).filter(Boolean) : optText(b.notes) ? String(b.notes).split('\n').map((x) => x.trim()).filter(Boolean) : [], actor: actorOf(req), kind: b.kind === 'cruva' ? 'cruva' : 'standard' });
       res.status(201).json({ report, ...reports.data() });
     } catch (err) {
       throw new HttpError(502, (err as Error).message);
@@ -2882,6 +2960,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (b.title !== undefined) { const v = optText(b.title); if (!v) throw new HttpError(400, 'Title cannot be empty.'); patch.title = v; }
     if (b.body !== undefined) { const v = String(b.body ?? '').replace(/\r\n/g, '\n').trim(); if (!v) throw new HttpError(400, 'Body cannot be empty.'); patch.body = v; }
     if (b.slack_channel !== undefined) patch.slack_channel = optText(b.slack_channel);
+    if (b.slack_draft !== undefined) patch.slack_draft = String(b.slack_draft ?? '').replace(/\r\n/g, '\n').trim() || null;
     const report = q.updateReport(idParam(req), patch);
     if (!report) throw new HttpError(404, 'Report not found');
     liveEvents.emitUpdate({ kind: 'reports' });
@@ -2890,11 +2969,52 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   r.post('/reports/:id/send', async (req, res) => {
     const b = (req.body ?? {}) as Record<string, unknown>;
     try {
-      const report = await reports.send(idParam(req), optText(b.slack_channel));
+      const report = await reports.send(idParam(req), optText(b.slack_channel), { pdf: b.pdf === undefined ? true : bool(b.pdf, true), text: b.slack_draft === undefined ? undefined : String(b.slack_draft ?? '') });
       res.json({ report, ...reports.data() });
     } catch (err) {
       throw new HttpError(502, (err as Error).message);
     }
+  });
+  r.post('/reports/:id/approve', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const sendAt = optText(b.send_at);
+    if (sendAt && Number.isNaN(Date.parse(sendAt))) throw new HttpError(400, 'send_at must be a date-time.');
+    try {
+      const report = reports.approve(idParam(req), actorOf(req), sendAt ? new Date(sendAt).toISOString() : null);
+      res.json({ report, ...reports.data() });
+    } catch (err) { throw new HttpError(400, (err as Error).message); }
+  });
+  r.post('/reports/:id/unapprove', (req, res) => {
+    try { res.json({ report: reports.unapprove(idParam(req)), ...reports.data() }); } catch (err) { throw new HttpError(404, (err as Error).message); }
+  });
+  r.get('/reports/:id/report.pdf', (req, res) => {
+    try {
+      const f = reports.pdf(idParam(req));
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `${req.query.download === '1' ? 'attachment' : 'inline'}; filename="${f.filename}"`);
+      res.send(f.content);
+    } catch (err) { throw new HttpError(404, (err as Error).message); }
+  });
+  r.put('/reports/schedules/:accountId', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const accountId = Number(req.params.accountId);
+    if (!q.getAccount(accountId)) throw new HttpError(404, 'Account not found');
+    const patch: Partial<ReportSchedule> = {};
+    if (b.enabled !== undefined) patch.enabled = bool(b.enabled, false);
+    if (b.autosend !== undefined) patch.autosend = bool(b.autosend, false);
+    if (b.pdf !== undefined) patch.pdf = bool(b.pdf, true);
+    if (b.weekday !== undefined) { const n = Number(b.weekday); if (!Number.isInteger(n) || n < 1 || n > 7) throw new HttpError(400, 'weekday must be 1 (Monday) to 7 (Sunday).'); patch.weekday = n; }
+    if (b.hour !== undefined) { const n = Number(b.hour); if (!Number.isInteger(n) || n < 0 || n > 23) throw new HttpError(400, 'hour must be 0 to 23.'); patch.hour = n; }
+    if (b.minute !== undefined) { const n = Number(b.minute); if (!Number.isInteger(n) || n < 0 || n > 59) throw new HttpError(400, 'minute must be 0 to 59.'); patch.minute = n; }
+    if (b.period !== undefined) patch.period = b.period === 'monthly' ? 'monthly' : 'weekly';
+    if (b.kind !== undefined) patch.kind = b.kind === 'cruva' ? 'cruva' : 'standard';
+    q.saveReportSchedule(accountId, patch);
+    liveEvents.emitUpdate({ kind: 'reports' });
+    res.json(reports.data());
+  });
+  r.post('/reports/queue/tick', async (_req, res) => {
+    const r2 = await reports.tick();
+    res.json({ ...r2, ...reports.data() });
   });
   r.get('/reports/:id/export.md', (req, res) => {
     const rep = q.getReport(idParam(req));
@@ -3069,7 +3189,9 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (!question) throw new HttpError(400, 'Type the question first.');
     const accountId = b.account_id === undefined || b.account_id === null || b.account_id === '' ? null : Number(b.account_id);
     try {
-      const created = await copilot.ask({ account_id: accountId, question, source: 'manual', asked_by: optText(b.asked_by), created_by: actorOf(req) });
+      const asOf = optText(b.as_of);
+      if (asOf && !/^\d{4}-\d{2}-\d{2}$/.test(asOf)) throw new HttpError(400, 'as_of must be YYYY-MM-DD.');
+      const created = await copilot.ask({ account_id: accountId, question, source: 'manual', asked_by: optText(b.asked_by), created_by: actorOf(req), audience: b.audience === 'client' ? 'client' : 'internal', as_of: asOf });
       res.status(201).json({ question: created, ...copilot.data() });
     } catch (err) {
       throw new HttpError(502, (err as Error).message);

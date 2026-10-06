@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { StockData, StockProjection, StockProjectionRow } from '../../../sweep/types';
 import { api, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
-import { useAccountScope } from '../hubs';
+import { useAccountScope, useAllowedAccounts, useInScope } from '../hubs';
 import { AccountGroup, GroupsHead, useOpenGroups, type GroupLight } from '../groups';
 import FbtPanel from './Fbt';
 
@@ -52,9 +52,11 @@ export default function StockPage() {
     } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
   };
   const scope = useAccountScope();
+  const inScope = useInScope();
+  const allowed = useAllowedAccounts();
   if (!data) return <p>{error ?? 'Loading…'}</p>;
-  const shops = data.shops.filter((sh) => scope === null || sh.account_id === scope);
-  const alerts = data.alerts.filter((a) => scope === null || shops.some((sh) => sh.shop_id === a.shop_id));
+  const shops = data.shops.filter((sh) => inScope(sh.account_id));
+  const alerts = data.alerts.filter((a) => shops.some((sh) => sh.shop_id === a.shop_id));
   const rows = proj ? proj.rows.filter((r) => !onlyNeeded || r.send_in > 0) : [];
   const badge = (l: StockProjectionRow['level']) => <span className={`badge ${LEVEL[l].cls}`}>{LEVEL[l].label}</span>;
 

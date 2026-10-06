@@ -298,9 +298,29 @@ Inside a shop's projection, "FBT paperwork" turns the send-in quantities into th
 
 Account management > P&L is the profit and loss per account and month, in the same collapsible account blocks with a traffic light (green at 20% net margin or better, amber from 5%, red below, grey without GMV). GMV, affiliate GMV and units come from the synced daily figures (Windsor first, Cruva where Windsor has nothing); the inputs are kept per month and carry forward: TikTok platform fee %, creator commission % (on affiliate GMV), shipping %, agency fee, agency commission % (from the deal on the account; on GMV or on the settlement for MoR deals, with the real settlement once entered), ad spend, samples sent and the cost per sample, other costs, and COGS either blended (% of GMV) or per SKU (unit cost per SKU from the stock snapshots, weighted by each SKU's 30-day sales; unpriced SKUs fall back to the blended %). The P&L tab shows the KPIs, three charts (where the GMV goes, GMV, net margin) and the month-by-month table across six months of history, this month and the forecast. The Forecast tab rolls this month forward (a running month is scaled to a full month first) with monthly GMV growth %, ad spend and ad ROI (spend × ROI of extra GMV), samples per month and GMV per sample, with or without the agency fees, and totals the forecast. "Download client P&L" produces the client-facing sheet: a Brightform header, an inputs block the client can edit, and one column per month where every line is a live formula on the GMV row and the inputs, so the sheet recalculates when a fee or growth rate changes.
 
-## Client reports
+## What scans when (every Accounts tab)
 
-Account management > Client reports writes the weekly or monthly report for an account from: GMV and affiliate GMV vs the previous period (Cruva sync, per shop), TikTok Shop analytics per authorised shop, what the market is doing from the BD pipeline's FastMoss pulls (shops tracked, how many are surging, the leaders), the tl;dv calls with the client in the period (matched by the client email domain or the account name; highlights become "what we did"), promotions live, incidents handled and checklist completion, plus notes typed in by the AM. Claude writes it (headline, the numbers table, what we did, what we are doing next, market context, what we need from you); without a key a template fills the same shape. The report is edited in place (preview or text), regenerated with fresh data or instructions, downloaded as Markdown, and "Send to client channel" posts it to the account's client Slack channel (long reports continue in the thread).
+Under the tabs on every Accounts page sits the scan strip: the feeds that tab reads (account monitor, Windsor pull, TikTok pull, Cruva pull, GMV sync, stock, checklist lock and reminder, inbox, evidence index, tl;dv, client task scan, report queue), when each runs in the team timezone (CET by default, from `check_timezone`), its next run, when it last ran and whether it failed. Click it for the full table.
+
+## AM picker
+
+Next to the account picker in the Accounts hub, pick an AM: every tab then shows only that AM's accounts (the account dropdown narrows too), and the choice sticks across tabs through `?am=` in the URL.
+
+## Ask (Accounts > Ask)
+
+The team's own tool, one collapsible block per account (plus "All accounts"). Type a question, optionally the day it is about, and whether the answer is for us (a Slack-syntax brief) or for the client (a reply draft). Claude answers from the evidence on record: tl;dv calls, emails with the client, the client Slack channel, SOPs and context notes, reports, incidents, the numbers, and, for a day, that day's GMV, flags, incidents and checklist. Every answer has a "Copy for Slack" button, can be edited and re-asked, and lists its sources. Client questions caught automatically in their channel or by email still land here with a client-facing draft and the reply-in-thread button.
+
+## Client tasks (Accounts > Checklist > Client tasks)
+
+A second view on the Checklist tab, in the same collapsible account blocks: the ad hoc tasks agreed with each client, pulled every 30 minutes from their Slack channel, the emails and the calls (the evidence index behind Ask) by Claude (pattern matching without a key): a short bullet, the deeper context behind it, the source link and a due date when one was said ("by Friday", "next week", "15 October"); the AM can change the date, tick it done, dismiss it, or add a task by hand. Today by default; the presets and the custom range show history (created, due, done or dismissed in the range). Lights: red with an overdue task, amber with open tasks, green when everything is done.
+
+## Reports (Accounts > Reports)
+
+One collapsible block per account. Generate a standard report or a **Cruva report** (the creator programme: DMs, samples approved and shipped, videos and views, affiliate GMV and share, the Cruva performance score) for a week or a month. Every report is built from: GMV and affiliate GMV vs the previous period (Windsor or Cruva), the Cruva daily rows, TikTok Shop analytics per authorised shop, the market from the BD pipeline, the tl;dv calls with the client, what the client said in their Slack channel and by email in the period (from the evidence index), promotions, incidents, checklist completion and the AM's notes. Claude writes it; without a key a template fills the same shape.
+
+The report lands in the account's **queue** as a draft with the Slack message pre-written in Slack syntax. The AM edits the Slack message (and the report text if they want), opens or downloads the **Brightform PDF** (black header band, KPI tiles, the daily GMV chart, the sections), then **approves** it: send now, or set an autosend time and the queue sends it by itself (every 10 minutes), posting the message to the client channel with the PDF in the thread.
+
+**Schedule weekly report** per account: day, time (team timezone), weekly or monthly, standard or Cruva, autosend on or off, PDF on or off. The queue generates it on the day; with autosend it goes straight out, otherwise it waits for approval. "Run queue now" runs the queue by hand.
 
 ## Cruva best practice (Accounts › Cruva)
 

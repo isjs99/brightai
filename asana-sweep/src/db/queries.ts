@@ -50,6 +50,8 @@ import type {
   FbtSkuSpec,
   PnlInputs,
   PnlSkuCogs,
+  ClientTask,
+  ReportSchedule,
   ReplyEvent,
   ReplyDecision,
   InboxChannel,
@@ -2078,6 +2080,7 @@ export class Queries {
     return {
       id: r.id as number, account_id: r.account_id as number, account_name: (r.account_name as string | null) ?? '', period: r.period as ClientReport['period'], period_start: r.period_start as string, period_end: r.period_end as string,
       title: r.title as string, body: r.body as string, data: parseJson<ReportData>(r.data_json, {} as ReportData), generator: r.generator as ClientReport['generator'], status: r.status as ClientReport['status'],
+      kind: (r.kind as ClientReport['kind']) ?? 'standard', slack_draft: (r.slack_draft as string | null) ?? null, approved_at: (r.approved_at as string | null) ?? null, approved_by: (r.approved_by as string | null) ?? null, send_at: (r.send_at as string | null) ?? null,
       slack_channel: (r.slack_channel as string | null) ?? null, sent_at: (r.sent_at as string | null) ?? null, created_by: (r.created_by as string | null) ?? null, created_at: r.created_at as string, updated_at: r.updated_at as string,
     };
   }
@@ -2091,13 +2094,13 @@ export class Queries {
     return r ? this.rowToReport(r) : null;
   }
 
-  createReport(i: { account_id: number; period: 'weekly' | 'monthly'; period_start: string; period_end: string; title: string; body: string; data: ReportData; generator: 'claude' | 'template'; slack_channel: string | null; created_by: string | null }): ClientReport {
-    const res = this.db.prepare(`INSERT INTO client_reports (account_id, period, period_start, period_end, title, body, data_json, generator, slack_channel, created_by) VALUES (@account_id, @period, @period_start, @period_end, @title, @body, @data_json, @generator, @slack_channel, @created_by)`)
-      .run({ ...i, data_json: JSON.stringify(i.data) });
+  createReport(i: { account_id: number; period: 'weekly' | 'monthly'; period_start: string; period_end: string; title: string; body: string; data: ReportData; generator: 'claude' | 'template'; slack_channel: string | null; created_by: string | null; kind?: 'standard' | 'cruva'; slack_draft?: string | null }): ClientReport {
+    const res = this.db.prepare(`INSERT INTO client_reports (account_id, period, period_start, period_end, title, body, data_json, generator, slack_channel, created_by, kind, slack_draft) VALUES (@account_id, @period, @period_start, @period_end, @title, @body, @data_json, @generator, @slack_channel, @created_by, @kind, @slack_draft)`)
+      .run({ ...i, kind: i.kind ?? 'standard', slack_draft: i.slack_draft ?? null, data_json: JSON.stringify(i.data) });
     return this.getReport(Number(res.lastInsertRowid))!;
   }
 
-  updateReport(id: number, patch: Partial<{ title: string; body: string; data: ReportData; generator: 'claude' | 'template'; status: 'draft' | 'sent'; slack_channel: string | null; sent_at: string | null }>): ClientReport | null {
+  updateReport(id: number, patch: Partial<{ title: string; body: string; data: ReportData; generator: 'claude' | 'template'; status: ClientReport['status']; slack_channel: string | null; sent_at: string | null; slack_draft: string | null; approved_at: string | null; approved_by: string | null; send_at: string | null; kind: ClientReport['kind'] }>): ClientReport | null {
     const sets: string[] = [];
     const params: Record<string, unknown> = { id };
     for (const [k, v] of Object.entries(patch)) {
@@ -2327,6 +2330,90 @@ export class Queries {
 
   // ---- FBT paperwork ----
 
+  // ---- Report schedules ----
+
+  listReportSchedules(): ReportSchedule[] {
+    return (this.db.prepare('SELECT * FROM report_schedules').all() as Row[]).map((r) => this.rowToSchedule(r));
+  }
+
+  getReportSchedule(accountId: number): ReportSchedule | null {
+    const r = this.db.prepare('SELECT * FROM report_schedules WHERE account_id = ?').get(accountId) as Row | undefined;
+    return r ? this.rowToSchedule(r) : null;
+  }
+
+  private rowToSchedule(r: Row): ReportSchedule {
+    const j = parseJson<Partial<ReportSchedule>>(r.json, {});
+    return { account_id: r.account_id as number, enabled: Boolean(j.enabled), weekday: j.weekday ?? 1, hour: j.hour ?? 9, minute: j.minute ?? 0, period: j.period === 'monthly' ? 'monthly' : 'weekly', kind: j.kind === 'cruva' ? 'cruva' : 'standard', autosend: Boolean(j.autosend), pdf: j.pdf !== false, last_generated_at: (r.last_generated_at as string | null) ?? null, updated_at: (r.updated_at as string | null) ?? null };
+  }
+
+  saveReportSchedule(accountId: number, s: Partial<ReportSchedule>): ReportSchedule {
+    const cur = this.getReportSchedule(accountId);
+    const { account_id: _a, last_generated_at: _l, updated_at: _u, ...rest } = { ...(cur ?? {}), ...s } as ReportSchedule;
+    this.db.prepare(`INSERT INTO report_schedules (account_id, json, updated_at) VALUES (?, ?, ?) ON CONFLICT(account_id) DO UPDATE SET json = excluded.json, updated_at = excluded.updated_at`).run(accountId, JSON.stringify(rest), new Date().toISOString());
+    return this.getReportSchedule(accountId)!;
+  }
+
+  markReportGenerated(accountId: number, at = new Date().toISOString()): void {
+    this.db.prepare('UPDATE report_schedules SET last_generated_at = ? WHERE account_id = ?').run(at, accountId);
+  }
+
+  // ---- Ad hoc client tasks ----
+
+  private rowToTask(r: Row): ClientTask {
+    return {
+      id: r.id as number, account_id: r.account_id as number, account_name: (r.account_name as string | null) ?? '', am_name: (r.am_name as string | null) ?? null, title: r.title as string, detail: (r.detail as string | null) ?? '',
+      source: r.source as ClientTask['source'], source_ref: (r.source_ref as string | null) ?? null, source_url: (r.source_url as string | null) ?? null, due_date: (r.due_date as string | null) ?? null, due_source: r.due_source === 'context' ? 'context' : 'am',
+      status: r.status as ClientTask['status'], created_by: (r.created_by as string | null) ?? null, created_at: r.created_at as string, updated_at: r.updated_at as string, completed_at: (r.completed_at as string | null) ?? null, completed_by: (r.completed_by as string | null) ?? null, dismissed_at: (r.dismissed_at as string | null) ?? null,
+    };
+  }
+
+  /** Tasks that touch the window: open tasks (any date), plus tasks created, due, completed or dismissed within it. */
+  listClientTasks(opts: { accountId?: number | null; from?: string; to?: string; includeOpen?: boolean } = {}): ClientTask[] {
+    const where: string[] = [];
+    const params: unknown[] = [];
+    if (opts.accountId) { where.push('t.account_id = ?'); params.push(opts.accountId); }
+    if (opts.from && opts.to) {
+      const f = opts.from, t = `${opts.to}T23:59:59.999Z`;
+      const inWin = `(substr(t.created_at, 1, 10) BETWEEN ? AND ?) OR (t.due_date BETWEEN ? AND ?) OR (t.completed_at BETWEEN ? AND ?) OR (t.dismissed_at BETWEEN ? AND ?)`;
+      where.push(opts.includeOpen === false ? `(${inWin})` : `(t.status = 'open' OR ${inWin})`);
+      params.push(f, opts.to, f, opts.to, f, t, f, t);
+    }
+    return (this.db.prepare(`SELECT t.*, a.name AS account_name, a.am_name FROM client_tasks t JOIN accounts a ON a.id = t.account_id ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY CASE t.status WHEN 'open' THEN 0 WHEN 'done' THEN 1 ELSE 2 END, t.due_date IS NULL, t.due_date, t.created_at DESC`).all(...params) as Row[]).map((r) => this.rowToTask(r));
+  }
+
+  getClientTask(id: number): ClientTask | null {
+    const r = this.db.prepare('SELECT t.*, a.name AS account_name, a.am_name FROM client_tasks t JOIN accounts a ON a.id = t.account_id WHERE t.id = ?').get(id) as Row | undefined;
+    return r ? this.rowToTask(r) : null;
+  }
+
+  hasClientTask(accountId: number, sourceRef: string): boolean {
+    return Boolean(this.db.prepare('SELECT 1 FROM client_tasks WHERE account_id = ? AND source_ref = ?').get(accountId, sourceRef));
+  }
+
+  /** Open or recent titles for one account, to keep the extractor from adding the same ask twice. */
+  recentClientTaskTitles(accountId: number, days = 60): string[] {
+    const since = new Date(Date.now() - days * 86400000).toISOString();
+    return (this.db.prepare('SELECT title FROM client_tasks WHERE account_id = ? AND (status = ? OR created_at >= ?)').all(accountId, 'open', since) as { title: string }[]).map((r) => r.title);
+  }
+
+  createClientTask(i: { account_id: number; title: string; detail?: string | null; source?: ClientTask['source']; source_ref?: string | null; source_url?: string | null; due_date?: string | null; due_source?: ClientTask['due_source']; created_by?: string | null }): ClientTask {
+    const res = this.db.prepare('INSERT INTO client_tasks (account_id, title, detail, source, source_ref, source_url, due_date, due_source, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(i.account_id, i.title.trim().slice(0, 240), (i.detail ?? '').trim().slice(0, 6000), i.source ?? 'manual', i.source_ref ?? null, i.source_url ?? null, i.due_date ?? null, i.due_source ?? (i.due_date ? 'context' : 'am'), i.created_by ?? null);
+    return this.getClientTask(Number(res.lastInsertRowid))!;
+  }
+
+  updateClientTask(id: number, patch: Partial<{ title: string; detail: string; due_date: string | null; due_source: ClientTask['due_source']; status: ClientTask['status']; completed_at: string | null; completed_by: string | null; dismissed_at: string | null }>): ClientTask | null {
+    const sets: string[] = [];
+    const params: Record<string, unknown> = { id };
+    for (const [k, v] of Object.entries(patch)) { if (v === undefined) continue; sets.push(`${k} = @${k}`); params[k] = v; }
+    if (sets.length) this.db.prepare(`UPDATE client_tasks SET ${sets.join(', ')}, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = @id`).run(params);
+    return this.getClientTask(id);
+  }
+
+  deleteClientTask(id: number): boolean {
+    return this.db.prepare('DELETE FROM client_tasks WHERE id = ?').run(id).changes > 0;
+  }
+
   getFbtProfile(accountId: number, market: string): Partial<FbtProfile> & { updated_at: string | null } {
     const r = this.db.prepare('SELECT json, updated_at FROM fbt_profiles WHERE account_id = ? AND market = ?').get(accountId, market.toUpperCase()) as Row | undefined;
     return { ...parseJson<Partial<FbtProfile>>(r?.json, {}), updated_at: (r?.updated_at as string | null) ?? null };
@@ -2382,6 +2469,7 @@ export class Queries {
   private rowToQuestion(r: Row): CopilotQuestion {
     return {
       id: r.id as number, account_id: (r.account_id as number | null) ?? null, account_name: (r.account_name as string | null) ?? null, source: r.source as CopilotQuestion['source'], channel: (r.channel as string | null) ?? null, thread_ts: (r.thread_ts as string | null) ?? null, external_id: (r.external_id as string | null) ?? null,
+      audience: r.audience === 'internal' ? 'internal' : 'client', as_of: (r.as_of as string | null) ?? null, slack_text: null,
       asked_by: (r.asked_by as string | null) ?? null, question: r.question as string, answer: (r.answer as string | null) ?? null, sources: parseJson<CopilotSource[]>(r.sources_json, []), generator: (r.generator as CopilotQuestion['generator']) ?? null, status: r.status as CopilotQuestion['status'],
       created_by: (r.created_by as string | null) ?? null, created_at: r.created_at as string, answered_at: (r.answered_at as string | null) ?? null, sent_at: (r.sent_at as string | null) ?? null,
     };
@@ -2397,9 +2485,9 @@ export class Queries {
   }
 
   /** Returns null when a question with this source + external id already exists. */
-  createQuestion(i: { account_id: number | null; source: CopilotQuestion['source']; channel?: string | null; thread_ts?: string | null; external_id?: string | null; asked_by?: string | null; question: string; created_by?: string | null }): CopilotQuestion | null {
+  createQuestion(i: { account_id: number | null; source: CopilotQuestion['source']; channel?: string | null; thread_ts?: string | null; external_id?: string | null; asked_by?: string | null; question: string; created_by?: string | null; audience?: CopilotQuestion['audience']; as_of?: string | null }): CopilotQuestion | null {
     if (i.external_id && this.db.prepare('SELECT 1 FROM copilot_questions WHERE source = ? AND external_id = ?').get(i.source, i.external_id)) return null;
-    const res = this.db.prepare('INSERT INTO copilot_questions (account_id, source, channel, thread_ts, external_id, asked_by, question, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)').run(i.account_id, i.source, i.channel ?? null, i.thread_ts ?? null, i.external_id ?? null, i.asked_by ?? null, i.question, i.created_by ?? null);
+    const res = this.db.prepare('INSERT INTO copilot_questions (account_id, source, channel, thread_ts, external_id, asked_by, question, created_by, audience, as_of) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(i.account_id, i.source, i.channel ?? null, i.thread_ts ?? null, i.external_id ?? null, i.asked_by ?? null, i.question, i.created_by ?? null, i.audience ?? 'client', i.as_of ?? null);
     return this.getQuestion(Number(res.lastInsertRowid));
   }
 
@@ -2428,11 +2516,13 @@ export class Queries {
     return n;
   }
 
-  listEvidence(opts: { accountId?: number | null; kinds?: string[] } = {}): { id: number; account_id: number | null; kind: string; ref: string; title: string; text: string; url: string | null; occurred_at: string | null; indexed_at: string }[] {
+  listEvidence(opts: { accountId?: number | null; kinds?: string[]; from?: string | null; to?: string | null; ownOnly?: boolean } = {}): { id: number; account_id: number | null; kind: string; ref: string; title: string; text: string; url: string | null; occurred_at: string | null; indexed_at: string }[] {
     const where: string[] = [];
     const params: unknown[] = [];
-    if (opts.accountId !== undefined && opts.accountId !== null) { where.push('(account_id = ? OR account_id IS NULL)'); params.push(opts.accountId); }
+    if (opts.accountId !== undefined && opts.accountId !== null) { where.push(opts.ownOnly ? 'account_id = ?' : '(account_id = ? OR account_id IS NULL)'); params.push(opts.accountId); }
     if (opts.kinds?.length) { where.push(`kind IN (${opts.kinds.map(() => '?').join(',')})`); params.push(...opts.kinds); }
+    if (opts.from) { where.push('occurred_at >= ?'); params.push(opts.from); }
+    if (opts.to) { where.push('occurred_at <= ?'); params.push(`${opts.to}T23:59:59.999Z`); }
     return (this.db.prepare(`SELECT * FROM copilot_evidence ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY occurred_at DESC`).all(...params) as Row[]).map((r) => ({ id: r.id as number, account_id: (r.account_id as number | null) ?? null, kind: r.kind as string, ref: r.ref as string, title: r.title as string, text: r.text as string, url: (r.url as string | null) ?? null, occurred_at: (r.occurred_at as string | null) ?? null, indexed_at: r.indexed_at as string }));
   }
 

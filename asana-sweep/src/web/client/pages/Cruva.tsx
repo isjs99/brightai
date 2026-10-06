@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import type { PlaybookCellStatus, PlaybookData, PlaybookDraft, PlaybookDraftStatus, PlaybookItem, PlaybookKind, PlaybookRollout, PlaybookSetupCell, PlaybookShop } from '../../../sweep/types';
 import { api, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
-import { useAccountScope } from '../hubs';
+import { useAccountScope, useAllowedAccounts, useInScope } from '../hubs';
 import { GroupsHead, useOpenGroups, type GroupLight } from '../groups';
 
 /** The matrix reads left to right the way the rollout happens: groups, the bots on them, outreach, content, email, flows, hygiene. */
@@ -46,6 +46,8 @@ type Column = { kind: PlaybookKind; key: string; name: string; description: stri
 export default function CruvaPage() {
   const [params, setParams] = useSearchParams();
   const scope = useAccountScope();
+  const inScope = useInScope();
+  const allowed = useAllowedAccounts();
   const [data, setData] = useState<PlaybookData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -75,7 +77,7 @@ export default function CruvaPage() {
   }, [data]);
   if (!data) return <p>{error ?? 'Loading…'}</p>;
 
-  const shops = data.shops.filter((s) => scope === null || s.account_id === scope).sort((a, b) => a.account_name.localeCompare(b.account_name) || a.shop_name.localeCompare(b.shop_name));
+  const shops = data.shops.filter((s) => inScope(s.account_id)).sort((a, b) => a.account_name.localeCompare(b.account_name) || a.shop_name.localeCompare(b.shop_name));
   const cell = (shopId: string, c: Column) => data.cells.find((x) => x.shop_id === shopId && x.kind === c.kind && x.playbook_key === c.key) ?? null;
   const coverage = (shopId: string) => { const cells = columns.map((c) => cell(shopId, c)); const known = cells.filter((c) => c && c.status !== 'unknown' && c.status !== 'manual'); return { set: known.filter((c) => c!.status === 'set' || c!.status === 'drift').length, total: known.length, missing: cells.filter((c) => c?.status === 'missing' || c?.status === 'error').length, paused: cells.filter((c) => c?.status === 'paused').length, drift: cells.filter((c) => c?.status === 'drift').length, checked: known.length > 0 }; };
   const toggle = (id: string) => { const n = new Set(sel); if (n.has(id)) n.delete(id); else n.add(id); setSel(n); };

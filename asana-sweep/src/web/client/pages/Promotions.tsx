@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import type { Account, Promotion, PromotionInput, TargetStatus, TtsStatus } from '../../../sweep/types';
 import { api, fmtDate, fmtRelative } from '../api';
 import { useIsAdmin } from '../session';
-import { useAccountScope } from '../hubs';
+import { useAccountScope, useAllowedAccounts, useInScope } from '../hubs';
 
 const EU = ['DE', 'FR', 'IT', 'ES', 'NL', 'BE', 'IE', 'AT', 'PL', 'UK'];
 
@@ -305,7 +305,9 @@ export default function PromotionsPage() {
   const [showConn, setShowConn] = useState(params.get('connection') === '1');
   const isAdmin = useIsAdmin();
   const scope = useAccountScope();
-  const visible = promotions === null ? null : promotions.filter((p) => scope === null || p.targets.some((t) => t.account_id === scope));
+  const inScope = useInScope();
+  const allowed = useAllowedAccounts();
+  const visible = promotions === null ? null : promotions.filter((p) => (scope === null && allowed === null) || p.targets.some((t) => inScope(t.account_id)));
 
   const load = useCallback(() => {
     api.listPromotions().then((r) => { setPromotions(r.promotions); setTts(r.tts); }).catch((e) => setError((e as Error).message));

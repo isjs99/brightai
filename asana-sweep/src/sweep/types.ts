@@ -1662,6 +1662,60 @@ export interface PnlData {
 }
 export interface PnlSummaryRow { account_id: number; account_name: string; am_name: string | null; markets: string | null; currency: string; month: string; gmv: number; net: number; margin_pct: number | null; agency_billing: number; has_inputs: boolean; light: 'red' | 'amber' | 'green' | 'grey' }
 
+// ---- Ad hoc client tasks ----
+
+export interface ClientTask {
+  id: number;
+  account_id: number;
+  account_name: string;
+  am_name: string | null;
+  /** The short bullet. */
+  title: string;
+  /** The deeper context: what was said, where, the full notes. */
+  detail: string;
+  source: 'slack' | 'email' | 'call' | 'manual';
+  source_ref: string | null;
+  source_url: string | null;
+  due_date: string | null;
+  /** context: taken from the conversation; am: set or amended by the AM. */
+  due_source: 'context' | 'am';
+  status: 'open' | 'done' | 'dismissed';
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+  completed_at: string | null;
+  completed_by: string | null;
+  dismissed_at: string | null;
+}
+export interface ClientTasksData {
+  from: string;
+  to: string;
+  today: string;
+  tasks: ClientTask[];
+  accounts: { id: number; name: string; am_name: string | null; markets: string | null; client_slack_channel: string | null; client_domain: string | null }[];
+  last_scan_at: string | null;
+  last_scan_error: string | null;
+  scanning: boolean;
+  llm_configured: boolean;
+}
+
+// ---- Sync status (what scans when) ----
+
+export interface SyncFeed {
+  key: string;
+  label: string;
+  /** What it feeds, in a few words. */
+  feeds: string;
+  /** "Daily 06:30 CET", "Every 4 hours", … */
+  schedule_text: string;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  last_error: string | null;
+  running: boolean;
+  configured: boolean;
+}
+export interface SyncStatus { timezone: string; now: string; feeds: SyncFeed[] }
+
 // ---- Stock ----
 
 export interface StockSku {
@@ -1856,12 +1910,50 @@ export interface ClientReport {
   body: string;
   data: ReportData;
   generator: 'claude' | 'template';
-  status: 'draft' | 'sent';
+  /** draft: in the queue to review; approved: ready to send now or at send_at; sent. */
+  status: 'draft' | 'approved' | 'sent';
+  /** standard: the usual report; cruva: the Cruva performance report (creators, videos, samples, DMs, score). */
+  kind: 'standard' | 'cruva';
+  /** The Slack message the AM edits (defaults to the report in Slack syntax). */
+  slack_draft: string | null;
+  approved_at: string | null;
+  approved_by: string | null;
+  /** When an approved report goes out by itself (autosend); null = send by hand. */
+  send_at: string | null;
   slack_channel: string | null;
   sent_at: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
+}
+export interface ReportContext {
+  /** Client Slack channel messages in the period (one entry per day). */
+  slack: { date: string; text: string }[];
+  /** Emails with the client in the period. */
+  emails: { date: string | null; subject: string; snippet: string; url: string | null }[];
+}
+export interface ReportCruva {
+  shops: { shop_id: string; shop_name: string; market: string | null; gmv: number; affiliate_gmv: number; units: number; videos_posted: number; video_views: number; samples_approved: number; samples_shipped: number; dms_sent: number; sps: number | null }[];
+  totals: { gmv: number; affiliate_gmv: number; units: number; videos_posted: number; video_views: number; samples_approved: number; samples_shipped: number; dms_sent: number };
+  prev_totals: { gmv: number; affiliate_gmv: number; units: number; videos_posted: number; video_views: number; samples_approved: number; samples_shipped: number; dms_sent: number };
+  /** Daily GMV in the period, for the chart. */
+  daily: { date: string; gmv: number; affiliate_gmv: number }[];
+}
+export interface ReportSchedule {
+  account_id: number;
+  enabled: boolean;
+  /** 1 = Monday … 7 = Sunday. */
+  weekday: number;
+  hour: number;
+  minute: number;
+  period: 'weekly' | 'monthly';
+  kind: 'standard' | 'cruva';
+  /** Send to the client channel as soon as it is generated (otherwise it waits in the queue for approval). */
+  autosend: boolean;
+  /** Attach the Brightform PDF to the Slack message. */
+  pdf: boolean;
+  last_generated_at: string | null;
+  updated_at: string | null;
 }
 
 export interface ReportData {
@@ -1873,10 +1965,13 @@ export interface ReportData {
   promotions: { name: string; begin_at: string; end_at: string }[];
   checklist: { days: number; complete: number };
   notes: string[];
+  context?: ReportContext;
+  cruva?: ReportCruva | null;
 }
 
 export interface ReportsData {
   reports: ClientReport[];
+  schedules: ReportSchedule[];
   accounts: { id: number; name: string; client_slack_channel: string | null; client_domain: string | null; markets: string | null; shops: number }[];
   slack_configured: boolean;
   llm_configured: boolean;
@@ -2007,12 +2102,18 @@ export interface CopilotQuestion {
   account_id: number | null;
   account_name: string | null;
   source: 'slack' | 'email' | 'manual';
+  /** client: a reply the AM sends on; internal: a briefing for the team, in Slack syntax. */
+  audience: 'client' | 'internal';
+  /** The day the question is about (evidence up to that day, the numbers of that day). */
+  as_of: string | null;
   channel: string | null;
   thread_ts: string | null;
   external_id: string | null;
   asked_by: string | null;
   question: string;
   answer: string | null;
+  /** The answer as a Slack message (mrkdwn), ready to paste. */
+  slack_text: string | null;
   sources: CopilotSource[];
   generator: 'claude' | 'template' | null;
   status: 'open' | 'drafted' | 'answered' | 'dismissed';

@@ -1493,6 +1493,47 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 39,
+    name: 'Internal Ask mode, report queue and schedules, client tasks',
+    up(db) {
+      db.exec(`
+        ALTER TABLE copilot_questions ADD COLUMN audience TEXT NOT NULL DEFAULT 'client';
+        ALTER TABLE copilot_questions ADD COLUMN as_of TEXT;
+        ALTER TABLE client_reports ADD COLUMN kind TEXT NOT NULL DEFAULT 'standard';
+        ALTER TABLE client_reports ADD COLUMN slack_draft TEXT;
+        ALTER TABLE client_reports ADD COLUMN approved_at TEXT;
+        ALTER TABLE client_reports ADD COLUMN approved_by TEXT;
+        ALTER TABLE client_reports ADD COLUMN send_at TEXT;
+        CREATE TABLE report_schedules (
+          account_id INTEGER PRIMARY KEY REFERENCES accounts(id) ON DELETE CASCADE,
+          json TEXT NOT NULL DEFAULT '{}',
+          last_generated_at TEXT,
+          updated_at TEXT NOT NULL
+        );
+        CREATE TABLE client_tasks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          title TEXT NOT NULL,
+          detail TEXT NOT NULL DEFAULT '',
+          source TEXT NOT NULL DEFAULT 'manual',
+          source_ref TEXT,
+          source_url TEXT,
+          due_date TEXT,
+          due_source TEXT NOT NULL DEFAULT 'am',
+          status TEXT NOT NULL DEFAULT 'open',
+          created_by TEXT,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          completed_at TEXT,
+          completed_by TEXT,
+          dismissed_at TEXT
+        );
+        CREATE INDEX client_tasks_account ON client_tasks(account_id, status, due_date);
+        CREATE UNIQUE INDEX client_tasks_source ON client_tasks(account_id, source_ref) WHERE source_ref IS NOT NULL;
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

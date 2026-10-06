@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import type { Account } from '../../sweep/types';
 import { api } from './api';
+import { SyncStrip } from './sync';
 
 /**
  * The six hubs of the portal. Each one is a title, a row of tabs and the existing page for that tab,
@@ -14,11 +15,21 @@ export interface HubTab { to: string; label: string; aliases?: string[] }
 /** The account every page under Accounts is scoped to (from ?account= in the URL), or null for all. */
 export const AccountScopeContext = createContext<number | null>(null);
 export const useAccountScope = (): number | null => useContext(AccountScopeContext);
+/** The accounts of the chosen AM (from ?am= in the URL), or null for everyone's. */
+export const AllowedAccountsContext = createContext<Set<number> | null>(null);
+export const useAllowedAccounts = (): Set<number> | null => useContext(AllowedAccountsContext);
+/** One check for both pickers: the account scope and the AM's accounts. */
+export function useInScope(): (accountId: number | null | undefined) => boolean {
+  const scope = useAccountScope();
+  const allowed = useAllowedAccounts();
+  return (id) => (scope === null || id === scope) && (allowed === null || (id !== null && id !== undefined && allowed.has(id)));
+}
 
 export function Hub({ title, tabs, children, right }: { title: string; tabs: HubTab[]; children: ReactNode; right?: ReactNode }) {
   const { pathname } = useLocation();
   const [params] = useSearchParams();
-  const keep = params.get('account') ? `?account=${params.get('account')}` : '';
+  const keepParams = new URLSearchParams(); if (params.get('account')) keepParams.set('account', params.get('account')!); if (params.get('am')) keepParams.set('am', params.get('am')!);
+  const keep = keepParams.toString() ? `?${keepParams.toString()}` : '';
   return (
     <div className="hub">
       <div className="hub-head">
@@ -72,21 +83,33 @@ export function AccountHub({ children }: { children: ReactNode }) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   useEffect(() => { api.listAccounts().then((r) => setAccounts(r.accounts.map((x) => x.account).filter((a) => a.enabled).sort((a, b) => a.name.localeCompare(b.name)))).catch(() => setAccounts([])); }, []);
   const scope = params.get('account') ? Number(params.get('account')) : null;
+  const am = params.get('am') ?? '';
+  const ams = [...new Set(accounts.map((a) => a.am_name ?? 'Unassigned'))].sort();
+  const mine = am ? accounts.filter((a) => (a.am_name ?? 'Unassigned') === am) : accounts;
+  const allowed = am ? new Set(mine.map((a) => a.id)) : null;
   const pick = (id: string) => { const n = new URLSearchParams(params); if (id) n.set('account', id); else n.delete('account'); setParams(n); };
+  const pickAm = (name: string) => { const n = new URLSearchParams(params); if (name) n.set('am', name); else n.delete('am'); if (scope !== null && name && !accounts.some((a) => a.id === scope && (a.am_name ?? 'Unassigned') === name)) n.delete('account'); setParams(n); };
   const current = accounts.find((a) => a.id === scope);
   return (
     <AccountScopeContext.Provider value={scope}>
-      <Hub title="Accounts" tabs={ACCOUNT_TABS} right={(
-        <div className="account-scope">
-          <select value={scope ?? ''} onChange={(e) => pick(e.target.value)} aria-label="Account">
-            <option value="">All accounts</option>
-            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}{a.markets ? ` · ${a.markets}` : ''}</option>)}
-          </select>
-          {current && <span className="sub">{current.am_name ? `AM ${current.am_name}` : ''}{current.aa_name ? ` · AA ${current.aa_name}` : ''}</span>}
-        </div>
-      )}>
-        {children}
-      </Hub>
+      <AllowedAccountsContext.Provider value={allowed}>
+        <Hub title="Accounts" tabs={ACCOUNT_TABS} right={(
+          <div className="account-scope">
+            <select value={am} onChange={(e) => pickAm(e.target.value)} aria-label="Account manager" className="am" title="Pick your name to see only your accounts on every tab">
+              <option value="">All AMs</option>
+              {ams.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <select value={scope ?? ''} onChange={(e) => pick(e.target.value)} aria-label="Account">
+              <option value="">{am ? `All ${am}'s accounts` : 'All accounts'}</option>
+              {mine.map((a) => <option key={a.id} value={a.id}>{a.name}{a.markets ? ` · ${a.markets}` : ''}</option>)}
+            </select>
+            {current && <span className="sub">{current.am_name ? `AM ${current.am_name}` : ''}{current.aa_name ? ` · AA ${current.aa_name}` : ''}</span>}
+          </div>
+        )}>
+          <SyncStrip />
+          {children}
+        </Hub>
+      </AllowedAccountsContext.Provider>
     </AccountScopeContext.Provider>
   );
 }

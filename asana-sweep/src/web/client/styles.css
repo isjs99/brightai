@@ -352,6 +352,7 @@ tr.dim td, .card.dim { opacity: .55; }
 .hub-tabs a.tab.active { background: var(--primary); color: var(--primary-ink); border-color: var(--primary); }
 .account-scope { display: flex; align-items: center; gap: 10px; }
 .account-scope select { min-width: 260px; font-weight: 700; }
+.account-scope select.am { min-width: 150px; }
 .embedded > .page-head:first-child > div:first-child > h1, .embedded > .page-head:first-child > div:first-child > p.hint { display: none; }
 .embedded > .page-head:first-child > h1 { display: none; }
 .embedded > .page-head:first-child:has(> div:first-child > h1):not(:has(.actions)) { display: none; }
@@ -553,3 +554,23 @@ table.pnl td.crit, td.num.crit { color: var(--crit-ink); }
 table.fbt input[type=number], table.fbt input[type=text] { padding: 3px 6px; font-size: 12px; }
 table.fbt tr.warnrow td:first-child { box-shadow: inset 3px 0 0 var(--warn); }
 .area > .head .light + b { min-width: 0; }
+
+/* Scan strip under the Accounts tabs */
+.sync-strip { border: 1px solid var(--border); border-radius: var(--r-card); background: var(--surface); margin: 0 0 12px; font-size: 12px; }
+.sync-strip > .row { display: flex; align-items: center; gap: 12px; padding: 6px 12px; cursor: pointer; flex-wrap: wrap; }
+.sync-strip .feeds { display: flex; gap: 10px 14px; flex-wrap: wrap; flex: 1; }
+.sync-strip .feed { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.sync-strip .feed .light { width: 9px; height: 9px; box-shadow: none; }
+.sync-strip table.sync { font-size: 12px; }
+.sync-strip table.sync td, .sync-strip table.sync th { padding: 5px 10px; }
+
+/* Client tasks and Ask */
+ul.ctasks { list-style: none; margin: 0; padding: 0; }
+ul.ctasks li.ctask { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-bottom: 1px solid var(--border-2); }
+ul.ctasks li.ctask.done b { color: var(--muted); text-decoration: line-through; }
+ul.ctasks li.ctask.dismissed { opacity: .6; }
+ul.ctasks li.ctask .tick { margin-top: 2px; }
+.ctask-detail { background: var(--surface-2); border-radius: 10px; padding: 8px 12px; margin-top: 6px; font-size: 13px; }
+textarea.slack-text { font-size: 13px; line-height: 1.45; }
+ol.sources { padding-left: 20px; font-size: 12.5px; } ol.sources li { margin-bottom: 6px; }
+.ask-q .page-head { align-items: center; }

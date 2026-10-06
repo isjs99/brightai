@@ -41,6 +41,19 @@ export class SlackBot {
     return { ts: data.ts, channel: data.channel };
   }
 
+  /** Upload a file into a channel (files:write): a PDF report with its message, in the thread when given. */
+  async uploadFile(channel: string, file: { filename: string; title: string; content: Buffer; contentType?: string }, opts: { initial_comment?: string | null; thread_ts?: string | null } = {}): Promise<{ file_id: string }> {
+    if (!this.token) throw new Error('SLACK_BOT_TOKEN is not set.');
+    const form = new URLSearchParams({ filename: file.filename, length: String(file.content.length) });
+    const r1 = await fetch('https://slack.com/api/files.getUploadURLExternal', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Authorization: `Bearer ${this.token}` }, body: form.toString() });
+    const d1 = (await r1.json()) as { ok: boolean; error?: string; upload_url?: string; file_id?: string };
+    if (!d1.ok || !d1.upload_url || !d1.file_id) throw new Error(`Slack files.getUploadURLExternal failed: ${d1.error ?? r1.status}`);
+    const r2 = await fetch(d1.upload_url, { method: 'POST', headers: { 'Content-Type': file.contentType ?? 'application/octet-stream' }, body: new Uint8Array(file.content) });
+    if (!r2.ok) throw new Error(`Slack upload failed: HTTP ${r2.status}`);
+    await this.call('files.completeUploadExternal', { files: [{ id: d1.file_id, title: file.title }], channel_id: channel, ...(opts.initial_comment ? { initial_comment: opts.initial_comment } : {}), ...(opts.thread_ts ? { thread_ts: opts.thread_ts } : {}) });
+    return { file_id: d1.file_id };
+  }
+
   /** Recent channel messages (needs channels:history / groups:history), oldest first. */
   async history(channel: string, opts: { oldest?: string; limit?: number } = {}): Promise<{ ts: string; user?: string; text?: string; bot_id?: string; subtype?: string; thread_ts?: string }[]> {
     const data = await this.call<{ messages?: { ts: string; user?: string; text?: string; bot_id?: string; subtype?: string; thread_ts?: string }[] }>('conversations.history', { channel, limit: opts.limit ?? 50, ...(opts.oldest ? { oldest: opts.oldest } : {}) });

@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactElement } from 'react';
 import type { AlertCalendar, AlertDay, CalendarAccountRow, CalendarCell, CalendarData } from '../../../sweep/types';
 import { Link, useSearchParams } from 'react-router-dom';
-import { useAccountScope } from '../hubs';
+import { useAccountScope, useAllowedAccounts, useInScope } from '../hubs';
 import { api, currentMonth, fmtPct, fmtRelative, monthLabel, shiftMonth, useLiveUpdates } from '../api';
 
 const CELL: Record<string, string> = { complete: '✓', partial: '◐', none: '○', empty: '–', error: '!', unlinked: '–' };
@@ -42,6 +42,8 @@ function ViewTabs({ view, onView }: { view: 'checklist' | 'alerts'; onView: (v: 
 /** Alerts view: a month of traffic lights. Red = a critical incident or flag was open that day, amber = a warning, green = nothing open and the checklist done. */
 function AlertsCalendar({ onView }: { onView: (v: 'checklist' | 'alerts') => void }) {
   const scope = useAccountScope();
+  const inScope = useInScope();
+  const allowed = useAllowedAccounts();
   const [month, setMonth] = useState(currentMonth());
   const [data, setData] = useState<AlertCalendar | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -49,8 +51,8 @@ function AlertsCalendar({ onView }: { onView: (v: 'checklist' | 'alerts') => voi
   const load = () => api.alertCalendar(month).then((d) => { setData(d); setSel((cur) => cur && cur.startsWith(month) ? cur : d.today.startsWith(month) ? d.today : d.days[d.days.length - 1]?.date ?? null); }).catch((e) => setError((e as Error).message));
   useEffect(() => { setData(null); load(); }, [month]); // eslint-disable-line react-hooks/exhaustive-deps
   useLiveUpdates((e) => { if (e.kind === 'incidents' || e.kind === 'monitor' || e.kind === 'check') load(); });
-  const scoped = (d: AlertDay) => (scope === null ? d.accounts : d.accounts.filter((a) => a.account_id === scope));
-  const lightOf = (d: AlertDay) => { if (scope === null) return d.light; const mine = scoped(d); return d.date > (data?.today ?? '') ? 'none' : mine.some((a) => a.light === 'crit') ? 'crit' : mine.some((a) => a.light === 'warn') ? 'warn' : mine.some((a) => a.light === 'good') ? 'good' : 'none'; };
+  const scoped = (d: AlertDay) => d.accounts.filter((a) => inScope(a.account_id));
+  const lightOf = (d: AlertDay) => { if (scope === null && allowed === null) return d.light; const mine = scoped(d); return d.date > (data?.today ?? '') ? 'none' : mine.some((a) => a.light === 'crit') ? 'crit' : mine.some((a) => a.light === 'warn') ? 'warn' : mine.some((a) => a.light === 'good') ? 'good' : 'none'; };
   const day = data?.days.find((d) => d.date === sel) ?? null;
   const first = data ? new Date(data.days[0].date + 'T12:00:00Z').getUTCDay() : 0; // 0 = Sunday
   const lead = (first + 6) % 7; // Monday first
