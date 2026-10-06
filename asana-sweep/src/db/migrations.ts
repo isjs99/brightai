@@ -1607,6 +1607,27 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 42,
+    name: 'Pitch designer: pitches with brief, research and deck',
+    up(db) {
+      db.exec(`
+        CREATE TABLE pitches (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          lead_id INTEGER REFERENCES leads(id) ON DELETE SET NULL,
+          name TEXT NOT NULL,
+          client TEXT NOT NULL,
+          brief_json TEXT NOT NULL DEFAULT '{}',
+          research_json TEXT,
+          deck_json TEXT,
+          status TEXT NOT NULL DEFAULT 'draft',
+          created_by TEXT,
+          created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+          updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+        );
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

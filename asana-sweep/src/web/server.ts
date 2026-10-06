@@ -14,7 +14,8 @@ export function createApp(q: Queries, scheduler: Scheduler) {
   app.set('trust proxy', 1);
   app.use(express.json({ limit: '256kb' }));
   app.use((_req, res, next) => {
-    res.setHeader('X-Frame-Options', 'DENY');
+    // SAMEORIGIN rather than DENY: the Pitch designer previews its own deck in an iframe; other sites still cannot frame us.
+    res.setHeader('X-Frame-Options', 'SAMEORIGIN');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'same-origin');
     next();

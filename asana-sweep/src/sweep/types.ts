@@ -1826,6 +1826,78 @@ export interface OnboardingsData {
   templates: { key: string; label: string; url: string; kind: string }[];
 }
 
+
+// ---- Pitch designer ----
+
+export interface PitchProduct { name: string; price: number | null; url: string | null; image: string | null }
+export interface PitchBrief {
+  client: string;
+  website: string;
+  markets: string[];
+  category: string;
+  /** What the creators' videos should look like, for the Cruva creator search. */
+  creator_query: string;
+  products: PitchProduct[];
+  pdp_images: string[];
+  logo_url: string;
+  colours: { primary: string; secondary: string; accent: string };
+  options: { pdp_imagery: boolean; livestream: boolean; forecasts: boolean; case_studies: boolean; creators: boolean; market: boolean; amazon: boolean; resellers: boolean };
+  pricing: { retainer: number | null; currency: string; commission_pct: number | null; commission_basis: 'gmv' | 'mor'; term_months: number; creator_video_fee: number | null; live_rate: number | null };
+  forecast: { start_gmv: number; aov: number; cogs_pct: number; discount_pct: number; growth_pct: number; ad_spend: number; ad_roi: number; samples_per_month: number; sample_gmv_each: number; months: number };
+  case_studies: string[];
+  notes: string;
+  instructions: string;
+}
+export interface PitchCreator { handle: string; name: string | null; followers: number | null; gmv_30d: number | null; engagement: number | null; categories: string | null; video_url: string | null; source: 'cruva' | 'fastmoss' }
+export interface PitchResearch {
+  fetched_at: string;
+  errors: string[];
+  site: { title: string | null; description: string | null; theme_colour: string | null; images: string[] } | null;
+  products: { name: string; price: number | null; image: string | null; url: string }[];
+  context: TargetSource[];
+  tiktok: { brand: { name: string; gmv: number | null; creators: number | null; videos: number | null; region: string } | null; shops: { shop_name: string; region: string; gmv_7d: number | null; total_gmv: number | null; seller_id: string | null }[]; top_products: { name: string; region: string; gmv: number | null; units: number | null; price: number | null; shop: string | null }[]; market: { market: string; prospects: number; surging: number; leaders: string[] }[] };
+  creators: PitchCreator[];
+  amazon: { reachable: boolean; items: { title: string; price: string | null; url: string }[] };
+  resellers: { name: string; region: string; gmv_7d: number | null; note: string | null }[];
+}
+export interface PitchStat { label: string; value: string; note: string | null }
+export interface PitchSlide {
+  key: string;
+  kind: 'cover' | 'agenda' | 'about' | 'market' | 'presence' | 'products' | 'opportunity' | 'forecast' | 'creators' | 'content' | 'livestream' | 'case_studies' | 'pricing' | 'roadmap' | 'next' | 'custom';
+  enabled: boolean;
+  title: string;
+  subtitle: string | null;
+  bullets: string[];
+  stats: PitchStat[];
+  images: string[];
+  /** Free text under the bullets (one paragraph). */
+  body: string | null;
+  notes: string | null;
+}
+export interface PitchDeck { palette: { primary: string; secondary: string; accent: string; ink: string; paper: string }; slides: PitchSlide[]; generator: 'claude' | 'template'; built_at: string }
+export interface Pitch {
+  id: number;
+  lead_id: number | null;
+  lead_name: string | null;
+  name: string;
+  client: string;
+  brief: PitchBrief;
+  research: PitchResearch | null;
+  deck: PitchDeck | null;
+  status: 'draft' | 'ready';
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export interface PitchesData {
+  pitches: Pitch[];
+  leads: { id: number; name: string; country: string | null; poc: string | null }[];
+  accounts: { id: number; name: string; markets: string | null }[];
+  fastmoss_configured: boolean;
+  cruva_configured: boolean;
+  llm_configured: boolean;
+}
+
 // ---- Stock ----
 
 export interface StockSku {

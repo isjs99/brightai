@@ -53,6 +53,10 @@ import type {
   Onboarding,
   OnboardingsData,
   OnboardingTerms,
+  Pitch,
+  PitchBrief,
+  PitchDeck,
+  PitchesData,
   IncidentsData,
   ReportsData,
   ClientReport,
@@ -498,6 +502,17 @@ export const api = {
   onboardingTerms: (id: number, t: Partial<OnboardingTerms>) => call<OnboardingsData & { onboarding: Onboarding }>('PUT', `/onboarding/${id}/terms`, t),
   onboardingComplete: (id: number) => call<OnboardingsData & { onboarding: Onboarding }>('POST', `/onboarding/${id}/complete`),
   onboardingDelete: (id: number) => call<OnboardingsData>('DELETE', `/onboarding/${id}`),
+  // Pitch designer
+  pitches: () => call<PitchesData>('GET', '/pitch'),
+  pitch: (id: number) => call<PitchesData & { pitch: Pitch }>('GET', `/pitch/${id}`),
+  pitchCreate: (b: { lead_id?: number | null; client?: string; name?: string; website?: string; brief?: Partial<PitchBrief> }) => call<PitchesData & { pitch: Pitch }>('POST', '/pitch', b),
+  pitchUpdate: (id: number, b: { name?: string; brief?: Partial<PitchBrief>; status?: 'draft' | 'ready'; lead_id?: number | null }) => call<PitchesData & { pitch: Pitch }>('PUT', `/pitch/${id}`, b),
+  pitchResearch: (id: number) => call<PitchesData & { pitch: Pitch }>('POST', `/pitch/${id}/research`),
+  pitchBuild: (id: number, useLlm = true) => call<PitchesData & { pitch: Pitch }>('POST', `/pitch/${id}/build`, { use_llm: useLlm }),
+  pitchDeck: (id: number, d: Partial<PitchDeck>) => call<PitchesData & { pitch: Pitch }>('PUT', `/pitch/${id}/deck`, d),
+  pitchDelete: (id: number) => call<PitchesData>('DELETE', `/pitch/${id}`),
+  pitchDeckUrl: (id: number, download = false) => `/api/pitch/${id}/deck.html${download ? '?download=1' : ''}`,
+  pitchExportUrl: (id: number) => `/api/pitch/${id}/export.json`,
   // What scans when
   syncStatus: () => call<SyncStatus>('GET', '/sync/status'),
   // Ad hoc client tasks

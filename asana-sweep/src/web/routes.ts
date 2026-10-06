@@ -53,7 +53,9 @@ import { columnsFromHeader, FBT_FIELDS, fbtManifestCsv, fbtPlan, fbtProfile, fbt
 import { currentMonth as pnlCurrentMonth, pnlCsv, pnlData, pnlSummary } from '../pnl/index.js';
 import { syncStatus } from '../scheduler/sync-status.js';
 import { inboxSettings as inboxSettingsOf } from '../inbox/sync.js';
-import type { FbtField, FbtProfile, OnboardingTerms, PnlForecastInputs, PnlInputs, ReportSchedule } from '../sweep/types.js';
+import type { FbtField, FbtProfile, OnboardingTerms, PitchBrief, PitchDeck, PitchesData, PitchSlide, PitchStat, PnlForecastInputs, PnlInputs, ReportSchedule } from '../sweep/types.js';
+import { researchPitch } from '../pitch/research.js';
+import { buildDeck, deckHtml, DEFAULT_BRIEF, normaliseBrief } from '../pitch/deck.js';
 import { periodBounds } from '../reports/client.js';
 import type { IngestPayload } from '../health/index.js';
 import { THRESHOLD_LABELS } from '../health/rules.js';
@@ -2985,6 +2987,76 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     liveEvents.emitUpdate({ kind: 'leads' });
     res.json(onboardings.data());
   });
+
+  // ---- Pitch designer ----
+  const pitchesData = (): PitchesData => ({
+    pitches: q.listPitches(), leads: q.listLeads(false).filter((l) => !l.signed).map((l) => ({ id: l.id, name: l.name, country: l.country, poc: l.poc })), accounts: q.listAccounts().filter((a) => a.enabled).map((a) => ({ id: a.id, name: a.name, markets: a.markets })),
+    fastmoss_configured: fastmoss.configured, cruva_configured: cruvaMcp.configured, llm_configured: Boolean(config.anthropicApiKey),
+  });
+  const pitchParam = (req: Request) => { const p = q.getPitch(idParam(req)); if (!p) throw new HttpError(404, 'Pitch not found'); return p; };
+  r.get('/pitch', (_req, res) => res.json(pitchesData()));
+  r.get('/pitch/:id', (req, res) => res.json({ pitch: pitchParam(req), ...pitchesData() }));
+  r.post('/pitch', (req, res) => {
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const lead = b.lead_id ? q.listLeads(true).find((l) => l.id === Number(b.lead_id)) ?? null : null;
+    const client = optText(b.client) ?? lead?.name ?? '';
+    if (!client) throw new HttpError(400, 'Who is the pitch for?');
+    const brief = normaliseBrief({ ...(b.brief as Partial<PitchBrief> | undefined ?? {}), client, markets: lead?.country ? [lead.country.toUpperCase()] : (b.brief as Partial<PitchBrief> | undefined)?.markets ?? DEFAULT_BRIEF.markets, website: optText(b.website) ?? (b.brief as Partial<PitchBrief> | undefined)?.website ?? '' });
+    const pitch = q.createPitch({ lead_id: lead?.id ?? null, name: optText(b.name) ?? `${client} x Brightform`, client, brief, created_by: actorOf(req) });
+    res.status(201).json({ pitch, ...pitchesData() });
+  });
+  r.put('/pitch/:id', (req, res) => {
+    const p = pitchParam(req);
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const patch: Parameters<Queries['updatePitch']>[1] = {};
+    if (b.name !== undefined) { const v = optText(b.name); if (!v) throw new HttpError(400, 'Name cannot be empty.'); patch.name = v; }
+    if (b.brief !== undefined) { patch.brief = normaliseBrief(b.brief as Partial<PitchBrief>, p.brief); patch.client = patch.brief.client || p.client; }
+    if (b.status !== undefined) patch.status = b.status === 'ready' ? 'ready' : 'draft';
+    if (b.lead_id !== undefined) patch.lead_id = b.lead_id === null || b.lead_id === '' ? null : Number(b.lead_id);
+    res.json({ pitch: q.updatePitch(p.id, patch)!, ...pitchesData() });
+  });
+  r.post('/pitch/:id/research', async (req, res) => {
+    const p = pitchParam(req);
+    const lead = p.lead_id ? q.listLeads(true).find((l) => l.id === p.lead_id) ?? null : null;
+    const research = await researchPitch(q, p.brief, lead);
+    // The site's theme colour becomes the primary when the brief still has the default.
+    const brief = { ...p.brief };
+    if (research.site?.theme_colour && /^#[0-9a-f]{6}$/i.test(research.site.theme_colour) && brief.colours.primary === DEFAULT_BRIEF.colours.primary) brief.colours = { ...brief.colours, primary: research.site.theme_colour.toLowerCase() };
+    if (!brief.pdp_images.length && research.products.some((x) => x.image)) brief.pdp_images = research.products.map((x) => x.image).filter((x): x is string => Boolean(x)).slice(0, 12);
+    res.json({ pitch: q.updatePitch(p.id, { research, brief })!, ...pitchesData() });
+  });
+  r.post('/pitch/:id/build', async (req, res) => {
+    const p = pitchParam(req);
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const deck = await buildDeck(q, p.brief, p.research, p.deck, b.use_llm === false ? null : undefined);
+    res.json({ pitch: q.updatePitch(p.id, { deck, status: 'ready' })!, ...pitchesData() });
+  });
+  r.put('/pitch/:id/deck', (req, res) => {
+    const p = pitchParam(req);
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    if (!p.deck) throw new HttpError(400, 'Build the deck first.');
+    const deck: PitchDeck = { ...p.deck };
+    if (b.palette && typeof b.palette === 'object') { const pal = b.palette as Record<string, unknown>; for (const k of ['primary', 'secondary', 'accent', 'ink', 'paper'] as const) if (typeof pal[k] === 'string' && /^#[0-9a-f]{6}$/i.test(pal[k] as string)) deck.palette = { ...deck.palette, [k]: (pal[k] as string).toLowerCase() }; }
+    if (Array.isArray(b.slides)) {
+      const kinds = new Set(['cover', 'agenda', 'about', 'market', 'presence', 'products', 'opportunity', 'forecast', 'creators', 'content', 'livestream', 'case_studies', 'pricing', 'roadmap', 'next', 'custom']);
+      deck.slides = (b.slides as Partial<PitchSlide>[]).filter((s) => s && typeof s.key === 'string' && typeof s.title === 'string').map((s): PitchSlide => ({ key: String(s.key), kind: kinds.has(String(s.kind)) ? (s.kind as PitchSlide['kind']) : 'custom', enabled: s.enabled !== false, title: String(s.title).slice(0, 160), subtitle: typeof s.subtitle === 'string' ? s.subtitle.slice(0, 200) : null, bullets: Array.isArray(s.bullets) ? s.bullets.map(String).slice(0, 10) : [], stats: Array.isArray(s.stats) ? s.stats.filter((x) => x && typeof x === 'object').map((x) => ({ label: String((x as PitchStat).label ?? ''), value: String((x as PitchStat).value ?? ''), note: (x as PitchStat).note ? String((x as PitchStat).note) : null })).slice(0, 6) : [], images: Array.isArray(s.images) ? s.images.map(String).filter((u) => /^https?:\/\//i.test(u)).slice(0, 6) : [], body: typeof s.body === 'string' ? s.body.slice(0, 1000) : null, notes: typeof s.notes === 'string' ? s.notes.slice(0, 600) : null })).slice(0, 40);
+      if (!deck.slides.length) throw new HttpError(400, 'A deck needs at least one slide.');
+    }
+    res.json({ pitch: q.updatePitch(p.id, { deck })!, ...pitchesData() });
+  });
+  r.get('/pitch/:id/deck.html', (req, res) => {
+    const p = pitchParam(req);
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    if (req.query.download === '1') res.setHeader('Content-Disposition', `attachment; filename="${p.name.replace(/[^A-Za-z0-9_-]+/g, '_')}.html"`);
+    res.send(deckHtml(p));
+  });
+  r.get('/pitch/:id/export.json', (req, res) => {
+    const p = pitchParam(req);
+    res.setHeader('Content-Type', 'application/json; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${p.name.replace(/[^A-Za-z0-9_-]+/g, '_')}.json"`);
+    res.send(JSON.stringify({ name: p.name, client: p.client, brief: p.brief, research: p.research, deck: p.deck, design_system: { fonts: { display: 'Archivo Black', body: 'Manrope' }, template: 'Brightform pitch: black cover, accent bar left, big-number stat tiles, uppercase display titles, 16:9' } }, null, 2));
+  });
+  r.delete('/pitch/:id', (req, res) => { if (!q.deletePitch(idParam(req))) throw new HttpError(404, 'Pitch not found'); res.json(pitchesData()); });
 
   // ---- Incidents (instant issue alerts to Slack) ----
   const incidents = scheduler.incidents;

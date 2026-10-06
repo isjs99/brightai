@@ -55,6 +55,10 @@ import type {
   ReportSchedule,
   Onboarding,
   OnboardingContext,
+  Pitch,
+  PitchBrief,
+  PitchDeck,
+  PitchResearch,
   OnboardingStep,
   OnboardingTerms,
   TargetAnalysis,
@@ -2499,6 +2503,46 @@ export class Queries {
 
   deleteOnboarding(id: number): boolean {
     return this.db.prepare('DELETE FROM onboardings WHERE id = ?').run(id).changes > 0;
+  }
+
+  // ---- Pitch designer ----
+
+  private rowToPitch(r: Row): Pitch {
+    return {
+      id: r.id as number, lead_id: (r.lead_id as number | null) ?? null, lead_name: (r.lead_name as string | null) ?? null, name: r.name as string, client: r.client as string,
+      brief: parseJson<PitchBrief>(r.brief_json, {} as PitchBrief), research: r.research_json ? parseJson<PitchResearch | null>(r.research_json, null) : null, deck: r.deck_json ? parseJson<PitchDeck | null>(r.deck_json, null) : null,
+      status: r.status === 'ready' ? 'ready' : 'draft', created_by: (r.created_by as string | null) ?? null, created_at: r.created_at as string, updated_at: r.updated_at as string,
+    };
+  }
+
+  listPitches(): Pitch[] {
+    return (this.db.prepare('SELECT p.*, l.name AS lead_name FROM pitches p LEFT JOIN leads l ON l.id = p.lead_id ORDER BY p.updated_at DESC').all() as Row[]).map((r) => this.rowToPitch(r));
+  }
+
+  getPitch(id: number): Pitch | null {
+    const r = this.db.prepare('SELECT p.*, l.name AS lead_name FROM pitches p LEFT JOIN leads l ON l.id = p.lead_id WHERE p.id = ?').get(id) as Row | undefined;
+    return r ? this.rowToPitch(r) : null;
+  }
+
+  createPitch(i: { lead_id?: number | null; name: string; client: string; brief: PitchBrief; created_by?: string | null }): Pitch {
+    const res = this.db.prepare('INSERT INTO pitches (lead_id, name, client, brief_json, created_by) VALUES (?, ?, ?, ?, ?)').run(i.lead_id ?? null, i.name, i.client, JSON.stringify(i.brief), i.created_by ?? null);
+    return this.getPitch(Number(res.lastInsertRowid))!;
+  }
+
+  updatePitch(id: number, patch: Partial<{ name: string; client: string; lead_id: number | null; brief: PitchBrief; research: PitchResearch | null; deck: PitchDeck | null; status: 'draft' | 'ready' }>): Pitch | null {
+    const sets: string[] = [];
+    const params: Record<string, unknown> = { id };
+    for (const [k, v] of Object.entries(patch)) {
+      if (v === undefined) continue;
+      if (k === 'brief' || k === 'research' || k === 'deck') { sets.push(`${k}_json = @${k}_json`); params[`${k}_json`] = v === null ? null : JSON.stringify(v); continue; }
+      sets.push(`${k} = @${k}`); params[k] = v;
+    }
+    if (sets.length) this.db.prepare(`UPDATE pitches SET ${sets.join(', ')}, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = @id`).run(params);
+    return this.getPitch(id);
+  }
+
+  deletePitch(id: number): boolean {
+    return this.db.prepare('DELETE FROM pitches WHERE id = ?').run(id).changes > 0;
   }
 
   getFbtProfile(accountId: number, market: string): Partial<FbtProfile> & { updated_at: string | null } {
