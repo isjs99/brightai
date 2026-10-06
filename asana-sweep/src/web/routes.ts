@@ -33,7 +33,7 @@ import type { BdContact, BdFollowup, TtsContact } from '../sweep/types.js';
 import { inboxSettings, sendReply, syncInbox } from '../inbox/sync.js';
 import { syncCruvaInbox } from '../inbox/cruva-inbox.js';
 import { cruvaMcp } from '../cruva/mcp.js';
-import { feedback as replyFeedback, repliesData, replyBlocker, sampleThread, savePolicy, summary as repliesSummary, waitingAll } from '../inbox/replies.js';
+import { feedback as replyFeedback, repliesData, replyBlocker, retryErrors, sampleThread, savePolicy, summary as repliesSummary, waitingAll } from '../inbox/replies.js';
 import { buildContext, renderPrompt } from '../inbox/context.js';
 import { draftWithClaude } from '../inbox/llm.js';
 import { LANGUAGE_NAMES } from '../inbox/language.js';
@@ -2593,6 +2593,14 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     } catch (err) {
       throw new HttpError(502, (err as Error).message);
     }
+  });
+  r.post('/replies/:accountId/:channel/retry', async (req, res) => {
+    const a = accountParam(req);
+    const channel = channelParam(req);
+    const b = (req.body ?? {}) as { conversation_refs?: unknown };
+    const refs = Array.isArray(b.conversation_refs) ? b.conversation_refs.map(Number).filter(Number.isInteger) : undefined;
+    const out = await retryErrors(q, a.id, channel, { conversationRefs: refs });
+    res.json({ ...out, data: repliesData(q, a, channel, scopeLive) });
   });
   r.post('/replies/events/:id/feedback', (req, res) => {
     const b = (req.body ?? {}) as { feedback?: 'right' | 'wrong' | null; note?: string; teach?: { title?: string; body?: string } | null };

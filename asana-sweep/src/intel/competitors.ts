@@ -22,12 +22,53 @@ import { slackBot } from '../notify/slackbot.js';
 export interface SlackLike { configured: boolean; post(channel: string, text: string): Promise<unknown>; channelId(nameOrId: string): Promise<string> }
 export interface CompetitorDeps { apollo?: ApolloClient; fetchFn?: typeof fetch; llm?: ((system: string, user: string) => Promise<string>) | null; slack?: SlackLike; now?: () => string }
 
-export const SEED_COMPETITORS: { name: string; domain: string; markets: string[]; notes: string }[] = [
+export interface SeedCompetitor { name: string; domain: string | null; markets: string[]; notes: string }
+/**
+ * The agencies we meet in deals plus the TikTok Shop Partners (TSPs) found per market, October 2026. A seed
+ * is added when no competitor with that name or domain exists yet, so the list can be edited freely in the
+ * UI and new seeds still arrive with a deploy. Domains come from Apollo lookups; "domain to confirm" means
+ * Apollo had no match and the sweep waits until someone fills it in.
+ */
+export const SEED_COMPETITORS: SeedCompetitor[] = [
+  // Named by Isaac
   { name: 'Genuine', domain: 'wearegenuine.com', markets: ['UK'], notes: 'Domain from an Apollo lookup; confirm it is the TikTok Shop agency.' },
-  { name: 'Unsociable', domain: 'weareunsociable.com', markets: ['UK'], notes: '' },
+  { name: 'Unsociable', domain: 'weareunsociable.com', markets: ['UK'], notes: 'Official TikTok Shop Partner, multi-market.' },
   { name: 'Flywheel Digital', domain: 'flywheel.digital', markets: ['UK', 'DE', 'FR'], notes: '' },
   { name: 'AdToker', domain: 'adtoker.com', markets: ['UK', 'DE'], notes: '' },
-  { name: 'AdBaker', domain: 'adbaker.de', markets: ['DE'], notes: '' },
+  { name: 'AdBaker', domain: 'adbaker.de', markets: ['DE'], notes: 'Adbaker GmbH, Cologne.' },
+  { name: 'HypeAuditor', domain: 'hypeauditor.com', markets: ['UK', 'DE', 'FR', 'ES', 'IT'], notes: 'Influencer analytics platform rather than a TSP; tracked for its agency moves and client announcements.' },
+  { name: 'Socially Powerful', domain: 'sociallypowerful.com', markets: ['UK'], notes: 'Global influencer agency, London; TikTok Shop managed service.' },
+  { name: 'Ubiquitous', domain: 'ubiquitousinfluence.com', markets: ['UK'], notes: 'US influencer agency with TikTok Shop work; UK reach.' },
+  { name: 'Fanbytes', domain: 'fanbytes.co.uk', markets: ['UK'], notes: 'Now part of Brainlabs; Gen Z and TikTok specialist.' },
+  // UK TSPs
+  { name: 'Social Tale', domain: 'socialtale.co', markets: ['UK'], notes: 'Official TSP in the UK and US; $120M+ GMV claimed across 50+ DTC brands.' },
+  { name: 'Somerce', domain: 'somerce.com', markets: ['UK'], notes: 'TSP, Manchester; £20M+ a month GMV across 55+ accounts claimed.' },
+  { name: 'Superb', domain: null, markets: ['UK'], notes: 'We Are Superb, Paignton. TikTok Shop UK TSP Agency of the Year 2025; first agency in the UK TSP programme (2021). Domain to confirm.' },
+  { name: 'Cipher Agency', domain: null, markets: ['UK'], notes: 'Cipher Paid Media Ltd, Warrington; beauty LIVE specialist. Domain to confirm.' },
+  { name: 'Nonsensical', domain: 'nonsensical.agency', markets: ['UK'], notes: 'Official TSP, Birmingham; mid-size brands.' },
+  { name: 'IF.', domain: null, markets: ['UK'], notes: 'Manchester brand communications agency, TSP (Starpowa, Surcare, OGGS). Domain to confirm.' },
+  { name: 'TikMarketing', domain: 'tikmarketing.co.uk', markets: ['UK'], notes: 'TikTok Shop agency and partner, UK.' },
+  { name: 'LiveBuzz Studio', domain: 'livebuzzstudio.com', markets: ['UK'], notes: 'TSP, TAP and CAP; LIVE-led.' },
+  { name: 'MediaLabs', domain: 'medialabs-co.com', markets: ['UK', 'DE'], notes: 'US agency; DACH operations through ad hoc gaming GmbH (Cologne); named a top TSP in Germany for Q1 2026.' },
+  { name: 'SAMY', domain: 'samy.com', markets: ['ES', 'DE', 'IT', 'UK'], notes: 'Official TSP in Spain, Germany, Italy, the UK, the US and Mexico.' },
+  { name: 'Hubfluence', domain: 'hubfluence.io', markets: ['UK'], notes: 'TikTok Shop management agency, UK.' },
+  // Germany and Benelux
+  { name: 'team5pm', domain: 'team5pm.com', markets: ['NL', 'DE'], notes: 'Official TSP in Germany and the Netherlands.' },
+  { name: 'No German Angst', domain: null, markets: ['DE'], notes: 'Noga, Berlin; among the first German agencies offering creative services on TikTok Shop. Domain to confirm.' },
+  { name: 'Follo Agency', domain: 'folloagency.com', markets: ['NL'], notes: 'TikTok Shop early access agency in the Netherlands.' },
+  // France
+  { name: 'Neads', domain: 'neads.io', markets: ['FR'], notes: 'TSP since April 2025 (among the first in France, alongside WPP); 200+ brands, 2,000 creators claimed.' },
+  { name: 'WOO', domain: 'woo.paris', markets: ['FR'], notes: 'Olyn group; certified TSP with a dedicated TikTok Shop offer.' },
+  { name: 'Adopterz', domain: null, markets: ['FR'], notes: 'Ran the Live Shopping Festival with TikTok France. Domain to confirm.' },
+  { name: 'Public Actif', domain: 'publicactif.com', markets: ['FR'], notes: 'TikTok Shop integration offer.' },
+  // Italy
+  { name: 'REKA', domain: null, markets: ['IT'], notes: 'Accredited TSP in Italy, Integrated Marketing category. Domain to confirm.' },
+  // Spain
+  { name: 'Paragon Social Commerce', domain: 'paragonsocialcommerce.com', markets: ['ES', 'UK'], notes: 'TSP, CAP and TAP; top 10 official partner agency in Spain.' },
+  { name: 'Outlandish', domain: 'outlandishdigital.es', markets: ['ES'], notes: 'International TikTok Shop agency, Madrid office; Goodbuy Iberia partnership; Nivea, Foreo, Goli.' },
+  // Poland
+  { name: 'Salestube', domain: 'salestube.tech', markets: ['PL'], notes: 'Group One; first certified TSP in Poland (tech and media).' },
+  { name: 'Labcon', domain: null, markets: ['PL'], notes: 'Group One; live commerce, creators and content for the TikTok Shop offer. Domain to confirm.' },
 ];
 
 const UA = 'Mozilla/5.0 (compatible; BrightformIntel/1.0; +https://brightform.agency)';
@@ -251,11 +292,19 @@ export class Competitors {
     return this.settings();
   }
 
-  /** The five we meet most, once, when the registry is empty. Editable afterwards. */
-  seed(): void {
-    if (this.q.getSetting('competitors_seeded', '') === '1' || this.q.listCompetitors().length) return;
-    for (const c of SEED_COMPETITORS) this.q.createCompetitor({ name: c.name, domain: c.domain, markets: c.markets, notes: c.notes || null, watch_urls: [`https://${c.domain}`] });
-    this.q.setSetting('competitors_seeded', '1');
+  /** Add every seed that is not on the registry yet (by name or domain); nothing already there is touched. */
+  seed(): number {
+    const existing = this.q.listCompetitors();
+    const names = new Set(existing.map((c) => c.name.toLowerCase()));
+    const domains = new Set(existing.map((c) => c.domain?.toLowerCase()).filter((d): d is string => Boolean(d)));
+    let n = 0;
+    for (const c of SEED_COMPETITORS) {
+      if (names.has(c.name.toLowerCase()) || (c.domain && domains.has(c.domain.toLowerCase()))) continue;
+      this.q.createCompetitor({ name: c.name, domain: c.domain, markets: c.markets, notes: c.notes || null, watch_urls: c.domain ? [`https://${c.domain}`] : [] });
+      n++;
+    }
+    if (n) { log.info(`Competitors: ${n} seeded`); liveEvents.emitUpdate({ kind: 'competitors' }); }
+    return n;
   }
 
   start(): void {

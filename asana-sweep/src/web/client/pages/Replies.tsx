@@ -239,7 +239,7 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
 
       {/* Needs a human */}
       <div className="card" style={{ marginBottom: 16 }}>
-        <div className="page-head" style={{ marginBottom: 8 }}><h3 style={{ margin: 0 }}><span className="badge warn">{counts.waiting}</span> Needs a human</h3><span className="sub">Newest first</span></div>
+        <div className="page-head" style={{ marginBottom: 8 }}><h3 style={{ margin: 0 }}><span className="badge warn">{counts.waiting}</span> Needs a human</h3><div className="actions">{isAdmin && data.waiting.some((w) => w.event?.decision === 'error') && <button className="small" disabled={busy === 'retry'} title="Threads that failed on the model (no credit, an outage) are decided once per message and never retried on their own; this clears those errors and runs the pass again" onClick={() => run('retry', () => api.retryReplies(accountId, channel), (r) => { setData(r.data); setNotice(`${r.retried} thread(s) re-read: ${Object.entries(r.result).filter(([, n]) => n).map(([k, n]) => `${n} ${k}`).join(', ') || 'nothing changed'}.`); })}>{busy === 'retry' ? 'Retrying…' : `Retry ${data.waiting.filter((w) => w.event?.decision === 'error').length} error(s)`}</button>}<span className="sub">Newest first</span></div></div>
         {data.waiting.length === 0 ? <p className="sub">Nobody is waiting on this account.</p> : (
           <div className="waitlist">
             {data.waiting.slice(0, 50).map((w) => (
@@ -253,6 +253,7 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
                 {isAdmin && (
                   <div className="actions wait-actions">
                     {w.draft && w.can_send && !w.conversation_id.startsWith('sample-') && <button className="primary small" disabled={busy === `send${w.id}`} onClick={() => window.confirm(`Send this draft to ${w.counterpart_name ?? `the ${who(channel)}`}?`) && run(`send${w.id}`, () => api.sendDraft(w.draft!.id), () => { setNotice('Sent.'); load(); })}>Send draft</button>}
+                    {w.event?.decision === 'error' && <button className="small" disabled={busy === `retry${w.id}`} onClick={() => run(`retry${w.id}`, () => api.retryReplies(accountId, channel, [w.id]), (r) => { setData(r.data); setNotice(r.result.error ? `Still failing: ${r.data.waiting.find((x) => x.id === w.id)?.event?.escalation ?? 'see the row'}` : 'Re-read.'); })}>Retry</button>}
                     <button className="small" onClick={() => setThread(w.id)}>{w.draft ? 'Edit & send' : 'Reply'}</button>
                     <button className="small" disabled={busy === `close${w.id}`} onClick={() => run(`close${w.id}`, () => api.updateConversation(w.id, { status: 'closed' }), () => load())}>No reply needed</button>
                   </div>

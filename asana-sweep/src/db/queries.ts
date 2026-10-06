@@ -2326,6 +2326,14 @@ export class Queries {
     return r ? this.rowToReplyEvent(r) : null;
   }
 
+  /** Drop the error decisions on the threads' latest messages so the next pass reads them again. Returns the conversation refs. */
+  clearReplyErrors(accountId: number, channel: InboxChannel, conversationRefs?: number[]): number[] {
+    const rows = this.db.prepare(`SELECT e.id, e.conversation_ref FROM reply_events e JOIN inbox_conversations c ON c.id = e.conversation_ref WHERE e.account_id = ? AND e.channel = ? AND e.decision = 'error' AND e.message_id = c.last_message_id${conversationRefs?.length ? ` AND e.conversation_ref IN (${conversationRefs.map(() => '?').join(',')})` : ''}`).all(accountId, channel, ...(conversationRefs ?? [])) as { id: number; conversation_ref: number }[];
+    const del = this.db.prepare('DELETE FROM reply_events WHERE id = ?');
+    this.db.transaction(() => { for (const r of rows) del.run(r.id); })();
+    return [...new Set(rows.map((r) => r.conversation_ref))];
+  }
+
   countReplyEvents(accountId: number, channel: InboxChannel, decision: ReplyDecision, since: string): number {
     return (this.db.prepare('SELECT COUNT(*) AS n FROM reply_events WHERE account_id = ? AND channel = ? AND decision = ? AND created_at >= ?').get(accountId, channel, decision, since) as { n: number }).n;
   }

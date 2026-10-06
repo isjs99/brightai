@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { Queries } from '../src/db/queries';
 import { openTestDb } from '../src/db/index';
 import type { ApolloClient, ApolloOrgPerson } from '../src/bd/apollo';
-import { Competitors, addedLines, atsUrl, brandKey, diffPeople, digestText, extractRules, matchOverlap, overlapIndex, parseAtsFeed, parseExtraction, textOfHtml } from '../src/intel/competitors';
+import { Competitors, SEED_COMPETITORS, addedLines, atsUrl, brandKey, diffPeople, digestText, extractRules, matchOverlap, overlapIndex, parseAtsFeed, parseExtraction, textOfHtml } from '../src/intel/competitors';
 import type { CompetitorPerson, CompetitorSignal } from '../src/sweep/types';
 
 const person = (over: Partial<ApolloOrgPerson>): ApolloOrgPerson => ({ id: 'p1', name: 'Anna K', title: 'Account Manager', email: null, linkedin_url: null, phone: null, organization: 'Genuine', email_status: null, city: 'London', country: 'United Kingdom', organization_id: 'o1', seniority: 'manager', departments: ['master_sales'], started_at: '2026-09-01', ...over });
@@ -58,6 +58,22 @@ describe('competitor helpers', () => {
     const sig = (over: Partial<CompetitorSignal>): CompetitorSignal => ({ id: 1, competitor_id: 1, kind: 'joined', summary: 'x', evidence: null, url: null, observed_at: '2026-10-05T10:00:00.000Z', created_at: '2026-10-05T10:00:00.000Z', seen_at: null, ...over });
     const text = digestText(comps, [sig({ summary: 'Anna K, Head of TikTok Shop DE' }), sig({ id: 2, kind: 'overlap', summary: 'Waterdrop is a Genuine client and on our BD pipeline (contacted)', url: 'https://g/clients' }), sig({ id: 3, kind: 'job_closed', summary: 'closed role' })], { since: '2026-09-29T00:00:00.000Z', until: '2026-10-06T00:00:00.000Z', link: 'https://ops/competitors', timezone: 'Europe/Madrid' });
     expect(text.split('\n')).toEqual(['*Competitor movements · 29 Sept to 6 Oct*', '', '*Genuine* (UK)', '• In our pipeline: Waterdrop is a Genuine client and on our BD pipeline (contacted) <https://g/clients|source>', '• Joined: Anna K, Head of TikTok Shop DE', '', '_No changes seen for AdBaker._', '', '<https://ops/competitors|Open Competitors in the dashboard>']);
+  });
+});
+
+describe('competitor seed', () => {
+  it('adds the seeds that are missing and leaves the registry alone otherwise', () => {
+    const q = new Queries(openTestDb());
+    const comp = new Competitors(q, { llm: null });
+    q.createCompetitor({ name: 'genuine', domain: 'wearegenuine.com', markets: ['UK', 'IE'], notes: 'edited by the team' });
+    expect(comp.seed()).toBe(SEED_COMPETITORS.length - 1);
+    expect(comp.seed()).toBe(0);
+    const all = q.listCompetitors();
+    expect(all).toHaveLength(SEED_COMPETITORS.length);
+    expect(all.find((c) => c.name === 'genuine')).toMatchObject({ markets: ['UK', 'IE'], notes: 'edited by the team' });
+    expect(all.find((c) => c.name === 'Superb')).toMatchObject({ domain: null, watch_urls: [] });
+    expect(all.find((c) => c.name === 'SAMY')!.markets).toEqual(['ES', 'DE', 'IT', 'UK']);
+    expect(new Set(SEED_COMPETITORS.map((c) => c.name.toLowerCase())).size).toBe(SEED_COMPETITORS.length);
   });
 });
 

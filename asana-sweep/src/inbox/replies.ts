@@ -260,6 +260,13 @@ export async function processConversations(q: Queries, ids: number[], deps: Proc
   return out;
 }
 
+/** Errors (no credit, outage) are never retried on their own: a thread is decided once per message. This clears them and runs the pass again. */
+export async function retryErrors(q: Queries, accountId: number, channel: InboxChannel, opts: { conversationRefs?: number[]; deps?: ProcessDeps } = {}): Promise<{ retried: number; result: Record<ReplyDecision, number> }> {
+  const ids = q.clearReplyErrors(accountId, channel, opts.conversationRefs);
+  const result = await processConversations(q, ids, opts.deps);
+  return { retried: ids.length, result };
+}
+
 /** Why this conversation will not be answered automatically right now (for the thread view). */
 export function replyBlocker(q: Queries, c: InboxConversation, now = Date.now()): string | null {
   if (!c.account_id) return 'shop not linked to an account';

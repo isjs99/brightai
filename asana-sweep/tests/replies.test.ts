@@ -3,7 +3,7 @@ import { openTestDb } from '../src/db/index';
 import { Queries } from '../src/db/queries';
 import { buildContext, cruvaShopFor, renderPrompt } from '../src/inbox/context';
 import { CruvaRest } from '../src/cruva/rest';
-import { defaultPolicy, inQuietHours, onlyFilterBlocker, parseClassification, prefilter, processConversations, repliesData, sampleThread, savePolicy, startOfDay, summary, weeklyDigest, feedback } from '../src/inbox/replies';
+import { defaultPolicy, inQuietHours, onlyFilterBlocker, parseClassification, prefilter, processConversations, repliesData, retryErrors, sampleThread, savePolicy, startOfDay, summary, weeklyDigest, feedback } from '../src/inbox/replies';
 import { parseOrder } from '../src/health/tts-pull';
 import type { InboxChannel } from '../src/sweep/types';
 
@@ -167,6 +167,15 @@ describe('processing conversations', () => {
     expect(cs.mode).toBe('auto');
     expect(cs.waiting).toBe(2);
     expect(weeklyDigest(q)).toMatch(/Nutori\* buyers \(auto\): 0 sent automatically, 0 drafted, 0 to a human, 0 needed no answer, 2 errors/);
+    // Errors are never retried on their own; Retry clears them and runs the pass again.
+    expect(await processConversations(q, [bad], { llm: llmOk(), send: noSend })).toMatchObject({ drafted: 0, error: 0 });
+    const retry = await retryErrors(q, account.id, 'cs', { conversationRefs: [bad], deps: { llm: llmOk(), send: noSend } });
+    expect(retry.retried).toBe(1);
+    expect(retry.result.auto_sent).toBe(1);
+    expect(q.listReplyEvents({ conversationRef: bad })[0].decision).toBe('auto_sent');
+    expect(q.listReplyEvents({ conversationRef: fail })[0].decision).toBe('error');
+    expect((await retryErrors(q, account.id, 'cs', { deps: { llm: llmOk(), send: noSend } })).retried).toBe(1);
+    expect(summary(q, () => true).find((x) => x.account_id === account.id && x.channel === 'cs')!.escalated).toBe(0);
   });
 
   it('feedback marks the event and teaching adds a library note scoped to the account and language', async () => {
