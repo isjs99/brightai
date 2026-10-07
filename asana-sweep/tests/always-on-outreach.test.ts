@@ -84,6 +84,36 @@ describe('always-on outreach in the engine', () => {
   });
 });
 
+describe('optimise copy in bulk', () => {
+  it('redoes every live bot of the chosen shops from what the learning knows and applies it where asked', async () => {
+    const q = new Queries(openTestDb());
+    const a = q.createAccount({ name: 'Kijimea', markets: 'DE', am_name: null, aa_name: null, enabled: true, notes: null, commission_pct: 15, commission_basis: 'gmv', settlement_pct: 100, slack_channel: null, client_slack_channel: null, client_domain: null });
+    const calls: { tool: string; args: Record<string, unknown> }[] = [];
+    const mcp: McpCaller = { configured: true, async call(tool, args) { calls.push({ tool, args }); if (tool === 'update_automation') return `Updated (ID: ${String(args.campaign_id)})`; if (tool.startsWith('list_')) return 'No results.'; return ''; } };
+    const llm = async (system: string) => (/in the brand's own voice/.test(system) ? 'Hey [affiliate_name], neue Hooks. Team Kijimea' : /describe how the brand/.test(system) ? '{"summary": "Warm du.", "greeting": null, "signoff": "Team Kijimea", "register": "du", "emoji": "light", "length": "short", "phrases": [], "avoid": []}' : '{"competitors": []}');
+    const engine = new PlaybookEngine(q, mcp, llm);
+    engine.seed();
+    engine.linkShop('shop-de', 'Kijimea DE', a.id);
+    q.replaceRemoteItems('shop-de', 'automation', [{ remote_id: 'auto-1', name: 'Sample sent', enabled: true, raw: { copy: 'Hey, dein Sample ist unterwegs', sent: 900, replies: 40, gmv: 500 } }, { remote_id: 'auto-2', name: 'September Deals', enabled: true, raw: { status: 'active', audience: 'new_affiliates', copy: 'Hey, Deals!', sent: 1000 } }]);
+    const now = new Date().toISOString();
+    q.setPlaybookCell({ shop_id: 'shop-de', kind: 'automation', playbook_key: 'sample_sent', status: 'set', remote_id: 'auto-1', remote_name: 'Sample sent', checked_at: now, applied_at: null, note: null });
+    q.setPlaybookCell({ shop_id: 'shop-de', kind: 'automation', playbook_key: 'monthly_deals_outreach', status: 'set', remote_id: 'auto-2', remote_name: 'September Deals', checked_at: now, applied_at: null, note: null });
+    await engine.learnIdle();
+    // Waiting by default: an update rollout per shop, tailored, nothing applied.
+    const r = await engine.optimiseCopy({ shopIds: ['shop-de', 'nope'] });
+    expect(r.shops_done).toBe(1); expect(r.errors).toEqual([]);
+    expect(r.optimised[0]).toMatchObject({ shop: 'Kijimea DE', drafts: 2, applied: 0 });
+    const drafts = q.listRolloutDrafts(r.optimised[0].rollout_id);
+    expect(drafts.map((d) => [d.key, d.action, d.status]).sort()).toEqual([['monthly_deals_outreach', 'update', 'ready'], ['sample_sent', 'update', 'ready']]);
+    expect(drafts.every((d) => d.copy === 'Hey [affiliate_name], neue Hooks. Team Kijimea' && d.tailored_at)).toBe(true);
+    expect(calls.filter((c) => c.tool === 'update_automation')).toHaveLength(0);
+    // Applied when asked (or when the shop updates bots automatically): both bots updated in Cruva.
+    const r2 = await engine.optimiseCopy({ shopIds: ['shop-de'], apply: true });
+    expect(r2.optimised[0].applied).toBe(2);
+    expect(calls.filter((c) => c.tool === 'update_automation').map((c) => c.args.campaign_id).sort()).toEqual(['auto-1', 'auto-2']);
+  });
+});
+
 describe('DMs going silent', () => {
   it('counts the days since the last DM in the pull and flags the shop on the monitor, critical from a week', async () => {
     const { daysFromStats, metricsFromDays } = await import('../src/cruva/pull');

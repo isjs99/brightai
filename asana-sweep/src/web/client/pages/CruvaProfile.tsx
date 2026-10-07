@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { PlaybookCompetitor, PlaybookContentVideo, PlaybookMarketProfile, PlaybookProfile, PlaybookShop } from '../../../sweep/types';
-import { api, fmtRelative, type PlaybookCompetitorsData } from '../api';
+import { api, fmtRelative, useLiveUpdates, type PlaybookCompetitorsData } from '../api';
 
 /**
  * One shop's learning: the top videos and what they have in common, the voice learnt from the messages the
@@ -16,6 +16,7 @@ export default function CruvaProfile({ shopId, isAdmin, onChanged }: { shopId: s
   const [tab, setTab] = useState<'content' | 'voice' | 'competitors' | 'history'>('content');
   const load = useCallback(() => api.playbookProfile(shopId).then(setD).catch((e) => setError((e as Error).message)), [shopId]);
   useEffect(() => { load(); }, [load]);
+  useLiveUpdates((e) => { if (e.kind === 'playbook') load(); });
   const run = async <T,>(key: string, fn: () => Promise<T>, after?: (r: T) => void) => { setBusy(key); setError(null); try { after?.(await fn()); await load(); onChanged(); } catch (e) { setError((e as Error).message); } finally { setBusy(null); } };
   if (!d) return <p className="sub">{error ?? 'Loading…'}</p>;
   const shop: PlaybookShop = d.shop; const p: PlaybookProfile | null = d.profiles[0] ?? null;
@@ -23,12 +24,13 @@ export default function CruvaProfile({ shopId, isAdmin, onChanged }: { shopId: s
   return (
     <>
       {error && <div className="banner crit">{error}</div>}
+      {shop.learning && <div className="banner">{shop.learning === 'running' ? 'Learning this shop now' : 'Queued for learning'}: the last 28 days of videos, the voice from its messages, and its direct competitors. This page fills in on its own when it is done; three shops learn at a time.</div>}
       <div className="actions" style={{ marginBottom: 10, flexWrap: 'wrap' }}>
         <span className="sub">{d.learned_at ? `Learnt ${fmtRelative(d.learned_at)}` : 'Not learnt yet'}{p ? ` · ${p.window_from} to ${p.window_to} · ${p.videos} videos, top ${p.top_count} = ${n(p.top_gmv)} of ${n(p.total_gmv)} GMV` : ''}</span>
         <span style={{ flex: 1 }} />
         {isAdmin && <label className="field" style={{ width: 120 }}><span className="lbl">Top slice %</span><input type="number" min={1} max={20} defaultValue={shop.top_pct} onBlur={(e) => Number(e.target.value) !== shop.top_pct && run('pct', () => api.playbookShop(shopId, { top_pct: Number(e.target.value) }))} /></label>}
         {isAdmin && <label className="field check" title="Monday: when the profile moves, the live lifecycle bots are rewritten and applied without waiting for approval (outreach pushes always wait)"><input type="checkbox" checked={shop.auto_update} onChange={(e) => run('auto', () => api.playbookShop(shopId, { auto_update: e.target.checked }))} /> Update bots automatically</label>}
-        {isAdmin && <button className="primary small" disabled={busy !== null} onClick={() => run('learn', () => api.playbookLearn(shopId), (r) => { if (r.errors.length) setError(r.errors.join(' | ')); })}>{busy === 'learn' ? 'Learning…' : 'Learn now'}</button>}
+        {isAdmin && <button className="primary small" disabled={busy !== null || shop.learning === 'running'} onClick={() => run('learn', () => api.playbookLearn(shopId), (r) => { if (r.errors.length) setError(r.errors.join(' | ')); })}>{busy === 'learn' || shop.learning === 'running' ? 'Learning…' : 'Learn now'}</button>}
       </div>
       <div className="presets" style={{ marginBottom: 10 }}>
         <button className={tab === 'content' ? 'active' : ''} onClick={() => setTab('content')}>What sells</button>
@@ -139,7 +141,7 @@ function Competitors({ shopId, isAdmin, onChanged }: { shopId: string; isAdmin: 
             <button className="small" disabled={busy !== null} onClick={() => run('rm', () => api.playbookRemoveCompetitor(shopId, c.id))}>Remove</button>
           </td>}
         </tr>)}
-        {d.competitors.length === 0 && <tr><td colSpan={7} className="sub">None yet. Press Suggest competitors, or add one by name.</td></tr>}
+        {d.competitors.length === 0 && <tr><td colSpan={7} className="sub">None yet: they are suggested with the shop's first learning (running in the background when the shop was never learnt). Press Suggest competitors to do it now, or add one by name.</td></tr>}
       </tbody></table>
       {isAdmin && <form className="actions" style={{ marginTop: 8 }} onSubmit={(e) => { e.preventDefault(); if (name.trim()) run('add', () => api.playbookAddCompetitor(shopId, name.trim()), () => setName('')); }}>
         <input placeholder="Add a brand by its TikTok Shop name" value={name} onChange={(e) => setName(e.target.value)} style={{ width: 320 }} />

@@ -189,10 +189,27 @@ export default function CruvaPage() {
             <span style={{ flex: 1 }} />
             <button className="small" onClick={() => setView('grid')}>Open grid</button>
           </div>
+          {isAdmin && (
+            <div className="actions" style={{ marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+              <label className="field check" style={{ margin: 0 }}><input type="checkbox" checked={cards.length > 0 && cards.every((c) => c.shops.every((s) => sel.has(s.shop_id)))} onChange={() => { const all = cards.every((c) => c.shops.every((s) => sel.has(s.shop_id))); setSel(all ? new Set() : new Set(cards.flatMap((c) => c.shops.map((s) => s.shop_id)))); }} /> Select all {cards.length} account{cards.length === 1 ? '' : 's'}</label>
+              {ticked.length > 0 && <>
+                <b>{ticked.length} shop{ticked.length === 1 ? '' : 's'} ticked</b>
+                <span className="sub">Update bots automatically:</span>
+                <button className="small" disabled={busy !== null} onClick={() => run('bulk', () => api.playbookShopsSettings({ shop_ids: ticked.map((s) => s.shop_id), auto_update: true }))}>On</button>
+                <button className="small" disabled={busy !== null} onClick={() => run('bulk', () => api.playbookShopsSettings({ shop_ids: ticked.map((s) => s.shop_id), auto_update: false }))}>Off</button>
+                <span className="sub">Always-on outreach:</span>
+                <button className="small" disabled={busy !== null} onClick={() => run('bulk', () => api.playbookShopsSettings({ shop_ids: ticked.map((s) => s.shop_id), always_on: true }))}>On</button>
+                <button className="small" disabled={busy !== null} onClick={() => run('bulk', () => api.playbookShopsSettings({ shop_ids: ticked.map((s) => s.shop_id), always_on: false }))}>Off</button>
+                <button className="primary small" disabled={busy !== null} title="Redo the copy of every live bot on these shops from the top videos, the competitors, the campaigns that work and the season; applied on its own where the shop updates bots automatically, otherwise it waits on the card" onClick={() => run('opt', () => api.playbookOptimise({ shop_ids: ticked.map((s) => s.shop_id) }), (r) => { setSel(new Set()); setNotice(`${r.optimised.length} rollout${r.optimised.length === 1 ? '' : 's'}: ${r.optimised.map((x) => `${x.shop} ${x.applied ? `${x.applied} bots updated` : `${x.drafts} drafts waiting`}`).join(' · ')}${r.errors.length ? ` · ${r.errors.join(' | ')}` : ''}`); })}>{busy === 'opt' ? 'Optimising…' : 'Optimise copy now'}</button>
+                <button className="primary small" disabled={busy !== null} title="The same, applied to every bot straight away" onClick={() => { if (!window.confirm(`Rewrite and apply the copy of every live bot on ${ticked.length} shop(s) now?`)) return; run('opt', () => api.playbookOptimise({ shop_ids: ticked.map((s) => s.shop_id), apply: true }), (r) => { setSel(new Set()); setNotice(`${r.optimised.reduce((n, x) => n + x.applied, 0)} bots updated across ${r.optimised.length} shop(s)${r.errors.length ? ` · ${r.errors.join(' | ')}` : ''}`); }); }}>Optimise and apply</button>
+              </>}
+            </div>
+          )}
           <div className="cruva-cards">
             {cards.map((c) => (
               <div key={c.account_id} className={`card cruva-card ${c.light}`}>
                 <div className="cc-head">
+                  {isAdmin && <input type="checkbox" aria-label={`Select ${c.account_name}`} checked={c.shops.every((s) => sel.has(s.shop_id))} onChange={() => { const n = new Set(sel); const all = c.shops.every((s) => n.has(s.shop_id)); for (const s of c.shops) { if (all) n.delete(s.shop_id); else n.add(s.shop_id); } setSel(n); }} />}
                   <span className={`light ${c.light === 'red' ? 'crit' : c.light === 'amber' ? 'warn' : c.light === 'green' ? 'good' : 'muted'}`} />
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <b>{c.account_name}</b> <span className="sub">{c.am_name ?? 'no AM'} · {c.shops.length} shop{c.shops.length === 1 ? '' : 's'}{c.markets.length ? ` · ${c.markets.join(' ')}` : ''}</span>

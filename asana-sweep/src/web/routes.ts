@@ -3369,6 +3369,21 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     try { const r2 = await samples.accept(String(req.params.shopId), ids, actorOf(req)); res.json({ accepted: r2.accepted.length, skipped: r2.skipped, ...samples.data() }); } catch (err) { bad(err); }
   });
 
+  // Bulk: switches for several shops at once, and the copy of every live bot redone from what the learning knows.
+  r.post('/playbook/shops-settings', (req, res) => {
+    const b = (req.body ?? {}) as { shop_ids?: unknown; auto_update?: unknown; always_on?: unknown };
+    const ids = Array.isArray(b.shop_ids) ? b.shop_ids.map(String) : [];
+    if (!ids.length) throw new HttpError(400, 'Pick at least one shop.');
+    for (const id of ids) { if (b.auto_update !== undefined) q.setSetting(`playbook_auto_update_${id}`, b.auto_update ? '1' : '0'); if (b.always_on !== undefined) q.setSetting(`playbook_always_on_${id}`, b.always_on ? '1' : '0'); }
+    liveEvents.emitUpdate({ kind: 'playbook' });
+    res.json(playbook.data());
+  });
+  r.post('/playbook/optimise', async (req, res) => {
+    const b = (req.body ?? {}) as { shop_ids?: unknown; apply?: unknown };
+    const ids = Array.isArray(b.shop_ids) ? b.shop_ids.map(String) : [];
+    if (!ids.length) throw new HttpError(400, 'Pick at least one shop.');
+    try { const r2 = await playbook.optimiseCopy({ shopIds: ids, apply: bool(b.apply, false), actor: actorOf(req) }); res.json({ ...r2, ...playbook.data() }); } catch (err) { bad(err); }
+  });
   r.post('/playbook/outreach', async (req, res) => { const b = (req.body ?? {}) as { shop_id?: unknown }; try { const r2 = await playbook.ensureOutreach({ shopIds: b.shop_id ? [String(b.shop_id)] : undefined }); res.json({ ...r2, ...playbook.data() }); } catch (err) { bad(err); } });
   // Direct competitors and the market read (Profile > Competitors)
   r.get('/playbook/shops/:shopId/competitors', (req, res) => res.json(playbook.competitors(String(req.params.shopId))));
@@ -3394,10 +3409,10 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const shopId = optText(b.shop_id) ?? undefined;
     const deep = b.deep === undefined ? true : bool(b.deep, true);
     try {
-      if (shopId) { const result = await playbook.check(shopId, deep); return res.json({ ...playbook.data(), checked: result.shops, errors: result.errors, started: false }); }
+      if (shopId) { const result = await playbook.check(shopId, deep); playbook.learnSoon(shopId); return res.json({ ...playbook.data(), checked: result.shops, errors: result.errors, started: false }); }
       if (!playbook.data().mcp_configured) throw new HttpError(409, 'CRUVA_API_KEY is not set: generate one under Cruva › Dashboard › API and add it to the server secrets.');
       if (playbook.data().checking) return res.json({ ...playbook.data(), checked: 0, errors: ['A check is already running'], started: false });
-      const p = playbook.check(undefined, deep).catch((err) => log.warn(`Cruva check: ${(err as Error).message}`));
+      const p = playbook.check(undefined, deep).then(() => { playbook.learnMissing(); }).catch((err) => log.warn(`Cruva check: ${(err as Error).message}`));
       await Promise.race([p, new Promise((r) => setTimeout(r, 300))]);
       res.json({ ...playbook.data(), checked: playbook.shops().length, errors: [], started: true });
     } catch (err) { bad(err); }
@@ -3435,6 +3450,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     try { const r2 = await playbook.learnShop(String(req.params.shopId)); res.json({ ...r2, ...playbook.data() }); } catch (err) { bad(err); }
   });
   r.get('/playbook/shops/:shopId/profile', (req, res) => {
+    playbook.learnSoon(String(req.params.shopId)); // opening the Profile of a shop never learnt starts its learning
     const shopId = String(req.params.shopId);
     const shop = playbook.shops().find((s) => s.shop_id === shopId);
     if (!shop) throw new HttpError(404, 'Shop not found');

@@ -176,7 +176,7 @@ export class PlaybookEngine {
       const fromName = s.shop_name.match(MARKET_RE)?.[1]?.toUpperCase() ?? null;
       const market = fromName ?? tts.find((t) => t.account_id === s.account_id)?.market ?? (a?.markets ?? '').split(/[,\s/]+/)[0] ?? null;
       const override = this.q.getSetting(`playbook_lang_${s.shop_id}`, '');
-      return { shop_id: s.shop_id, shop_name: s.shop_name, account_id: s.account_id, account_name: a?.name ?? '', am_name: a?.am_name ?? null, market: market || null, language: override || shopLanguage(market), plan: this.q.getSetting(`playbook_plan_${s.shop_id}`, '') || null, remote_counts: {}, checked_at: null, learned: this.learnedFor(s.shop_id), profile: this.q.listProfiles(s.shop_id, 1)[0] ?? null, voice: this.voiceFor(s.shop_id), top_pct: Number(this.q.getSetting(`playbook_top_pct_${s.shop_id}`, '10')) || 10, auto_update: this.q.getSetting(`playbook_auto_update_${s.shop_id}`, '') === '1', market_read: this.q.listMarkets(s.shop_id, 1)[0] ?? null, competitors: this.q.listShopCompetitors(s.shop_id).filter((c) => c.status !== 'rejected').length, outreach: this.outreachOf(s.shop_id, pulls.get(s.shop_id) ?? null), error: this.q.getSetting(`playbook_shop_error_${s.shop_id}`, '') || null };
+      return { shop_id: s.shop_id, shop_name: s.shop_name, account_id: s.account_id, account_name: a?.name ?? '', am_name: a?.am_name ?? null, market: market || null, language: override || shopLanguage(market), plan: this.q.getSetting(`playbook_plan_${s.shop_id}`, '') || null, remote_counts: {}, checked_at: null, learned: this.learnedFor(s.shop_id), profile: this.q.listProfiles(s.shop_id, 1)[0] ?? null, voice: this.voiceFor(s.shop_id), top_pct: Number(this.q.getSetting(`playbook_top_pct_${s.shop_id}`, '10')) || 10, auto_update: this.q.getSetting(`playbook_auto_update_${s.shop_id}`, '') === '1', market_read: this.q.listMarkets(s.shop_id, 1)[0] ?? null, competitors: this.q.listShopCompetitors(s.shop_id).filter((c) => c.status !== 'rejected').length, outreach: this.outreachOf(s.shop_id, pulls.get(s.shop_id) ?? null), learning: this.learningState(s.shop_id), error: this.q.getSetting(`playbook_shop_error_${s.shop_id}`, '') || null };
     }).filter((s) => accounts.get(s.account_id)?.enabled !== false);
   }
 
@@ -507,34 +507,73 @@ export class PlaybookEngine {
 
   // ---- Learning: the shop's voice from the copy it runs, and the content profile from its top videos ----
 
-  private learnQueue: Promise<unknown> = Promise.resolve();
-  /** Learn a shop in the background, one at a time, without anyone pressing anything (a newly linked shop, a shop that was never learnt). */
-  learnSoon(shopId: string): void {
-    if (!this.mcp.configured || (this.llm === undefined && !config.anthropicApiKey)) return;
-    this.learnQueue = this.learnQueue.then(async () => {
-      const shop = this.shops().find((sh) => sh.shop_id === shopId);
-      if (!shop || (shop.profile && shop.voice)) return;
-      if (!this.q.listRemoteItems(shopId).length) { try { await this.checkShop(shop, true); } catch (err) { log.warn(`Cruva learn ${shop.shop_name}: check failed: ${(err as Error).message}`); } }
-      const r = await this.learnShop(shopId);
-      if (r.errors.length) log.warn(`Cruva learn ${shop.shop_name}: ${r.errors.join(' | ')}`);
-      else log.info(`Cruva learnt ${shop.shop_name}: ${r.profile ? `top ${r.profile.top_count} of ${r.profile.videos} videos` : 'no videos'}${r.voice ? ', voice' : ''}`);
-    }).catch((err) => log.warn(`Cruva learn: ${(err as Error).message}`));
+  private learnPending: string[] = [];
+  private learnRunning = new Set<string>();
+  private learnDone = new Map<string, { promise: Promise<void>; resolve: () => void }>();
+  private static LEARN_WORKERS = 3;
+
+  /** A shop needs learning while any of its three reads is missing: the content profile, the voice, or the competitors and market read. */
+  needsLearning(shop: PlaybookShop): boolean {
+    return !shop.profile || !shop.voice || (shop.competitors === 0 && !shop.market_read);
   }
 
-  /** Every linked shop without a profile or a voice, queued for learning (after boot and after a sync). */
+  learningState(shopId: string): 'running' | 'queued' | null {
+    return this.learnRunning.has(shopId) ? 'running' : this.learnPending.includes(shopId) ? 'queued' : null;
+  }
+
+  /** Learn a shop in the background, three at a time, without anyone pressing anything (a newly linked shop, a shop never learnt, a Profile opened on one). */
+  learnSoon(shopId: string): void {
+    if (!this.mcp.configured || (this.llm === undefined && !config.anthropicApiKey)) return;
+    if (this.learnRunning.has(shopId) || this.learnPending.includes(shopId)) return;
+    const shop = this.shops().find((sh) => sh.shop_id === shopId);
+    if (!shop || !this.needsLearning(shop)) return;
+    this.learnPending.push(shopId);
+    if (!this.learnDone.has(shopId)) { let resolve = () => undefined as void; const promise = new Promise<void>((r) => { resolve = r; }); this.learnDone.set(shopId, { promise, resolve }); }
+    this.pumpLearning();
+  }
+
+  /** Resolves when no background learning is queued or running (tests and the weekly run wait on it). */
+  async learnIdle(): Promise<void> {
+    while (this.learnRunning.size || this.learnPending.length) await Promise.all([...this.learnDone.values()].map((d) => d.promise));
+  }
+
+  private pumpLearning(): void {
+    while (this.learnRunning.size < PlaybookEngine.LEARN_WORKERS && this.learnPending.length) {
+      const id = this.learnPending.shift()!;
+      this.learnRunning.add(id);
+      liveEvents.emitUpdate({ kind: 'playbook' });
+      // Starts on the next tick, so whatever queued it (a link, a sync, a request) finishes its own writes first.
+      void Promise.resolve().then(() => this.learnOne(id)).catch((err) => log.warn(`Cruva learn: ${(err as Error).message}`)).finally(() => {
+        this.learnRunning.delete(id);
+        const d = this.learnDone.get(id); if (d) { d.resolve(); this.learnDone.delete(id); }
+        liveEvents.emitUpdate({ kind: 'playbook' });
+        this.pumpLearning();
+      });
+    }
+  }
+
+  private async learnOne(shopId: string): Promise<void> {
+    const shop = this.shops().find((sh) => sh.shop_id === shopId);
+    if (!shop || !this.needsLearning(shop)) return;
+    if (!this.q.listRemoteItems(shopId).length) { try { await this.checkShop(shop, true); } catch (err) { log.warn(`Cruva learn ${shop.shop_name}: check failed: ${(err as Error).message}`); } }
+    const r = await this.learnShop(shopId);
+    if (r.errors.length) log.warn(`Cruva learn ${shop.shop_name}: ${r.errors.join(' | ')}`);
+    else log.info(`Cruva learnt ${shop.shop_name}: ${r.profile ? `top ${r.profile.top_count} of ${r.profile.videos} videos` : 'no videos'}${r.voice ? ', voice' : ''}${r.market ? `, ${r.market.competitors.length} competitor(s)` : ''}`);
+  }
+
+  /** Every linked shop missing a read, queued for learning (a minute after boot, after every check and sync, and from the Profile). */
   learnMissing(): number {
-    const missing = this.shops().filter((sh) => !sh.profile || !sh.voice);
+    const missing = this.shops().filter((sh) => this.needsLearning(sh));
     for (const sh of missing) this.learnSoon(sh.shop_id);
     return missing.length;
   }
 
-  /** Learn now when the shop has not been learnt, so a rollout is always tailored to it. */
+  /** Learn now when the shop has not been learnt, so a rollout is always tailored to it; a background learn already under way is awaited instead of repeated. */
   async ensureLearned(shopId: string): Promise<void> {
     const shop = this.shops().find((sh) => sh.shop_id === shopId);
-    if (!shop || (shop.profile && shop.voice)) return;
-    await this.learnQueue; // a background learn of this shop may be running
-    const again = this.shops().find((sh) => sh.shop_id === shopId);
-    if (again && again.profile && again.voice) return;
+    if (!shop || !this.needsLearning(shop)) return;
+    const pending = this.learnDone.get(shopId);
+    if (pending) { await pending.promise; return; }
     const r = await this.learnShop(shopId);
     if (r.errors.length) log.warn(`Cruva learn ${shop.shop_name}: ${r.errors.join(' | ')}`);
   }
@@ -611,6 +650,49 @@ export class PlaybookEngine {
     return { profile, voice, market, errors };
   }
 
+  /**
+   * Optimise the copy of every live bot on the chosen shops now, from what the learning knows (top videos,
+   * competitors, campaigns that work, voice, the season): an update rollout per shop, tailored; applied on its
+   * own when asked or when the shop updates bots automatically, otherwise waiting on the card.
+   */
+  async optimiseCopy(opts: { shopIds: string[]; apply?: boolean; actor?: string | null }): Promise<{ shops_done: number; optimised: { shop: string; rollout_id: number; drafts: number; applied: number }[]; errors: string[] }> {
+    const out = { shops_done: 0, optimised: [] as { shop: string; rollout_id: number; drafts: number; applied: number }[], errors: [] as string[] };
+    for (const id of opts.shopIds) {
+      const shop = this.shops().find((sh) => sh.shop_id === id);
+      if (!shop) continue;
+      out.shops_done += 1;
+      try {
+        await this.ensureLearned(id);
+        const fresh = this.shops().find((sh) => sh.shop_id === id) ?? shop;
+        // An optimise rollout still waiting on the card is the one to apply (or to leave), not a second one.
+        const open = this.q.listRollouts(50).find((r) => r.status === 'draft' && r.shop_ids.includes(id) && (r.note ?? '').startsWith('Optimise copy'));
+        if (open) {
+          let applied = 0;
+          if (opts.apply || fresh.auto_update) {
+            for (const d of this.q.listRolloutDrafts(open.id)) if (d.status === 'ready') this.updateDraft(d.id, { status: 'approved' });
+            if (this.q.getRollout(open.id)?.counts.approved) applied = (await this.runRollout(open.id, opts.actor ?? 'optimise copy')).done;
+          }
+          out.optimised.push({ shop: shop.shop_name, rollout_id: open.id, drafts: this.q.listRolloutDrafts(open.id).length, applied });
+          continue;
+        }
+        const cells = this.q.listPlaybookCells().filter((c) => c.shop_id === id && c.kind === 'automation' && c.status === 'set' && c.remote_id);
+        if (!cells.length) { out.errors.push(`${shop.shop_name}: no live bot to optimise (check the shop first)`); continue; }
+        const keys = cells.map((c) => `automation:${c.playbook_key}`);
+        const { rollout, drafts } = this.prepare({ shop_ids: [id], keys, updateKeys: keys, created_by: opts.actor ?? 'optimise copy', note: 'Optimise copy: top videos, competitors, campaigns that work, the season', tailor: false });
+        if (!drafts.length) { out.errors.push(`${shop.shop_name}: nothing to redo`); continue; }
+        await this.tailorRollout(rollout.id);
+        let applied = 0;
+        if (opts.apply || fresh.auto_update) {
+          for (const d of this.q.listRolloutDrafts(rollout.id)) if (d.status === 'ready') this.updateDraft(d.id, { status: 'approved' });
+          if (this.q.getRollout(rollout.id)?.counts.approved) applied = (await this.runRollout(rollout.id, opts.actor ?? 'optimise copy')).done;
+        }
+        out.optimised.push({ shop: shop.shop_name, rollout_id: rollout.id, drafts: drafts.length, applied });
+      } catch (err) { out.errors.push(`${shop.shop_name}: ${(err as Error).message}`); }
+    }
+    liveEvents.emitUpdate({ kind: 'playbook' });
+    return out;
+  }
+
   // ---- Always-on outreach: DMs must keep going out; an ended campaign gets a fresh, tailored one ----
 
   private outreachOf(shopId: string, metrics: Record<string, unknown> | null): PlaybookShop['outreach'] {
@@ -641,11 +723,11 @@ export class PlaybookEngine {
    * competitors, the season and the deals), and start it where Always-on outreach is on; otherwise it waits on
    * the Cruva card and the monitor flags it. A shop with a replacement still open is left alone.
    */
-  async ensureOutreach(opts: { shopIds?: string[]; now?: number } = {}): Promise<{ shops: number; drafted: { shop: string; rollout_id: number; started: boolean; reason: string }[]; errors: string[] }> {
+  async ensureOutreach(opts: { shopIds?: string[]; now?: number } = {}): Promise<{ shops_done: number; drafted: { shop: string; rollout_id: number; started: boolean; reason: string }[]; errors: string[] }> {
     const now = opts.now ?? Date.now();
-    const out = { shops: 0, drafted: [] as { shop: string; rollout_id: number; started: boolean; reason: string }[], errors: [] as string[] };
+    const out = { shops_done: 0, drafted: [] as { shop: string; rollout_id: number; started: boolean; reason: string }[], errors: [] as string[] };
     for (const shop of this.shops().filter((sh) => !opts.shopIds || opts.shopIds.includes(sh.shop_id))) {
-      out.shops += 1;
+      out.shops_done += 1;
       const o = shop.outreach;
       if (!this.q.listRemoteItems(shop.shop_id).length) continue; // never checked: nothing known
       const flowing = o.live > 0 && (o.silent_days === null || o.silent_days < 3);

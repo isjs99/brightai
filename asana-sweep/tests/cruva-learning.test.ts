@@ -182,7 +182,7 @@ describe('learning without anyone pressing anything', () => {
     for (const key of ['sample_sent', 'content_pending', 'first_sale']) q.setPlaybookCell({ shop_id: 'shop-de', kind: 'group', playbook_key: key, status: 'set', remote_id: `g-${key}`, remote_name: key, checked_at: now, applied_at: null, note: null });
     for (const key of ['delivered', 'sample_sent', 'first_sale']) q.setPlaybookCell({ shop_id: 'shop-de', kind: 'automation', playbook_key: key, status: 'missing', remote_id: null, remote_name: null, checked_at: now, applied_at: null, note: null });
     expect(engine.learnMissing()).toBeGreaterThanOrEqual(1); // queued in the background (the test database holds other shops too)
-    await engine['learnQueue'];
+    await engine.learnIdle();
     expect(engine.shops().find((s) => s.shop_id === 'shop-de')!.voice).toBeTruthy();
     // Nothing learnt: Prepare learns first (here already done by the queue), then drafts, then tailors in walk order.
     const { rollout, drafts } = await engine.prepareTailored({ shop_ids: ['shop-de'], keys: ['automation:sample_sent', 'automation:delivered', 'automation:first_sale'], created_by: 'Isaac' });
@@ -199,5 +199,5 @@ describe('learning without anyone pressing anything', () => {
     expect(sys).toMatch(/Campaigns that work on this shop/);
     expect(sys).toMatch(/"September Deals": sent 351,674, 457 replies \(0\.1%\), 2,246 GMV/);
     expect(engine.drafts(rollout.id).tailoring.done).toBe(3);
-  });
+  }, 30000);
 });

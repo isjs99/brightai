@@ -148,7 +148,7 @@ export class Scheduler {
     // A second pass late morning in case the FastMoss routine ran late.
     this.pullsLateTask = cron.schedule('0 11 * * *', () => void this.dailyPull(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Cruva best practice: re-read every linked shop's setup overnight so the matrix and the monitor rule are current.
-    this.cruvaTask = cron.schedule('20 5 * * *', () => { if (this.playbook.data().mcp_configured) void this.playbook.check(undefined, true).then(() => this.alwaysOnOutreach()).catch((err) => log.warn(`Cruva nightly check: ${(err as Error).message}`)); }, { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
+    this.cruvaTask = cron.schedule('20 5 * * *', () => { if (this.playbook.data().mcp_configured) void this.playbook.check(undefined, true).then(() => { this.playbook.learnMissing(); return this.alwaysOnOutreach(); }).catch((err) => log.warn(`Cruva nightly check: ${(err as Error).message}`)); }, { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Replies: Monday morning digest of what went out automatically last week, to the default Slack channel.
     this.repliesDigestTask = cron.schedule('50 8 * * 1', () => void this.repliesDigest(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Cruva learning: Monday 05:00, every shop's voice and content profile, and the update rollouts where the profile moved.
@@ -168,7 +168,7 @@ export class Scheduler {
     this.cruvaPull.start();
     this.playbook.seed();
     // Shops never learnt (voice and content profile) are learnt in the background, one at a time, ten minutes after boot.
-    setTimeout(() => { const n = this.playbook.learnMissing(); if (n) log.info(`Cruva: ${n} shop(s) queued for learning`); }, 600000);
+    setTimeout(() => { const n = this.playbook.learnMissing(); if (n) log.info(`Cruva: ${n} shop(s) queued for learning`); }, 60000);
     this.copilot.start();
     // Ad hoc client tasks from the client channel, emails and calls, every 30 minutes.
     this.clientTasks.start();
