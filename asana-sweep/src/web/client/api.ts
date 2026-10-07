@@ -332,6 +332,7 @@ export const api = {
   replyFeedback: (eventId: number, feedback: 'right' | 'wrong' | null, note?: string | null, teach?: { title?: string; body: string } | null) => call<{ event: ReplyEvent }>('POST', `/replies/events/${eventId}/feedback`, { feedback, note, teach }),
   retryReplies: (accountId: number, channel: InboxChannel, conversationRefs?: number[]) => call<{ retried: number; result: Record<string, number>; data: RepliesData }>('POST', `/replies/${accountId}/${channel}/retry`, conversationRefs ? { conversation_refs: conversationRefs } : {}),
   runReplies: (accountId: number, channel: InboxChannel) => call<{ synced: { shops: number; conversations: number; new_messages: number; errors: string[] } | null; swept: { scanned: number; candidates: number; result: Record<string, number> }; data: RepliesData }>('POST', `/replies/${accountId}/${channel}/run`, {}),
+  translate: (texts: string[], accountId?: number) => call<{ translations: string[] }>('POST', '/replies/translate', { texts, account_id: accountId }),
   sendDraft: (draftId: number, text?: string) => call<ConversationDetail>('POST', `/replies/drafts/${draftId}/send`, text === undefined ? {} : { text }),
   updateConversation: (id: number, s: Partial<{ status: string; language: string | null }>) => call<ConversationDetail>('PUT', `/inbox/conversations/${id}`, s),
   draftReply: (id: number, opts: { language?: string; instructions?: string } = {}) => call<ConversationDetail & { reply: InboxReply }>('POST', `/inbox/conversations/${id}/draft`, opts),

@@ -1781,6 +1781,11 @@ const migrations: Migration[] = [
     name: 'reply policy: answer everything switch',
     up: (db) => { db.exec(`ALTER TABLE reply_policies ADD COLUMN answer_all INTEGER NOT NULL DEFAULT 0`); },
   },
+  {
+    version: 48,
+    name: 'translations to English, kept per text',
+    up: (db) => { db.exec(`CREATE TABLE translations (hash TEXT PRIMARY KEY, text TEXT NOT NULL, english TEXT NOT NULL, created_at TEXT NOT NULL)`); },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

@@ -2378,6 +2378,21 @@ export class Queries {
     return this.getRolloutDraft(id);
   }
 
+  // ---- Translations ----
+
+  getTranslations(hashes: string[]): Map<string, string> {
+    const out = new Map<string, string>();
+    for (let i = 0; i < hashes.length; i += 400) {
+      const chunk = hashes.slice(i, i + 400);
+      for (const r of this.db.prepare(`SELECT hash, english FROM translations WHERE hash IN (${chunk.map(() => '?').join(',')})`).all(...chunk) as { hash: string; english: string }[]) out.set(r.hash, r.english);
+    }
+    return out;
+  }
+
+  putTranslation(hash: string, text: string, english: string): void {
+    this.db.prepare('INSERT OR REPLACE INTO translations (hash, text, english, created_at) VALUES (?, ?, ?, ?)').run(hash, text, english, new Date().toISOString());
+  }
+
   // ---- Reply policies and events ----
 
   getReplyPolicy(accountId: number, channel: InboxChannel): ReplyPolicy | null {

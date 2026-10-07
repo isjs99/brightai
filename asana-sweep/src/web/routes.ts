@@ -36,6 +36,7 @@ import { cruvaMcp } from '../cruva/mcp.js';
 import { feedback as replyFeedback, overview as repliesOverview, repliesData, replyBlocker, retryErrors, sampleThread, savePolicy, sweepDeferred, waitingAll } from '../inbox/replies.js';
 import { buildContext, renderPrompt } from '../inbox/context.js';
 import { draftWithClaude } from '../inbox/llm.js';
+import { translateToEnglish } from '../inbox/translate.js';
 import { LANGUAGE_NAMES } from '../inbox/language.js';
 import type { ConversationDetail, ContextEntry, InboxData } from '../sweep/types.js';
 import { normaliseDomain } from '../bd/score.js';
@@ -2626,6 +2627,13 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (channel === 'affiliate' && cruvaMcp.configured) { const r2 = await syncCruvaInbox(q, { accountId: a.id }, { sweep: false }); synced = { shops: r2.shops, conversations: r2.conversations, new_messages: r2.new_messages, errors: r2.errors }; }
     const swept = await sweepDeferred(q, { accountId: a.id, channel });
     res.json({ synced, swept, data: repliesData(q, a, channel, scopeLive) });
+  });
+  /** English for the team: up to 60 texts, each kept once translated. */
+  r.post('/replies/translate', async (req, res) => {
+    const b = (req.body ?? {}) as { texts?: unknown; account_id?: unknown };
+    const texts = Array.isArray(b.texts) ? b.texts.map((t) => String(t ?? '')).slice(0, 60) : [];
+    if (!texts.length) throw new HttpError(400, 'texts is empty');
+    try { res.json({ translations: await translateToEnglish(q, texts, { accountId: Number.isInteger(Number(b.account_id)) ? Number(b.account_id) : null }) }); } catch (err) { throw new HttpError(502, (err as Error).message); }
   });
   r.post('/replies/events/:id/feedback', (req, res) => {
     const b = (req.body ?? {}) as { feedback?: 'right' | 'wrong' | null; note?: string; teach?: { title?: string; body?: string } | null };

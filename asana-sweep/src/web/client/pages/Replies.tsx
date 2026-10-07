@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { ConversationDetail, InboxChannel, RepliesData, RepliesSummaryRow, ReplyEvent, ReplyMode } from '../../../sweep/types';
 import { api, fmtRelative, useLiveUpdates } from '../api';
@@ -22,6 +22,31 @@ export default function RepliesPage({ channel }: { channel: InboxChannel }) {
 const label = (channel: InboxChannel) => (channel === 'cs' ? 'Customer service' : 'Creators');
 const who = (channel: InboxChannel) => (channel === 'cs' ? 'buyer' : 'creator');
 const MODE_LABEL: Record<ReplyMode, string> = { off: 'Off', draft: 'Draft', auto: 'Automatic' };
+/**
+ * English for the team: translations are fetched for the texts on screen (creator and buyer messages, drafts,
+ * replies) when the toggle is on, kept server-side per text, and shown in italics under the original.
+ */
+function useEnglish(enabled: boolean, accountId?: number) {
+  const [tx, setTx] = useState<Record<string, string>>({});
+  const pending = useRef(new Set<string>());
+  const request = useCallback((items: { text: string | null | undefined; lang: string | null | undefined }[]) => {
+    if (!enabled) return;
+    const need = [...new Set(items.filter((i) => i.text && i.text.trim() && (i.lang ?? '').slice(0, 2) !== 'en').map((i) => i.text as string))].filter((t) => !(t in tx) && !pending.current.has(t));
+    if (!need.length) return;
+    for (const t of need) pending.current.add(t);
+    for (let i = 0; i < need.length; i += 40) {
+      const chunk = need.slice(i, i + 40);
+      api.translate(chunk, accountId).then((r) => setTx((cur) => { const next = { ...cur }; chunk.forEach((t, j) => { next[t] = r.translations[j] ?? t; }); return next; })).catch(() => setTx((cur) => { const next = { ...cur }; chunk.forEach((t) => { next[t] = '(translation failed)'; }); return next; })).finally(() => chunk.forEach((t) => pending.current.delete(t)));
+    }
+  }, [enabled, accountId, tx]);
+  const en = useCallback((text: string | null | undefined, lang: string | null | undefined): string | null => (enabled && text && text.trim() && (lang ?? '').slice(0, 2) !== 'en' ? tx[text] ?? 'translating…' : null), [enabled, tx]);
+  return { en, request };
+}
+function En({ text, lang, en }: { text: string | null | undefined; lang: string | null | undefined; en: (t: string | null | undefined, l: string | null | undefined) => string | null }) {
+  const t = en(text, lang);
+  return t && t !== text ? <div className="sub en" style={{ fontStyle: 'italic', whiteSpace: 'pre-wrap' }}>EN · {t}</div> : null;
+}
+
 const DECISION: Record<ReplyEvent['decision'], { label: string; cls: string }> = {
   auto_sent: { label: 'Sent automatically', cls: 'good' },
   drafted: { label: 'Drafted', cls: 'accent' },
@@ -102,7 +127,12 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
   const [busy, setBusy] = useState<string | null>(null);
   const [thread, setThread] = useState<number | null>(null);
   const [logOpen, setLogOpen] = useState(false);
-  const [logFilter, setLogFilter] = useState<'all' | ReplyEvent['decision']>('all');
+  const [logFilter, setLogFilter] = useState<'all' | 'wrong' | ReplyEvent['decision']>('all');
+  const [english, setEnglish] = useState<boolean>(() => { try { return localStorage.getItem('replies_english') === '1'; } catch { return false; } });
+  const { en, request } = useEnglish(english, accountId);
+  const logRef = useRef<HTMLDivElement>(null);
+  const waitRef = useRef<HTMLDivElement>(null);
+  const showLog = (f: typeof logFilter) => { setLogOpen(true); setLogFilter(f); setTimeout(() => logRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50); };
   const [teach, setTeach] = useState<{ id: number; note: string; body: string } | null>(null);
   const [sample, setSample] = useState({ text: '', language: '' });
   const [sampleOut, setSampleOut] = useState<{ draft: string | null; event: ReplyEvent | null } | null>(null);
@@ -127,7 +157,15 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
     if (mode === 'auto' && !window.confirm(`Switch ${label(channel)} replies for ${data.account.name} to automatic? Messages that pass the filters go out without a human reading them first${policy.daily_cap !== null ? ` (up to ${policy.daily_cap} a day)` : ' (no daily cap)'}.`)) return;
     save({ mode });
   };
-  const log = data.log.filter((e) => logFilter === 'all' || e.decision === logFilter);
+  const log = data.log.filter((e) => logFilter === 'all' || (logFilter === 'wrong' ? e.feedback === 'wrong' : e.decision === logFilter));
+  useEffect(() => { try { localStorage.setItem('replies_english', english ? '1' : '0'); } catch { /* private window */ } }, [english]);
+  useEffect(() => {
+    if (!english) return;
+    request([
+      ...data.waiting.slice(0, 50).flatMap((w) => [{ text: w.last_message_text, lang: w.language }, { text: w.draft?.text, lang: w.language }]),
+      ...(logOpen ? log.slice(0, 80).flatMap((e) => [{ text: e.context.their_text, lang: e.language }, { text: e.context.reply_text, lang: e.language }]) : []),
+    ]);
+  }, [english, data, logOpen, logFilter, request]); // eslint-disable-line react-hooks/exhaustive-deps
   const path = channel === 'cs' ? '/customer-service' : '/creators';
 
   return (
@@ -141,6 +179,7 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
           <span className={`badge ${data.channel_ready ? 'good' : 'muted'}`} title={data.channel_note ?? ''}>{data.channel_ready ? 'Channel live' : channel === 'cs' ? 'Scope pending' : 'Not connected'}</span>
           {!data.llm_configured && <span className="badge crit">Model not configured</span>}
           {policy.mode === 'auto' && !data.master_on && <span className="badge warn" title="Settings › Connections › Auto-reply master">Master switch off: drafts only</span>}
+          <button className={`small ${english ? 'primary' : ''}`} onClick={() => setEnglish((x) => !x)} title="Show an English translation under every message, draft and reply that is not in English (kept once translated)">{english ? 'Hide English' : 'Show English'}</button>
           <Link to={`${path}`} className="sub">All accounts ▸</Link>
         </div>
       </div>
@@ -239,15 +278,15 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
       </div>
 
       <div className="kpis">
-        <div className="kpi"><div className="v">{counts.replied_today}</div><div className="k">Replied today</div><div className="d">{counts.auto_today} automatic · {counts.manual_today} by the team</div></div>
-        <div className="kpi"><div className="v">{counts.waiting}</div><div className="k">Waiting for a human</div><div className="d">{counts.escalated} escalated · {counts.drafts} with a draft</div></div>
-        <div className="kpi"><div className="v">{counts.skipped_today}</div><div className="k">Needed no reply today</div><div className="d">thanks, emojis, cards</div></div>
-        <div className="kpi"><div className="v">{counts.median_minutes === null ? '–' : `${counts.median_minutes}m`}</div><div className="k">Median time to answer</div><div className="d">automatic, today</div></div>
-        <div className="kpi"><div className="v">{counts.wrong_7d}</div><div className="k">Marked wrong, 7 days</div><div className="d">teach from the log below</div></div>
+        <div className="kpi" style={{ cursor: 'pointer' }} title="Open the log of replies that went out" onClick={() => showLog('auto_sent')}><div className="v">{counts.replied_today}</div><div className="k">Replied today</div><div className="d">{counts.auto_today} automatic · {counts.manual_today} by the team</div></div>
+        <div className="kpi" style={{ cursor: 'pointer' }} title="Jump to the threads waiting" onClick={() => waitRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })}><div className="v">{counts.waiting}</div><div className="k">Waiting for a human</div><div className="d">{counts.escalated} escalated · {counts.drafts} with a draft</div></div>
+        <div className="kpi" style={{ cursor: 'pointer' }} title="Open the log of messages that needed no reply" onClick={() => showLog('skipped')}><div className="v">{counts.skipped_today}</div><div className="k">Needed no reply today</div><div className="d">thanks, emojis, cards</div></div>
+        <div className="kpi" style={{ cursor: 'pointer' }} title="Open the log of replies that went out" onClick={() => showLog('auto_sent')}><div className="v">{counts.median_minutes === null ? '–' : `${counts.median_minutes}m`}</div><div className="k">Median time to answer</div><div className="d">automatic, today</div></div>
+        <div className="kpi" style={{ cursor: 'pointer' }} title="Open the log filtered to replies marked wrong" onClick={() => showLog('wrong')}><div className="v">{counts.wrong_7d}</div><div className="k">Marked wrong, 7 days</div><div className="d">teach from the log below</div></div>
       </div>
 
       {/* Needs a human */}
-      <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card" style={{ marginBottom: 16 }} ref={waitRef}>
         <div className="page-head" style={{ marginBottom: 8 }}><h3 style={{ margin: 0 }}><span className="badge warn">{counts.waiting}</span> Needs a human</h3><div className="actions">{isAdmin && data.waiting.some((w) => w.event?.decision === 'error') && <button className="small" disabled={busy === 'retry'} title="Threads that failed on the model (no credit, an outage) are decided once per message and never retried on their own; this clears those errors and runs the pass again" onClick={() => run('retry', () => api.retryReplies(accountId, channel), (r) => { setData(r.data); setNotice(`${r.retried} thread(s) re-read: ${Object.entries(r.result).filter(([, n]) => n).map(([k, n]) => `${n} ${k}`).join(', ') || 'nothing changed'}.`); })}>{busy === 'retry' ? 'Retrying…' : `Retry ${data.waiting.filter((w) => w.event?.decision === 'error').length} error(s)`}</button>}{isAdmin && <button className="small" disabled={busy === 'run'} title="Pull this account's creator inbox from Cruva now, then look again at every open thread the policy should answer: deferred decisions (master switch, cap, quiet hours, errors) and threads no pass has read yet" onClick={() => run('run', () => api.runReplies(accountId, channel), (r) => { setData(r.data); const d = Object.entries(r.swept.result).filter(([, n]) => n).map(([k, n]) => `${n} ${k}`).join(', '); setNotice(`${r.synced ? `Synced ${r.synced.conversations} thread(s), ${r.synced.new_messages} new message(s). ` : ''}${r.swept.candidates} of ${r.swept.scanned} open thread(s) looked at again${d ? `: ${d}` : ''}.${r.synced?.errors.length ? ` Errors: ${r.synced.errors.join(' | ')}` : ''}`); })}>{busy === 'run' ? 'Running…' : 'Run now'}</button>}<span className="sub">Newest first</span></div></div>
         {data.blockers.length > 0 && (
           <table style={{ marginBottom: 10 }}>
@@ -269,8 +308,9 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
                 <div className="wait-main">
                   <div><b>{w.counterpart_name ?? who(channel)}</b> <span className="sub">· {w.shop_name}{w.market ? ` ${w.market}` : ''} · {fmtRelative(w.last_message_at)}</span> {w.event && <span className={`badge ${DECISION[w.event.decision].cls}`}>{w.event.intent ? (data.intents.find((i) => i.key === w.event!.intent)?.label ?? w.event.intent) : DECISION[w.event.decision].label}</span>}</div>
                   <div className="their">{w.last_message_text}</div>
+                  <En text={w.last_message_text} lang={w.language} en={en} />
                   {w.event?.escalation && <div className="sub">Why: {w.event.escalation}</div>}
-                  {w.draft && <div className="draft-preview"><span className="sub">Draft:</span> {w.draft.text}</div>}
+                  {w.draft && <div className="draft-preview"><span className="sub">Draft:</span> {w.draft.text}<En text={w.draft.text} lang={w.language} en={en} /></div>}
                 </div>
                 {isAdmin && (
                   <div className="actions wait-actions">
@@ -306,10 +346,10 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
       )}
 
       {/* Log */}
-      <div className="card" style={{ marginBottom: 16 }}>
+      <div className="card" style={{ marginBottom: 16 }} ref={logRef}>
         <div className="page-head" style={{ marginBottom: 8 }}>
           <h3 style={{ margin: 0, cursor: 'pointer' }} onClick={() => setLogOpen((x) => !x)}><button className="small">{logOpen ? '▾' : '▸'}</button> Everything the replies did <span className="sub">({data.log.length} recent)</span></h3>
-          {logOpen && <select value={logFilter} onChange={(e) => setLogFilter(e.target.value as typeof logFilter)} style={{ width: 'auto' }}><option value="all">Everything</option>{(Object.keys(DECISION) as ReplyEvent['decision'][]).map((d) => <option key={d} value={d}>{DECISION[d].label}</option>)}</select>}
+          {logOpen && <select value={logFilter} onChange={(e) => setLogFilter(e.target.value as typeof logFilter)} style={{ width: 'auto' }}><option value="all">Everything</option>{(Object.keys(DECISION) as ReplyEvent['decision'][]).map((d) => <option key={d} value={d}>{DECISION[d].label}</option>)}<option value="wrong">Marked wrong</option></select>}
         </div>
         {logOpen && (log.length === 0 ? <p className="sub">Nothing logged yet.</p> : (
           <div className="loglist">
@@ -324,7 +364,8 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
                   {e.feedback === 'wrong' && <span className="badge crit">marked wrong</span>}
                 </div>
                 {e.context.their_text && <div className="their">{e.context.their_text}</div>}
-                {e.context.reply_text && <div className="bubble reply">{e.context.reply_text}</div>}
+                <En text={e.context.their_text} lang={e.language} en={en} />
+                {e.context.reply_text && <div className="bubble reply">{e.context.reply_text}<En text={e.context.reply_text} lang={e.language} en={en} /></div>}
                 {e.escalation && <div className="sub">Why: {e.escalation}</div>}
                 {e.context.chips.length > 0 && <div className="chips">{e.context.chips.map((c, i) => <span key={i} className="chip static">{c}</span>)}</div>}
                 {isAdmin && (
@@ -356,13 +397,14 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
         {showLibrary && <div style={{ marginTop: 14 }}><Library accounts={[{ account_id: data.account.id, account_name: data.account.name }]} languages={data.languages} isAdmin={isAdmin} onError={setError} /></div>}
       </div>
 
-      {thread !== null && <ThreadModal id={thread} channel={channel} languages={data.languages} llm={data.llm_configured} onClose={() => { setThread(null); load(); }} />}
+      {thread !== null && <ThreadModal id={thread} channel={channel} languages={data.languages} llm={data.llm_configured} english={english} accountId={accountId} onClose={() => { setThread(null); load(); }} />}
     </>
   );
 }
 
-function ThreadModal({ id, channel, languages, llm, onClose }: { id: number; channel: InboxChannel; languages: Record<string, string>; llm: boolean; onClose: () => void }) {
+function ThreadModal({ id, channel, languages, llm, english, accountId, onClose }: { id: number; channel: InboxChannel; languages: Record<string, string>; llm: boolean; english: boolean; accountId: number; onClose: () => void }) {
   const isAdmin = useIsAdmin();
+  const { en, request } = useEnglish(english, accountId);
   const [d, setD] = useState<(ConversationDetail & { auto_reply_blocker: string | null; events: ReplyEvent[] }) | null>(null);
   const [draft, setDraft] = useState('');
   const [instructions, setInstructions] = useState('');
@@ -371,6 +413,7 @@ function ThreadModal({ id, channel, languages, llm, onClose }: { id: number; cha
   const [showContext, setShowContext] = useState(false);
   const load = useCallback(() => api.conversation(id).then((x) => { setD(x); setDraft((cur) => cur || x.replies.filter((r) => !r.sent_at && !r.error_message).slice(-1)[0]?.text || ''); }).catch((e) => setError((e as Error).message)), [id]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (d) request([...d.messages.map((m) => ({ text: m.text, lang: d.conversation.language })), { text: draft, lang: d.conversation.language }]); }, [d, draft, request]);
   const run = async <T,>(key: string, fn: () => Promise<T>, after?: (r: T) => void) => { setBusy(key); setError(null); try { after?.(await fn()); } catch (e) { setError((e as Error).message); } finally { setBusy(null); } };
   const paused = d?.auto_reply_blocker === 'paused by the team';
   return (
@@ -408,7 +451,7 @@ function ThreadModal({ id, channel, languages, llm, onClose }: { id: number; cha
               {d.messages.length === 0 && <div className="sub">No messages pulled yet.</div>}
               {d.messages.map((m) => (
                 <div key={m.id} className={`msg ${m.sender_role}`}>
-                  <div className="bubble">{m.text ?? <i>{m.type.toLowerCase()}</i>}</div>
+                  <div className="bubble">{m.text ?? <i>{m.type.toLowerCase()}</i>}<En text={m.text} lang={d.conversation.language} en={en} /></div>
                   <div className="sub">{m.sender_role === 'us' ? (m.sender_name ?? 'shop') : m.sender_role === 'them' ? (m.sender_name ?? who(channel)) : 'system'} · {fmtRelative(m.created_at)}</div>
                 </div>
               ))}
@@ -417,6 +460,7 @@ function ThreadModal({ id, channel, languages, llm, onClose }: { id: number; cha
             {isAdmin && (
               <div className="card" style={{ marginTop: 10 }}>
                 <textarea rows={4} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Type a reply, or let the model draft one from the context" style={{ width: '100%' }} />
+                <En text={draft} lang={d.conversation.language} en={en} />
                 <div className="inline-form" style={{ marginTop: 8 }}>
                   <input type="text" value={instructions} onChange={(e) => setInstructions(e.target.value)} placeholder="Optional steer, e.g. offer the 15% code" style={{ flex: 1, minWidth: 220 }} />
                   <button onClick={() => run('draft', () => api.draftReply(id, { instructions: instructions || undefined }), (x) => { setDraft(x.reply.text); setD({ ...d, ...x }); })} disabled={!llm || busy === 'draft'}>{busy === 'draft' ? 'Drafting…' : 'Draft for me'}</button>
