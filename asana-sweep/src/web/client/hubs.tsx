@@ -53,6 +53,7 @@ export const ACCOUNT_TABS: HubTab[] = [
   { to: '/stock', label: 'Stock' },
   { to: '/pnl', label: 'P&L' },
   { to: '/cruva', label: 'Cruva', aliases: ['/playbook'] },
+  { to: '/samples', label: 'Samples' },
   { to: '/creators', label: 'Creators' },
   { to: '/customer-service', label: 'Customer service' },
   { to: '/reports', label: 'Reports' },

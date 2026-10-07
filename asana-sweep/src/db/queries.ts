@@ -92,7 +92,7 @@ import type {
   ReplyAuditAction,
   ReplyAuditItem,
   ReplyAuditSummary,
-  PlaybookCompetitor, PlaybookContentVideo, PlaybookMarketProfile,
+  PlaybookCompetitor, PlaybookContentVideo, PlaybookMarketProfile, SampleRequest, SampleResearch,
   PlaybookProfile,
 } from '../sweep/types.js';
 import { isSignedStage, leadKey, matchPerson, type SheetLead } from '../leads/sheet.js';
@@ -2347,6 +2347,45 @@ export class Queries {
   addProfile(shopId: string, profile: PlaybookProfile): void {
     this.db.prepare('INSERT INTO cruva_profiles (shop_id, learned_at, profile_json) VALUES (?, ?, ?)').run(shopId, profile.learned_at, JSON.stringify(profile));
     this.db.prepare('DELETE FROM cruva_profiles WHERE shop_id = ? AND id NOT IN (SELECT id FROM cruva_profiles WHERE shop_id = ? ORDER BY id DESC LIMIT 8)').run(shopId, shopId);
+  }
+
+  // ---- Sample requests ----
+
+  private sampleRow(r: Row): SampleRequest { return parseJson<SampleRequest>(r.row_json, {} as SampleRequest); }
+
+  listSampleRequests(shopId: string, status?: SampleRequest['status']): SampleRequest[] {
+    const rows = (status ? this.db.prepare('SELECT row_json FROM sample_requests WHERE shop_id = ? AND status = ? ORDER BY score DESC, seen_at DESC').all(shopId, status) : this.db.prepare('SELECT row_json FROM sample_requests WHERE shop_id = ? ORDER BY score DESC, seen_at DESC').all(shopId)) as Row[];
+    return rows.map((r) => this.sampleRow(r));
+  }
+
+  getSampleRequest(shopId: string, applyId: string): SampleRequest | null {
+    const r = this.db.prepare('SELECT row_json FROM sample_requests WHERE shop_id = ? AND apply_id = ?').get(shopId, applyId) as Row | undefined;
+    return r ? this.sampleRow(r) : null;
+  }
+
+  saveSampleRequest(req: SampleRequest): void {
+    this.db.prepare('INSERT INTO sample_requests (shop_id, apply_id, handle, row_json, verdict, score, status, seen_at, decided_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (shop_id, apply_id) DO UPDATE SET handle = excluded.handle, row_json = excluded.row_json, verdict = excluded.verdict, score = excluded.score, status = excluded.status, seen_at = excluded.seen_at, decided_at = excluded.decided_at').run(req.shop_id, req.apply_id, req.handle, JSON.stringify(req), req.verdict, req.score, req.status, req.seen_at, req.decided_at);
+  }
+
+  /** Pending rows the latest scan did not see are gone (approved, rejected or expired in Cruva). */
+  markSampleRequestsGone(shopId: string, seenApplyIds: string[], at = new Date().toISOString()): number {
+    const rows = this.db.prepare("SELECT row_json FROM sample_requests WHERE shop_id = ? AND status = 'pending'").all(shopId) as Row[];
+    const seen = new Set(seenApplyIds); let n = 0;
+    for (const r of rows) { const req = this.sampleRow(r); if (!seen.has(req.apply_id)) { this.saveSampleRequest({ ...req, status: 'gone', decided_at: req.decided_at ?? at }); n += 1; } }
+    return n;
+  }
+
+  /** The newest research on a creator across shops, to reuse within a fortnight. */
+  latestSampleResearch(handle: string): SampleResearch | null {
+    const r = this.db.prepare('SELECT row_json FROM sample_requests WHERE handle = ? ORDER BY seen_at DESC LIMIT 5').all(handle) as Row[];
+    for (const row of r) { const req = this.sampleRow(row); if (req.research) return req.research; }
+    return null;
+  }
+
+  /** Accepted through here since a moment, per shop; auto only when asked. */
+  countSampleAccepted(shopId: string, sinceIso: string, autoOnly = false): number {
+    const rows = this.db.prepare("SELECT row_json FROM sample_requests WHERE shop_id = ? AND status = 'accepted' AND decided_at >= ?").all(shopId, sinceIso) as Row[];
+    return rows.map((r) => this.sampleRow(r)).filter((x) => !autoOnly || x.decided_by === 'auto').length;
   }
 
   // ---- Competitors and the market read ----

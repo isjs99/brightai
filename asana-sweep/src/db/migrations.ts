@@ -1823,6 +1823,17 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 52,
+    name: 'sample requests',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE sample_requests (shop_id TEXT NOT NULL, apply_id TEXT NOT NULL, handle TEXT NOT NULL, row_json TEXT NOT NULL, verdict TEXT NOT NULL, score REAL NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'pending', seen_at TEXT NOT NULL, decided_at TEXT, PRIMARY KEY (shop_id, apply_id));
+        CREATE INDEX sample_requests_shop ON sample_requests(shop_id, status, score DESC);
+        CREATE INDEX sample_requests_handle ON sample_requests(handle, seen_at DESC);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

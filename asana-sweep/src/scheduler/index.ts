@@ -28,6 +28,7 @@ import { StockTracker } from '../stock/index.js';
 import { IncidentEngine } from '../incidents/index.js';
 import { ClientReports } from '../reports/client.js';
 import { PlaybookEngine } from '../playbook/index.js';
+import { SampleEngine } from '../samples/index.js';
 import { cruvaMcp } from '../cruva/mcp.js';
 import { CruvaPuller } from '../cruva/pull.js';
 import { Copilot } from '../copilot/index.js';
@@ -69,11 +70,13 @@ export class Scheduler {
   readonly incidents: IncidentEngine;
   readonly reports: ClientReports;
   readonly playbook: PlaybookEngine;
+  readonly samples: SampleEngine;
   readonly cruvaPull: CruvaPuller;
   private cruvaTask: ScheduledTask | null = null;
   private repliesDigestTask: ScheduledTask | null = null;
   private auditTask: ScheduledTask | null = null;
   private learnTask: ScheduledTask | null = null;
+  private samplesTask: ScheduledTask | null = null;
   readonly copilot: Copilot;
   readonly clientTasks: ClientTasks;
   readonly cruvaInbox: CruvaInboxWatcher;
@@ -101,6 +104,7 @@ export class Scheduler {
     this.incidents = new IncidentEngine(q);
     this.reports = new ClientReports(q);
     this.playbook = new PlaybookEngine(q);
+    this.samples = new SampleEngine(q, this.playbook);
     this.cruvaPull = new CruvaPuller(q);
     this.stock.cruvaRefresh = (shopId) => this.cruvaPull.run(shopId);
     this.copilot = new Copilot(q, { gmail: this.gmail });
@@ -149,6 +153,8 @@ export class Scheduler {
     this.repliesDigestTask = cron.schedule('50 8 * * 1', () => void this.repliesDigest(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Cruva learning: Monday 05:00, every shop's voice and content profile, and the update rollouts where the profile moved.
     this.learnTask = cron.schedule('0 5 * * 1', () => void this.weeklyLearning(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
+    // Samples: the To Review queue of every shop, twice a working day; auto-accept where an account allows it.
+    this.samplesTask = cron.schedule('30 8,14 * * 1-5', () => void this.samples.scanAll().then((r) => { if (r.errors.length) log.warn(`Samples scan: ${r.errors.slice(0, 5).join(' | ')}`); }), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Reply audit: Monday and Thursday 07:00, the last three days of automatic replies scored and the fixes applied.
     this.auditTask = cron.schedule('0 7 * * 1,4', () => void this.replyAudit(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Account monitor: rolling scan of every account for the flags the team otherwise catches by hand.
@@ -425,6 +431,7 @@ export class Scheduler {
     this.inbox.stop();
     this.auditTask?.stop();
     this.learnTask?.stop();
+    this.samplesTask?.stop();
     this.stock.stop();
     this.copilot.stop();
     this.clientTasks.stop();

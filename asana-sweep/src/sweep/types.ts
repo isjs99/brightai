@@ -2369,6 +2369,21 @@ export interface PlaybookData {
 
 export interface PlaybookShop { shop_id: string; shop_name: string; account_id: number; account_name: string; am_name: string | null; language: string; market: string | null; plan: string | null; remote_counts: Record<string, number>; checked_at: string | null; learned: PlaybookLearned | null; /** Why the last check of this shop failed, or null. */ error: string | null; /** The content profile and voice, when learnt. */ profile: PlaybookProfile | null; voice: PlaybookVoice | null; top_pct: number; auto_update: boolean; /** The latest market read of the shop's direct competitors, when scanned, and how many competitors are confirmed or suggested. */ market_read: PlaybookMarketProfile | null; competitors: number }
 
+// ---- Samples: the traffic light, the rules, the shortlist ----
+
+/** The numbers a creator's pending sample request has to clear, per account; the weekly cap comes from the account's targets unless overridden here. */
+export interface SampleRules { min_gmv: number; min_engagement: number; min_post_rate: number; min_followers: number; /** require: only creators Claude or the research call relevant make the shortlist; prefer: relevance only ranks; ignore: numbers only. */ relevance: 'require' | 'prefer' | 'ignore'; cap_override: number | null; auto_accept: boolean; /** How many the scan may accept on its own each week. */ auto_per_week: number }
+export interface SampleResearch { creator_id: string | null; categories: string[]; category_splits: Record<string, number>; bio: string | null; content_quality: number | null; brand_collaborations: number | null; language: string | null; brands: { name: string; id: string; gmv: number; videos: number }[]; /** The direct competitor the creator sold for, when one matched. */ competitor: string | null; /** A category of theirs that matches the shop's. */ category_match: string | null; relevant: 0 | 1 | 2; risk: 'none' | 'some' | 'high'; note: string | null; researched_at: string }
+export interface SampleRequest {
+  shop_id: string; apply_id: string; handle: string; name: string | null; followers: number; gmv_30d: number; engagement: number | null; post_rate: number | null;
+  product: string | null; product_id: string | null; variant: string | null; submitted: string | null; commission: number | null; videos: { url: string; views: number }[];
+  research: SampleResearch | null; verdict: 'accept' | 'review' | 'skip'; score: number; reasons: string[];
+  seen_at: string; status: 'pending' | 'accepted' | 'gone'; decided_at: string | null; decided_by: string | null;
+}
+export interface SampleShop { shop_id: string; shop_name: string; market: string | null; account_id: number; pending: number; oldest_days: number | null; shortlist: SampleRequest[]; review: SampleRequest[]; skipped: SampleRequest[]; accepted: SampleRequest[]; accepted_week: number; auto_week: number; cap: number | null; cap_source: 'target' | 'override' | null; min_target: number | null; scanned_at: string | null; error: string | null }
+export interface SampleAccount { account_id: number; name: string; am_name: string | null; light: 'red' | 'amber' | 'green' | 'grey'; summary: string; rules: SampleRules; shops: SampleShop[] }
+export interface SamplesData { configured: boolean; accounts: SampleAccount[]; defaults: SampleRules; scanning: boolean }
+
 // ---- Client question copilot ----
 
 export interface CopilotSource {

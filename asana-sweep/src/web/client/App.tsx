@@ -26,6 +26,7 @@ import PitchPage from './pages/Pitch';
 import CompetitorsPage from './pages/Competitors';
 import ReportsPage from './pages/Reports';
 import CruvaPage from './pages/Cruva';
+import SamplesPage from './pages/Samples';
 import CopilotPage from './pages/Copilot';
 import ChecklistTemplatePage from './pages/ChecklistTemplate';
 import ConnectionsPage from './pages/Connections';
@@ -112,7 +113,7 @@ function Login({ onDone }: { onDone: (role: Role) => void }) {
 /** Six entries. Each hub owns several paths (its tabs), so the link is active on any of them. */
 const NAV: { to: string; label: string; paths: string[] }[] = [
   { to: '/today', label: 'Today', paths: ['/today'] },
-  { to: '/monitor', label: 'Accounts', paths: ['/monitor', '/checklists', '/calendar', '/promotions', '/gmv-max', '/stock', '/pnl', '/cruva', '/playbook', '/creators', '/customer-service', '/replies/audit', '/reports', '/copilot'] },
+  { to: '/monitor', label: 'Accounts', paths: ['/monitor', '/checklists', '/calendar', '/promotions', '/gmv-max', '/stock', '/pnl', '/cruva', '/playbook', '/samples', '/creators', '/customer-service', '/replies/audit', '/reports', '/copilot'] },
   { to: '/targets', label: 'Onboarding', paths: ['/targets', '/onboarding'] },
   { to: '/pitch', label: 'Pitch designer', paths: ['/pitch'] },
   { to: '/inquiries', label: 'Enquiries', paths: ['/inquiries', '/inbox'] },
@@ -217,6 +218,7 @@ export default function App() {
               <Route path="/connections" element={<Hub title="Settings" tabs={SETTINGS_TABS}><ConnectionsPage /></Hub>} />
               <Route path="/cruva" element={<AccountHub><CruvaPage /></AccountHub>} />
               <Route path="/playbook" element={<AccountHub><CruvaPage /></AccountHub>} />
+              <Route path="/samples" element={<AccountHub><SamplesPage /></AccountHub>} />
               <Route path="*" element={<Navigate to="/today" replace />} />
             </Routes>
           </main>

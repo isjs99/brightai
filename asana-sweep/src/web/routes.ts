@@ -63,7 +63,7 @@ import { researchPitch } from '../pitch/research.js';
 import { llmUsageData, saveLlmSettings } from '../llm/usage.js';
 import { perfSnapshot, slowRequests } from '../perf.js';
 import { buildDeck, deckHtml, DEFAULT_BRIEF, normaliseBrief } from '../pitch/deck.js';
-import type { AtsKind, CompetitorAts } from '../sweep/types.js';
+import type { AtsKind, CompetitorAts, SampleRules } from '../sweep/types.js';
 import { periodBounds } from '../reports/client.js';
 import type { IngestPayload } from '../health/index.js';
 import { THRESHOLD_LABELS } from '../health/rules.js';
@@ -3357,6 +3357,18 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (!slackBot.configured) return res.json({ configured: false, channels: [] });
     try { res.json({ configured: true, channels: await slackBot.listChannels() }); } catch (err) { throw new HttpError(502, (err as Error).message); }
   });
+  // ---- Samples: the traffic light, the rules, the shortlist, bulk and auto accept ----
+  const samples = scheduler.samples;
+  r.get('/samples', (_req, res) => res.json(samples.data()));
+  r.put('/samples/accounts/:id/rules', (req, res) => { const id = idParam(req); samples.setRules(id, (req.body ?? {}) as Partial<SampleRules>); res.json(samples.data()); });
+  r.post('/samples/scan', async (_req, res) => { try { const r2 = await samples.scanAll(); res.json({ ...r2, ...samples.data() }); } catch (err) { bad(err); } });
+  r.post('/samples/:shopId/scan', async (req, res) => { try { await samples.scanShop(String(req.params.shopId)); res.json(samples.data()); } catch (err) { bad(err); } });
+  r.post('/samples/:shopId/accept', async (req, res) => {
+    const ids = Array.isArray((req.body ?? {}).apply_ids) ? ((req.body as { apply_ids: unknown[] }).apply_ids).map(String).filter((x) => /^\d+$/.test(x)) : [];
+    if (!ids.length) throw new HttpError(400, 'Pick at least one request.');
+    try { const r2 = await samples.accept(String(req.params.shopId), ids, actorOf(req)); res.json({ accepted: r2.accepted.length, skipped: r2.skipped, ...samples.data() }); } catch (err) { bad(err); }
+  });
+
   // Direct competitors and the market read (Profile > Competitors)
   r.get('/playbook/shops/:shopId/competitors', (req, res) => res.json(playbook.competitors(String(req.params.shopId))));
   r.post('/playbook/shops/:shopId/competitors/suggest', async (req, res) => { try { const r2 = await playbook.suggestCompetitors(String(req.params.shopId)); res.json({ ...r2, ...playbook.competitors(String(req.params.shopId)) }); } catch (err) { bad(err); } });
