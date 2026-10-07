@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import type { PlaybookCellStatus, PlaybookData, PlaybookDraft, PlaybookDraftStatus, PlaybookItem, PlaybookKind, PlaybookRollout, PlaybookSetupCell, PlaybookShop } from '../../../sweep/types';
-import { api, fmtRelative, useLiveUpdates } from '../api';
+import { api, fmtRelative, useActor, useLiveUpdates } from '../api';
+import CruvaWalk from './CruvaWalk';
 import { useIsAdmin } from '../session';
 import { useAccountScope, useAllowedAccounts, useInScope } from '../hubs';
 import { GroupsHead, useOpenGroups, type GroupLight } from '../groups';
@@ -56,6 +57,11 @@ export default function CruvaPage() {
   const [menu, setMenu] = useState(false);
   const [dialog, setDialog] = useState<'library' | 'rollouts' | 'link' | null>(null);
   const [cellOpen, setCellOpen] = useState<{ shop: PlaybookShop; col: Column; cell: PlaybookSetupCell | null } | null>(null);
+  const [view, setView] = useState<'cards' | 'grid'>(() => { try { return localStorage.getItem('cruva_view') === 'grid' ? 'grid' : 'cards'; } catch { return 'cards'; } });
+  useEffect(() => { try { localStorage.setItem('cruva_view', view); } catch { /* private window */ } }, [view]);
+  const [filter, setFilter] = useState<'all' | 'mine' | 'missing' | 'paused' | 'unchecked'>('all');
+  const [search, setSearch] = useState('');
+  const actor = useActor();
   const isAdmin = useIsAdmin();
   const groups = useOpenGroups('cruva');
   const rolloutId = params.get('rollout') ? Number(params.get('rollout')) : null;
@@ -99,9 +105,39 @@ export default function CruvaPage() {
       return { account_id, account_name: list[0].account_name, am_name: list[0].am_name, shops: list, checked, set, total, missing, paused, drift, errors, light };
     }).sort((a, b) => order.indexOf(a.light) - order.indexOf(b.light) || a.account_name.localeCompare(b.account_name));
   })();
-  const openRollout = (id: number | null) => { const n = new URLSearchParams(params); if (id === null) n.delete('rollout'); else n.set('rollout', String(id)); setParams(n); };
+  const openRollout = (id: number | null, opts: { shop?: string; table?: boolean } = {}) => { const n = new URLSearchParams(params); n.delete('shop'); n.delete('table'); if (id === null) n.delete('rollout'); else { n.set('rollout', String(id)); if (opts.shop) n.set('shop', opts.shop); if (opts.table) n.set('table', '1'); } setParams(n); };
 
-  if (rolloutId !== null) return <RolloutView id={rolloutId} data={data} isAdmin={isAdmin} onBack={() => openRollout(null)} onError={setError} />;
+  if (rolloutId !== null) return params.get('table') ? <RolloutView id={rolloutId} data={data} isAdmin={isAdmin} onBack={() => openRollout(null)} onError={setError} /> : <CruvaWalk id={rolloutId} shopId={params.get('shop')} data={data} isAdmin={isAdmin} onBack={() => openRollout(null)} onTable={() => openRollout(rolloutId, { table: true })} onError={setError} />;
+
+  // Cards: core coverage per account (the nine pieces the monitor cares about), what is missing, paused and drifted in words.
+  const coreCols = columns.filter((c) => c.core && !c.manual);
+  const cards = accountBlocks.map((blk) => {
+    const per = (st: PlaybookCellStatus[], cols: Column[]) => { const out = new Map<string, { col: Column; shops: PlaybookShop[] }>(); for (const sh of blk.shops) for (const c of cols) { const st2 = cell(sh.shop_id, c)?.status ?? 'unknown'; if (st.includes(st2)) { const k = `${c.kind}:${c.key}`; const e = out.get(k) ?? { col: c, shops: [] }; e.shops.push(sh); out.set(k, e); } } return [...out.values()]; };
+    const coreTotal = coreCols.length * blk.shops.length;
+    const coreSet = blk.shops.reduce((n, sh) => n + coreCols.filter((c) => ['set', 'drift'].includes(cell(sh.shop_id, c)?.status ?? '')).length, 0);
+    const missingCore = per(['missing', 'error'], coreCols);
+    const missingExtra = per(['missing', 'error'], columns.filter((c) => !c.core && !c.manual));
+    const paused = per(['paused'], columns);
+    const drift = per(['drift'], columns);
+    const light: GroupLight = !blk.checked ? 'grey' : coreTotal && coreSet === coreTotal && !blk.errors ? 'green' : coreTotal && coreSet / coreTotal >= 0.6 ? 'amber' : 'red';
+    const markets = [...new Set(blk.shops.map((sh) => sh.market).filter((m): m is string => Boolean(m)))];
+    const learned = blk.shops.map((sh) => sh.learned).filter((l): l is NonNullable<typeof l> => Boolean(l));
+    const drafting = data.rollouts.find((r) => r.status === 'draft' && r.shop_ids.some((sid) => blk.shops.some((sh) => sh.shop_id === sid)));
+    return { ...blk, coreSet, coreTotal, missingCore, missingExtra, paused, drift, light, markets, learned, drafting };
+  }).filter((c) => {
+    if (search && !c.account_name.toLowerCase().includes(search.toLowerCase()) && !(c.am_name ?? '').toLowerCase().includes(search.toLowerCase())) return false;
+    if (filter === 'mine') return Boolean(actor) && (c.am_name ?? '').toLowerCase().startsWith(actor.toLowerCase().split(' ')[0]);
+    if (filter === 'missing') return c.missingCore.length > 0;
+    if (filter === 'paused') return c.paused.length > 0;
+    if (filter === 'unchecked') return !c.checked;
+    return true;
+  }).sort((a, b) => (a.checked === b.checked ? 0 : a.checked ? -1 : 1) || (a.coreTotal ? a.coreSet / a.coreTotal : 0) - (b.coreTotal ? b.coreSet / b.coreTotal : 0) || a.account_name.localeCompare(b.account_name));
+  const allCore = cards.filter((c) => c.checked && c.coreTotal && c.coreSet === c.coreTotal).length;
+  const withPausedCore = cards.filter((c) => c.paused.some((p) => p.col.core)).length;
+  const draftsWaiting = data.rollouts.filter((r) => r.status === 'draft').reduce((n, r) => n + (r.counts.ready ?? 0) + (r.counts.needs_input ?? 0) + (r.counts.approved ?? 0), 0);
+  const names = (list: { col: Column; shops: PlaybookShop[] }[], blkShops: number) => list.map((e) => `${e.col.name.replace(/^Target collab: /, '')}${blkShops > 1 && e.shops.length < blkShops ? ` (${e.shops.map((sh) => sh.market ?? sh.shop_name).join(', ')})` : ''}`);
+  const checkAccount = (blk: (typeof cards)[number]) => run(`chk${blk.account_id}`, async () => { let last: PlaybookData | null = null; const errors: string[] = []; for (const sh of blk.shops) { const r = await api.playbookCheck(sh.shop_id, true); last = r; errors.push(...r.errors); } if (errors.length) setNotice(`Checked ${blk.account_name}: ${errors.join(' | ')}`); return last; });
+  const prepareAccount = (blk: (typeof cards)[number]) => run(`prep${blk.account_id}`, () => api.playbookPrepare({ shop_ids: blk.shops.map((sh) => sh.shop_id) }), (r) => openRollout(r.rollout.id, { shop: blk.shops[0].shop_id }));
 
   return (
     <>
@@ -134,6 +170,55 @@ export default function CruvaPage() {
       {data.mcp_configured && data.shops.length === 0 && <div className="banner info">No Cruva shops linked yet. Press <b>Sync shops</b>: every shop whose name matches an account links itself, the rest wait under More › Link shops.</div>}
       {data.unlinked.length > 0 && <div className="banner info">{data.unlinked.length} Cruva shop{data.unlinked.length === 1 ? '' : 's'} not linked to an account yet. <a href="#link" onClick={(e) => { e.preventDefault(); setDialog('link'); }}>Link them</a>.</div>}
 
+      {view === 'cards' && shops.length > 0 && (
+        <>
+          <div className="kpis" style={{ marginBottom: 10 }}>
+            <div className="kpi"><div className="v">{allCore}/{cards.filter((c) => c.checked).length}</div><div className="k">accounts with every core piece live</div></div>
+            <div className="kpi"><div className="v">{withPausedCore}</div><div className="k">accounts with a core bot paused</div></div>
+            <div className="kpi"><div className="v">{draftsWaiting}</div><div className="k">drafts waiting in rollouts</div></div>
+            <div className="kpi"><div className="v">{data.last_check_at ? fmtRelative(data.last_check_at) : '–'}</div><div className="k">last check{data.checking && data.progress ? ` · running ${data.progress.done}/${data.progress.total}` : ''}</div></div>
+          </div>
+          <div className="toolbar" style={{ marginBottom: 10 }}>
+            <div className="presets">
+              {([['all', 'All'], ['mine', 'Mine'], ['missing', 'Missing core'], ['paused', 'Paused'], ['unchecked', 'Not checked']] as const).map(([k, l]) => <button key={k} className={filter === k ? 'active' : ''} onClick={() => setFilter(k)}>{l}</button>)}
+            </div>
+            <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Account or AM" style={{ width: 180 }} />
+            <span className="sub">Worst setup first. Core = the six lifecycle bots, the brief, first outreach and AI replies; the rest counts as extras.</span>
+            <span style={{ flex: 1 }} />
+            <button className="small" onClick={() => setView('grid')}>Open grid</button>
+          </div>
+          <div className="cruva-cards">
+            {cards.map((c) => (
+              <div key={c.account_id} className={`card cruva-card ${c.light}`}>
+                <div className="cc-head">
+                  <span className={`light ${c.light === 'red' ? 'crit' : c.light === 'amber' ? 'warn' : c.light === 'green' ? 'good' : 'muted'}`} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <b>{c.account_name}</b> <span className="sub">{c.am_name ?? 'no AM'} · {c.shops.length} shop{c.shops.length === 1 ? '' : 's'}{c.markets.length ? ` · ${c.markets.join(' ')}` : ''}</span>
+                    {c.checked ? <div className="cc-bar"><div className="pace"><span className={c.light === 'green' ? 'good' : c.light === 'amber' ? 'warn' : 'crit'} style={{ width: `${c.coreTotal ? (c.coreSet / c.coreTotal) * 100 : 0}%` }} /></div><span className="sub">{c.coreSet}/{c.coreTotal} core{c.missingExtra.length ? ` · ${c.missingExtra.length} extra${c.missingExtra.length === 1 ? '' : 's'} missing` : ''}</span></div> : <div className="sub">Not checked yet</div>}
+                  </div>
+                </div>
+                <div className="cc-lines">
+                  {c.missingCore.length > 0 && <div><span className="badge crit">missing</span> {c.missingCore.map((e, i) => <a key={e.col.key} href="#cell" onClick={(ev) => { ev.preventDefault(); setCellOpen({ shop: e.shops[0], col: e.col, cell: cell(e.shops[0].shop_id, e.col) }); }}>{names([e], c.shops.length)[0]}{i < c.missingCore.length - 1 ? ', ' : ''}</a>)}</div>}
+                  {c.paused.length > 0 && <div><span className="badge warn">paused</span> {c.paused.map((e, i) => <a key={e.col.key} href="#cell" onClick={(ev) => { ev.preventDefault(); setCellOpen({ shop: e.shops[0], col: e.col, cell: cell(e.shops[0].shop_id, e.col) }); }}>{names([e], c.shops.length)[0]}{i < c.paused.length - 1 ? ', ' : ''}</a>)}</div>}
+                  {c.drift.length > 0 && <div><span className="badge muted">differs</span> {names(c.drift, c.shops.length).join(', ')}</div>}
+                  {c.errors > 0 && <div className="check-err sub">{c.errors} shop{c.errors === 1 ? '' : 's'} failed the last check</div>}
+                  {c.checked && !c.missingCore.length && !c.paused.length && !c.drift.length && <div className="sub">Every core piece is live.</div>}
+                  {c.learned.length > 0 && <div className="sub cc-learned">Known from the shop: {c.learned.some((l) => l.brief_link) ? 'brief link' : 'no brief link'} · {[...new Set(c.learned.flatMap((l) => l.categories))].length} categories · {[...new Set(c.learned.flatMap((l) => l.products))].length} products{c.learned.some((l) => l.sender_emails.length) ? ' · sender email' : ' · no sender email'}</div>}
+                </div>
+                <div className="actions cc-actions">
+                  {isAdmin && (c.drafting ? <button className="small primary" onClick={() => openRollout(c.drafting!.id, { shop: c.shops[0].shop_id })}>Continue rollout #{c.drafting.id}</button> : <button className="small primary" disabled={busy !== null || !c.checked || (!c.missingCore.length && !c.missingExtra.length && !c.paused.length && !c.drift.length)} onClick={() => prepareAccount(c)}>{busy === `prep${c.account_id}` ? 'Preparing…' : 'Prepare rollout'}</button>)}
+                  {isAdmin && <button className="small" disabled={busy !== null || data.checking} onClick={() => checkAccount(c)}>{busy === `chk${c.account_id}` ? 'Checking…' : 'Check now'}</button>}
+                  <button className="small" onClick={() => { groups.setAll([c.account_id], true); setView('grid'); }}>Grid</button>
+                </div>
+              </div>
+            ))}
+            {cards.length === 0 && <div className="empty">No accounts match.</div>}
+          </div>
+        </>
+      )}
+
+      {view === 'grid' && (<>
+      <div className="toolbar" style={{ marginBottom: 6 }}><button className="small" onClick={() => setView('cards')}>◂ Cards</button><span className="sub">The full matrix, every item per shop.</span></div>
       {shops.length > 0 && <GroupsHead items={accountBlocks.length} lights={accountBlocks.map((b) => b.light)} open={accountBlocks.every((b) => groups.isOpen(b.account_id))} onAll={(o) => groups.setAll(accountBlocks.map((b) => b.account_id), o)} />}
       <div className="cruva-legend" style={{ marginBottom: 8 }}>
         <span>Click an account to open its shops, a cell for the detail. Tick shops and press Prepare to draft what is missing.</span>
@@ -192,6 +277,8 @@ export default function CruvaPage() {
           <button className="primary" disabled={!ticked.length || busy !== null} onClick={() => run('prep', () => api.playbookPrepare({ shop_ids: ticked.map((s) => s.shop_id) }), (r) => { setSel(new Set()); openRollout(r.rollout.id); })}>{busy === 'prep' ? 'Preparing…' : `Prepare rollout${totals.missing + totals.paused + totals.drift ? ` · ${totals.missing + totals.paused + totals.drift} drafts` : ''}`}</button>
         </div>
       )}
+
+      </>)}
 
       {cellOpen && <Modal title={`${cellOpen.col.name} · ${cellOpen.shop.shop_name}`} onClose={() => setCellOpen(null)}><CellDetail {...cellOpen} data={data} isAdmin={isAdmin} run={run} onClose={() => setCellOpen(null)} /></Modal>}
       {dialog === 'rollouts' && <Modal title="Rollouts" wide onClose={() => setDialog(null)}>

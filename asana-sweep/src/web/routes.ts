@@ -3394,6 +3394,17 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (b.payload !== undefined) { try { payload = typeof b.payload === 'string' ? (JSON.parse(b.payload) as Record<string, unknown>) : (b.payload as Record<string, unknown>); } catch { throw new HttpError(400, 'Payload must be valid JSON.'); } }
     try { res.json(playbook.updateDraft(idParam(req), { copy: b.copy === undefined ? undefined : (b.copy === null ? null : String(b.copy)), payload, status: b.status === undefined ? undefined : (String(b.status) as PlaybookDraftStatus), start_after: b.start_after === undefined ? undefined : bool(b.start_after, false), save_override: b.save_override === undefined ? undefined : bool(b.save_override, false), name: optText(b.name) ?? undefined })); } catch (err) { bad(err); }
   });
+  r.put('/playbook/rollouts/:id/walk', (req, res) => {
+    const b = (req.body ?? {}) as { shop_id?: unknown; index?: unknown };
+    if (typeof b.shop_id !== 'string' || !Number.isFinite(Number(b.index))) throw new HttpError(400, 'shop_id and index are required');
+    res.json({ walk: playbook.setWalkIndex(idParam(req), b.shop_id, Number(b.index)) });
+  });
+  r.post('/playbook/drafts/:id/english', async (req, res) => {
+    try { res.json(await playbook.englishForDraft(idParam(req))); } catch (err) { bad(err); }
+  });
+  r.post('/playbook/drafts/:id/from-english', async (req, res) => {
+    try { res.json(await playbook.copyFromEnglish(idParam(req), String((req.body ?? {}).english ?? ''))); } catch (err) { bad(err); }
+  });
   r.post('/playbook/drafts/:id/rewrite', async (req, res) => {
     try { res.json(await playbook.rewriteDraft(idParam(req), optText((req.body ?? {}).instruction))); } catch (err) { bad(err); }
   });

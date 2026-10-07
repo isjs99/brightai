@@ -7,6 +7,8 @@ import { liveEvents } from '../live/events.js';
 import { log } from '../logger.js';
 import { config } from '../config.js';
 import { draftWithClaude } from '../inbox/llm.js';
+import { textHash, translateToEnglish } from '../inbox/translate.js';
+import { fromEnglishPrompt, WALK_STEPS } from './walk.js';
 
 /**
  * Cruva best-practice rollout. The library (seed.ts, editable) lists what every shop should have; the
@@ -450,10 +452,48 @@ export class PlaybookEngine {
     return { rollout: this.q.getRollout(rollout.id)!, drafts };
   }
 
-  drafts(rolloutId: number): { rollout: PlaybookRollout; drafts: PlaybookDraft[] } {
+  drafts(rolloutId: number): { rollout: PlaybookRollout; drafts: PlaybookDraft[]; walk: Record<string, number>; steps: typeof WALK_STEPS } {
     const rollout = this.q.getRollout(rolloutId);
     if (!rollout) throw new Error('Rollout not found');
-    return { rollout, drafts: this.q.listRolloutDrafts(rolloutId) };
+    return { rollout, drafts: this.q.listRolloutDrafts(rolloutId), walk: this.walkState(rolloutId), steps: WALK_STEPS };
+  }
+
+  /** Where each shop's walk through a rollout stands (step index), shared between the people reviewing it. */
+  walkState(rolloutId: number): Record<string, number> {
+    try { return JSON.parse(this.q.getSetting(`playbook_walk:${rolloutId}`, '') || '{}') as Record<string, number>; } catch { return {}; }
+  }
+
+  setWalkIndex(rolloutId: number, shopId: string, index: number): Record<string, number> {
+    const state = { ...this.walkState(rolloutId), [shopId]: Math.max(0, Math.floor(index)) };
+    this.q.setSetting(`playbook_walk:${rolloutId}`, JSON.stringify(state));
+    return state;
+  }
+
+  /** The draft's copy in English for the reviewer who does not read the shop's language (kept per text). */
+  async englishForDraft(id: number): Promise<{ english: string | null }> {
+    const d = this.q.getRolloutDraft(id);
+    if (!d) throw new Error('Draft not found');
+    if (!d.copy) return { english: null };
+    if (d.language === 'en') return { english: d.copy };
+    const [english] = await translateToEnglish(this.q, [d.copy], { accountId: d.account_id, ...(this.llm ? { llm: this.llm } : {}) });
+    return { english };
+  }
+
+  /** The reviewer edited the English: render the shop-language copy again from it, placeholders intact. */
+  async copyFromEnglish(id: number, english: string): Promise<PlaybookDraft> {
+    const d = this.q.getRolloutDraft(id);
+    if (!d) throw new Error('Draft not found');
+    const text = english.trim();
+    if (!text) throw new Error('The English text is empty.');
+    if (d.language === 'en') return this.updateDraft(id, { copy: text });
+    const llm = this.llm !== undefined ? this.llm : config.anthropicApiKey ? (s: string, u: string) => draftWithClaude(s, u, { maxTokens: 900, feature: 'playbook', accountId: d.account_id }) : null;
+    if (!llm) throw new Error('ANTHROPIC_API_KEY is not set, so the English cannot be rendered back.');
+    const { system, user } = fromEnglishPrompt(d.language, text, brandOf(d.shop_name));
+    const out = (await llm(system, user)).trim().replace(/^["“]|["”]$/g, '');
+    const updated = this.updateDraft(id, { copy: out });
+    // The edited English is the translation of the new copy: keep it so the walk shows it without another call.
+    this.q.putTranslation(textHash(out), out, text);
+    return updated;
   }
 
   /** Reviewer edits: the copy, the whole payload, approval, start-after, save-as-override. Blockers are re-read from the payload. */

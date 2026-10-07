@@ -2273,6 +2273,8 @@ export interface PlaybookDraft {
   updated_at: string;
 }
 
+export interface PlaybookWalkStep { key: string; title: string; why: string }
+
 export interface PlaybookData {
   items: PlaybookItem[];
   shops: PlaybookShop[];
