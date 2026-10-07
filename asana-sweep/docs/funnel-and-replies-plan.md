@@ -184,3 +184,100 @@ Tests: a thread decided under master-off that sends after the switch without a s
 - Settings › Connections: master switch on (check it is on; the banner on the Replies page says if not).
 - Press "Retry errors" on Belively so the credit-era errors re-run.
 - Watch the Belively row: `auto_today` should show 1 or 2 within an hour if a creator writes a new message. If it stays at 0 and new messages arrive, the decisions column tells us which gate, and that confirms the order above.
+
+---
+
+## Part 3: the Cruva page, cleaner, with Prepare rollout on every card
+
+### 3.1 What is wrong with the page today
+
+- Every account row is red because the score counts 26 or 27 items of which most shops have 5 or 6. The colour says nothing: twenty-four red dots are no signal.
+- The grid shows 26 columns per shop, mostly "…" cells. The AM has to scroll sideways to learn anything, and the columns are the library's internal keys ("Unful. 7d", "No GMV").
+- Prepare is one button for the ticked shops at the top; the result is a flat table of drafts in a separate view. There is no way to go from "Belively is missing the Delivered bot" to "fix it" in one click.
+- "Check all now" reads 53 shops through the MCP and takes minutes; nothing shows progress per shop.
+
+### 3.2 The new page
+
+One card per account, no grid by default.
+
+- **Card head**: account, AM, markets, the shops as small flags. A coverage bar that only counts the **core** items (the six lifecycle bots, the brief, the first outreach, the AI auto-replies check: nine things), with the colour from that. The remaining items are "extras" and show as a count.
+- **Three lines under the bar**: what is missing (core first, named in words: "Delivered bot, First sale bot, creator brief"), what is paused ("2 bots paused: Shipped, Rejected"), what drifted from the library. Each a link into the walk at that step.
+- **Buttons on the card**: **Prepare rollout** (opens the walk for this account's shops, pre-ticked to the missing and paused core items), **Check now** (this account only, with a spinner on the card), **Open grid** (the current 26-column view, per account, for the people who want it).
+- **Learned strip** (from Part 1 once built): best hook, top products, top creator this week, so the card tells the AM what the funnel is saying before they open anything.
+- **Top of page**: the counts that matter (accounts with every core item live, accounts with a paused core bot, drafts waiting for approval, last check), the Check all button with a per-shop progress line while it runs, and a filter: my accounts, missing core, paused, by market.
+- **Sorting**: lowest core coverage first, so the worst setup is at the top.
+
+### 3.3 Prepare rollout on a card
+
+Pressing it on the card does what the top button does today for that account's shops, then opens the **walk** from Part 1, section 1.5: one step per screen in the order a creator experiences them, local language on the left, English on the right, approve / skip / rewrite, resume where you left off. The existing rollout machinery (`prepare`, `updateDraft`, `rewriteDraft`, `runRollout`, undo) stays; the walk is a new front on it, so nothing already approved or rolled out is lost.
+
+Two additions to the machinery for the walk:
+
+- A **step order** on library items (`position` in the seed, editable), so the walk and the card lines use the funnel order rather than the kind order.
+- **Per-shop progress** on a rollout (`walk_index` per shop), so two AMs can share a rollout and each resumes their own shops.
+
+### 3.4 Build order
+
+1. Card view with core coverage, the three lines, Check now per account, filters and sorting. The grid moves behind "Open grid". One session.
+2. Prepare rollout on the card → the walk (section 1.5), with the step order and per-shop progress. One session.
+3. Learned strip when Part 1 lands.
+
+---
+
+## Part 4: the reply audit, every few days, with a ranking and a report that fixes itself
+
+### 4.1 What it is for
+
+Automatic replies go out on Haiku, a few hundred a week across accounts. Nobody reads them all. The audit reads a sample on a schedule, scores each reply against a fixed rubric, ranks accounts and intents, posts the report, and turns what it found into library notes so the next replies are better. The loop closes without a person, and the person sees the report and the drift.
+
+### 4.2 What gets audited
+
+- **Sample**: every three days (Mon, Thu, 07:00 shop time), per account and channel, the last 72 hours of `auto_sent` replies plus every reply a person marked wrong. Up to 25 per account and channel, chosen to cover every intent that occurred (stratified), newest first within an intent. Drafts a person edited before sending are included with the diff, because the edit is the strongest signal of what the model gets wrong.
+- **Facts the auditor sees**: the creator's or buyer's message, the thread before it (last six messages), the context the model had (library notes, promotions, products, samples, commission: the same `ReplyContext`), the reply that went out, the intent and confidence, the language, and whether the creator wrote back and what (a reply that got "??" or "that is not what I asked" back is a fail by itself).
+- **Rubric**, each 0 to 2, so a reply scores 0 to 12:
+  1. Answers the question that was asked.
+  2. Facts right: nothing promised or stated that is not in the context (the auditor lists any claim it cannot find in the facts).
+  3. Right language and register (du/Sie, tu/vous) and no mixed language.
+  4. Tone: warm, short, no filler, no sign-off block, no placeholders left in.
+  5. Policy: no retainer, fee, free product beyond the sample, commission other than the account's, no refund or compensation promise in CS.
+  6. Next step clear: what the creator should do, or what we will do and when.
+  A reply with 0 on facts or policy is a **fail** regardless of total.
+- **Auditor model**: Sonnet, one call per reply, JSON out with the six scores, the fail flag, one sentence why, the claim it could not verify, and a suggested library note (or null). About 3k tokens a reply: 25 replies × 20 account-channels × $0.01 ≈ $5 a run, $10 a week. Feature `audit`, not automatic in the budget sense (it is scheduled, but it is the thing that protects the automatic spend, so it runs under its own small budget).
+
+### 4.3 The ranking
+
+- **Per account and channel**: mean score, fail rate, sample size, trend against the previous audit (arrow), and the three worst replies with their one-sentence why.
+- **Per intent across accounts**: the same, so "sample_status is 9.8 but deal_terms is 6.1" is visible without opening accounts.
+- **Per language**: catches a market where the register is wrong.
+- **Per library note**: which notes were cited by the auditor as the reason a reply was right or wrong, so a bad note is found.
+- Ranked worst first. An account whose fail rate is over 10% or mean under 7 is flagged red; its policy gets a suggestion (switch to draft for that intent, add to the never list, or the note to add).
+
+### 4.4 The report
+
+- A page under Accounts › Replies › **Audit**: the latest run with the ranking tables, the worst replies with the full thread and the auditor's reasoning, and the history of runs so the trend is a chart.
+- A Slack post to the incidents default channel on each run: five lines, the overall score and trend, the worst account, the worst intent, the number of library notes added, the link.
+- Every audited reply gets a badge in the account's log ("audit 11/12" or "audit fail: promised free shipping") so the AM sees it where they already look.
+
+### 4.5 Self-audit: what the audit changes on its own
+
+Everything below is done by the run itself, logged on the report, and reversible from it:
+
+1. **Library notes**: when the auditor suggests a note and two or more replies in the run would have been fixed by it, the note is added to the context library for that account and language, marked "from audit run N", enabled. The report lists the notes added with an Undo. This is the same mechanism as "Mark wrong · teach", just without the person.
+2. **Prompt rules**: a fail pattern that is not account-specific (mixed language, a sign-off block, a placeholder left in) is added as a line to the reply prompt's standing rules in a `reply_rules` setting the renderer reads. Same logging and undo.
+3. **Policy nudges**: an intent with a fail rate over 20% on an account is switched to draft for that account until the next audit scores it over 8 again; the report says so and the Replies page shows "paused by the audit" on that intent. Nothing is switched to automatic by the audit, only away from it.
+4. **Re-audit of the fix**: the next run reports whether the notes added last time reduced the fails they were meant to reduce. Notes that did not help after two runs are disabled and the report says why.
+
+What the audit never does: send anything, delete a note a person wrote, change the cap or the master switch.
+
+### 4.6 Preventing the same mistakes: the rubric feeds the writer
+
+The six rubric points become a self-check inside the reply prompt (the writer answers them for its own draft before returning it, in the JSON). A reply that fails its own facts or policy check is escalated with the reason instead of sent. This costs about 150 output tokens a reply and is the cheapest part of the whole plan; the audit then measures whether the self-check is honest, which is the point of keeping the audit separate from the writer.
+
+### 4.7 Build order
+
+1. Audit run: the sampler, the auditor call and parser, the `reply_audits` and `reply_audit_items` tables, the schedule, the Slack post. One session.
+2. The Audit page with the ranking tables, worst replies and history; the badge in the log. One session.
+3. Self-audit actions: library notes with undo, prompt rules, policy nudges, re-audit of the fix. One session.
+4. The writer's self-check. Half a session, with a test that a fabricated claim is caught.
+
+Tests throughout: the sampler covers every intent; a reply that promises a fee fails on policy; a note is only added when two replies would benefit; the nudge switches an intent to draft and back; the Slack text; the self-check escalates a fabricated claim.
