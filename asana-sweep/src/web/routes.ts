@@ -2905,7 +2905,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   r.post('/targets/seen', (req, res) => { targets.markSeen(actorOf(req)); res.json(targets.data(optText(req.body?.month), actorOf(req))); });
   r.post('/targets/refresh', async (req, res) => {
     const b = (req.body ?? {}) as Record<string, unknown>;
-    const r2 = await targets.refresh({ leadId: b.lead_id !== undefined ? Number(b.lead_id) : undefined, useLlm: b.use_llm === undefined ? undefined : bool(b.use_llm, true) });
+    const r2 = await targets.refresh({ leadId: b.lead_id !== undefined ? Number(b.lead_id) : undefined, useLlm: b.use_llm === undefined ? undefined : bool(b.use_llm, true), force: true });
     res.json({ ...r2, ...targets.data(optText(b.month), actorOf(req)) });
   });
   r.post('/targets/:leadId/analyse', async (req, res) => {

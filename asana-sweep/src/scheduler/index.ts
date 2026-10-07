@@ -158,8 +158,9 @@ export class Scheduler {
     // Creator inbox through Cruva for every linked shop.
     this.cruvaInbox.start();
     // Targets: every open lead re-read daily at 06:40 (after the evidence index and the lead sheet sync).
-    this.targetsTask = cron.schedule('40 6 * * *', () => void this.targets.refresh().catch((err) => log.warn(`Targets refresh: ${(err as Error).message}`)), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
-    setTimeout(() => void this.targets.refresh({ useLlm: false }).catch(() => undefined), 60000);
+    this.targetsTask = cron.schedule('40 6 * * *', () => void this.targets.refresh({ force: true }).catch((err) => log.warn(`Targets refresh: ${(err as Error).message}`)), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
+    // After boot only the leads without a recent read are re-read (rules only), three minutes in, after the sources index.
+    setTimeout(() => void this.targets.refresh({ useLlm: false }).catch(() => undefined), 180000);
     // Competitor intelligence: weekly sweep and digest on the day and time in settings (Monday by default).
     this.competitors.start();
     // Report queue: scheduled reports and approved autosends, every 10 minutes.

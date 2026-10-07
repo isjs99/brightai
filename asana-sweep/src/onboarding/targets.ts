@@ -69,7 +69,10 @@ export function gatherTargetContext(q: Queries, lead: Lead, cache?: TargetContex
     return true;
   });
   const query = `${name} ${domain ?? ''} proposal contract pricing retainer commission call next steps`;
-  const hits = searchEvidence(rows.map((r) => ({ kind: r.kind, title: r.title, text: r.text, url: r.url, occurred_at: r.occurred_at })), query, 8);
+  // Score the newest 40 matching rows on their first 12k characters: enough for the ten sources shown, and a
+  // bounded amount of tokenising per lead (a common brand name can match hundreds of transcripts).
+  const recent = [...rows].sort((a, b) => (b.occurred_at ?? '').localeCompare(a.occurred_at ?? '')).slice(0, 40);
+  const hits = searchEvidence(recent.map((r) => ({ kind: r.kind, title: r.title, text: r.text.slice(0, 12000), url: r.url, occurred_at: r.occurred_at })), query, 8);
   const sources: TargetSource[] = hits.map((h) => ({ kind: h.kind, title: h.title, occurred_at: h.occurred_at, url: h.url, snippet: h.snippet }));
   // Rows that name the lead but did not score (short notes): keep the newest few as context too.
   for (const r of rows.filter((x) => !sources.some((s) => s.title === x.title)).slice(0, 4)) sources.push({ kind: r.kind, title: r.title, occurred_at: r.occurred_at, url: r.url, snippet: r.text.replace(/\s+/g, ' ').slice(0, 300) });
@@ -156,14 +159,17 @@ export class Targets {
   }
 
   /** Daily: every open lead gets a fresh read (Claude for the ones that moved or are new, rules for the rest). */
-  async refresh(opts: { leadId?: number; useLlm?: boolean } = {}): Promise<{ analysed: number; errors: string[] }> {
+  async refresh(opts: { leadId?: number; useLlm?: boolean; force?: boolean } = {}): Promise<{ analysed: number; errors: string[] }> {
     if (this.refreshing) return { analysed: 0, errors: ['Already refreshing'] };
     this.refreshing = true;
     const errors: string[] = [];
     let analysed = 0;
+    const startedAt = Date.now();
     try {
       const states = this.q.listTargetStates();
-      const leads = this.q.listLeads(false).filter((l) => (!opts.leadId || l.id === opts.leadId) && (opts.leadId || (!l.signed && states.get(l.id)?.status !== 'lost')));
+      // One lead on demand, or every open lead whose read is older than 12 hours or whose row changed since; the rest keep theirs.
+      const freshFor = 12 * 3600000;
+      const leads = this.q.listLeads(false).filter((l) => (!opts.leadId || l.id === opts.leadId) && (opts.leadId || (!l.signed && states.get(l.id)?.status !== 'lost'))).filter((l) => { if (opts.leadId || opts.force) return true; const st = states.get(l.id); return !st?.analysis || !st.analysis_at || l.updated_at > st.analysis_at || Date.now() - Date.parse(st.analysis_at) > freshFor; });
       let llmBudget = 80;
       const cache = targetContextCache(this.q);
       for (const lead of leads) {
@@ -180,6 +186,7 @@ export class Targets {
       }
       this.q.setSetting('targets_last_refresh_at', new Date().toISOString());
       this.q.setSetting('targets_last_refresh_error', errors.join(' · ').slice(0, 500));
+      log.info(`Targets refresh: ${analysed} lead(s) read in ${Math.round((Date.now() - startedAt) / 1000)}s${errors.length ? `, ${errors.length} error(s)` : ''}`);
     } finally {
       this.refreshing = false;
       liveEvents.emitUpdate({ kind: 'leads' });

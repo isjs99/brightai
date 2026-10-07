@@ -42,7 +42,7 @@ export function searchEvidence(rows: { kind: string; title: string; text: string
   for (const r of rows) {
     const titleT = new Set(tokens(r.title));
     let best: { score: number; snippet: string } | null = null;
-    for (const w of windows(r.text)) {
+    for (const w of windows(r.text.length > 40000 ? r.text.slice(0, 40000) : r.text)) {
       const wt = tokens(w);
       const set = new Set(wt);
       let hits = 0;
