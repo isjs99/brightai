@@ -1829,6 +1829,12 @@ export class Queries {
   }
 
   /** Threads waiting on an answer: open, last word from them, with a message id. One query for the whole dashboard or one account. */
+  /** One thread by its shop, channel and platform id, or null. */
+  findConversation(ttsShopId: string, channel: InboxConversation['channel'], conversationId: string): InboxConversation | null {
+    const r = this.db.prepare(`${Queries.CONV_SELECT} WHERE c.tts_shop_id = ? AND c.channel = ? AND c.conversation_id = ?`).get(ttsShopId, channel, conversationId) as Row | undefined;
+    return r ? this.rowToConversation(r) : null;
+  }
+
   listOpenConversations(opts: { channel?: InboxConversation['channel']; accountId?: number; limit?: number } = {}): InboxConversation[] {
     const where: string[] = ["c.status != 'closed'", "c.last_sender = 'them'", 'c.last_message_id IS NOT NULL'];
     const params: unknown[] = [];
@@ -1907,6 +1913,11 @@ export class Queries {
         status = CASE WHEN ? THEN 'open' ELSE status END, synced_at = ?, updated_at = CASE WHEN ? THEN ? ELSE updated_at END WHERE id = ?`)
       .run(c.counterpart_name ?? null, c.counterpart_id ?? null, c.unread_count ?? null, c.can_send === undefined ? null : c.can_send ? 1 : 0, c.last_message_at ?? null, c.last_message_text ?? null, c.last_sender ?? null, c.last_message_id ?? null, reopen ? 1 : 0, now, changed ? 1 : 0, now, prev.id);
     return { id: prev.id, changed };
+  }
+
+  /** Stamp a thread as read from the platform just now, whether or not anything in it changed. */
+  markConversationSynced(id: number, now = new Date().toISOString()): void {
+    this.db.prepare('UPDATE inbox_conversations SET synced_at = ? WHERE id = ?').run(now, id);
   }
 
   setConversationStatus(id: number, status: InboxConversation['status']): void {

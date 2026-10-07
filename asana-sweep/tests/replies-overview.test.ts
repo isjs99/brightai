@@ -31,12 +31,13 @@ it('builds the replies overview for 12 accounts and 2,400 open threads in one pa
   const t3 = performance.now();
   const mine = rows.filter((r) => ids.includes(r.account_id));
   expect(mine).toHaveLength(24);
-  // Threads without a decision count as waiting only inside the policy's 48-hour window: the 26 even-hour ones older than that drop out.
-  expect([...new Set(mine.map((r) => r.waiting))]).toEqual([74]);
+  // Threads without a decision count as waiting only inside the policy's window: two days for buyers (the 26 even-hour ones older than that drop out), a week for creators (all 100 within it).
+  expect(new Set(mine.filter((r) => r.channel === 'cs').map((r) => r.waiting))).toEqual(new Set([74]));
+  expect(new Set(mine.filter((r) => r.channel === 'affiliate').map((r) => r.waiting))).toEqual(new Set([100]));
   expect([...new Set(mine.map((r) => r.escalated))]).toEqual([25]);
   expect(waiting).toHaveLength(40);
   expect(waiting[0].reason).not.toBeUndefined();
-  expect(d.counts).toMatchObject({ waiting: 74, escalated: 25, drafts: 25 });
+  expect(d.counts).toMatchObject({ waiting: 100, escalated: 25, drafts: 34 });
   expect(d.knowledge.find((k) => k.label === 'Conversation history')!.detail).toMatch(/^100 creator thread/);
   // Three queries per account and channel instead of two per thread: well under a second even on a slow machine.
   expect(t1 - t0).toBeLessThan(3000);

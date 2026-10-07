@@ -1768,6 +1768,14 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 46,
+    name: 'creator replies keep a week',
+    up: (db) => {
+      // The two-day limit meant a creator who wrote on Friday was ignored by Monday. Policies still on the old default move to a week; anything a person changed stays.
+      db.exec(`UPDATE reply_policies SET max_age_hours = 168 WHERE channel = 'affiliate' AND max_age_hours = 48`);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

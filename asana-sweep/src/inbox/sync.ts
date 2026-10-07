@@ -7,7 +7,7 @@ import { appCredentials, shopCredentials } from '../tts/promotions.js';
 import { config } from '../config.js';
 import type { InboxConversation, InboxMessage, InboxSettings } from '../sweep/types.js';
 import { guessLanguage } from './language.js';
-import { processConversations } from './replies.js';
+import { processConversations, sweepDeferred } from './replies.js';
 
 let syncing = false;
 
@@ -153,6 +153,8 @@ export async function syncInbox(q: Queries, client: TtsClient = tts): Promise<{ 
     }
     const decisions = await processConversations(q, [...new Set(changedIds)], { client });
     result.auto_replies = decisions.auto_sent;
+    const swept = await sweepDeferred(q, { source: 'tts', deps: { client } });
+    result.auto_replies += swept.result.auto_sent;
     q.setSetting('inbox_last_sync_at', new Date().toISOString());
     q.setSetting('inbox_last_sync_error', errors.length ? errors.slice(0, 3).join(' | ') : '');
     if (errors.length && result.conversations === 0) {

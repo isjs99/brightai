@@ -3,7 +3,7 @@ import type { InboxMessage } from '../sweep/types.js';
 import { cruvaMcp, type CruvaMcp } from '../cruva/mcp.js';
 import { marketOfShopName } from '../gmv/market.js';
 import { guessLanguage } from './language.js';
-import { processConversations } from './replies.js';
+import { processConversations, sweepDeferred, type ProcessDeps } from './replies.js';
 import { liveEvents } from '../live/events.js';
 import { log } from '../logger.js';
 
@@ -55,7 +55,7 @@ export function parseDms(text: string): CruvaDm[] {
   return out.map((d) => ({ ...d, text: d.text.trim() })).filter((d) => d.message_id);
 }
 
-export interface CruvaInboxDeps { mcp?: CruvaMcp; maxThreadsPerShop?: number; pages?: number }
+export interface CruvaInboxDeps { mcp?: CruvaMcp; maxThreadsPerShop?: number; pages?: number; /** false skips the deferred sweep (tests). */ sweep?: boolean; processDeps?: ProcessDeps }
 
 let syncing = false;
 
@@ -70,7 +70,7 @@ export async function syncCruvaInbox(q: Queries, opts: { shopId?: string; accoun
   const changed: number[] = [];
   try {
     const shops = q.listShops('cruva').filter((s) => s.account_id && (!opts.shopId || s.shop_id === opts.shopId) && (!opts.accountId || s.account_id === opts.accountId));
-    const maxThreads = deps.maxThreadsPerShop ?? 25;
+    const maxThreads = deps.maxThreadsPerShop ?? 100;
     for (const shop of shops) {
       try {
         const seen = new Map<string, CruvaInboxRow>();
@@ -84,23 +84,30 @@ export async function syncCruvaInbox(q: Queries, opts: { shopId?: string; accoun
         }
         try { for (const r of parseInbox(await mcp.call('list_inbox', { shop_id: shop.shop_id, conversation_status: 'ALL', page_size: 50 })).rows) if (!seen.has(r.conversation_id)) seen.set(r.conversation_id, r); } catch { /* the UNREPLIED page is enough */ }
         result.shops += 1;
-        let read = 0;
+        let read = 0; let skippedForBudget = 0;
         for (const row of seen.values()) {
+          // Cruva keeps unread > 0 until the brand answers, so an unanswered thread would be re-read every pass and
+          // starve the ones after it. A thread read in the last 30 minutes with the same unread count waits its turn.
+          const before = q.findConversation(shop.shop_id, 'affiliate', row.conversation_id);
+          const freshRead = Boolean(before && before.last_message_at && Date.now() - Date.parse(before.synced_at) < 30 * 60000 && before.unread_count === row.unread && before.counterpart_name === row.handle);
           const up = q.upsertConversation({ tts_shop_id: shop.shop_id, channel: 'affiliate', conversation_id: row.conversation_id, counterpart_name: row.handle, unread_count: row.unread, can_send: true, source: 'cruva' });
           result.conversations += 1;
           const prev = q.getConversation(up.id)!;
           const stale = !prev.last_message_at || Date.now() - Date.parse(prev.updated_at) > 12 * 3600000;
-          if (!(up.changed || row.unread > 0 || stale) || read >= maxThreads) continue;
+          if (!(up.changed || row.unread > 0 || stale) || freshRead) continue;
+          if (read >= maxThreads) { skippedForBudget += 1; continue; }
           read += 1;
           let dms: CruvaDm[] = [];
           try { dms = parseDms(await mcp.call('read_dms', { shop_id: shop.shop_id, handle: row.handle })); } catch (err) { result.errors.push(`${shop.shop_name} @${row.handle}: ${(err as Error).message.slice(0, 160)}`); continue; }
           const rows = dms.map((d) => ({ message_id: d.message_id, sender_role: (d.sender === 'brand' ? 'us' : d.sender === 'creator' ? 'them' : 'them') as InboxMessage['sender_role'], sender_name: d.sender === 'brand' ? 'brand' : row.handle, type: 'TEXT', text: d.text || null, created_at: d.created_at }));
           const added = q.upsertMessages(up.id, rows);
+          q.markConversationSynced(up.id);
           result.new_messages += added;
           const newest = [...rows].sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
           if (newest) q.upsertConversation({ tts_shop_id: shop.shop_id, channel: 'affiliate', conversation_id: row.conversation_id, last_message_at: newest.created_at, last_message_text: newest.text, last_sender: newest.sender_role, last_message_id: newest.message_id, unread_count: row.unread, source: 'cruva' });
           if (added || up.changed) changed.push(up.id);
         }
+        if (skippedForBudget) log.warn(`Cruva inbox: ${shop.shop_name} has ${skippedForBudget} thread(s) past the ${maxThreads}-thread read budget; they are read on the next pass`);
       } catch (err) {
         result.errors.push(`${shop.shop_name}: ${(err as Error).message.slice(0, 200)}`);
       }
@@ -112,6 +119,11 @@ export async function syncCruvaInbox(q: Queries, opts: { shopId?: string; accoun
     if (changed.length) {
       const decisions = await processConversations(q, [...new Set(changed)]);
       result.auto_replies = decisions.auto_sent;
+    }
+    // Then everything still open that no pass has settled: deferred decisions and threads that never got a read.
+    if (deps.sweep !== false) {
+      const swept = await sweepDeferred(q, { accountId: opts.accountId, channel: 'affiliate', source: 'cruva', deps: deps.processDeps });
+      result.auto_replies += swept.result.auto_sent;
     }
     q.setSetting('cruva_inbox_last_sync_at', new Date().toISOString());
     q.setSetting('cruva_inbox_last_sync_error', result.errors.length ? result.errors.slice(0, 3).join(' | ').slice(0, 500) : '');

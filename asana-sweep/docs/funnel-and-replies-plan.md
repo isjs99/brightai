@@ -107,14 +107,16 @@ Once a shop has been walked, the weekly job keeps it current without the AM:
 
 ### 1.7 Build order
 
-1. **Content pull and ranking** (`src/playbook/content.ts`): the Cruva and FastMoss reads, the 5% cut, the table `playbook_content` (shop, window, video id, creator, product, gmv, views, script, rank). Two days.
-2. **Profile** (`src/playbook/profile.ts`): the Claude pass, the JSON, the evidence ids, the weekly cron, the shop card showing the profile. Two days.
-3. **Placeholders and the three new items** in `seed.ts` and `payloadFor`. One day.
-4. **The walk** (`Cruva.tsx`, a new `Walk` view): one step per screen, two columns, approve/skip/rewrite, resume. Three days.
-5. **Pending updates and the Monday post**. Two days.
+The sizes below are sessions of work in this tool, not calendar days; the whole of Part 1 is three or four sessions. What takes calendar time is the AM walking the steps per shop and a few Mondays of the learning job before the profile is worth trusting.
+
+1. **Content pull and ranking** (`src/playbook/content.ts`): the Cruva and FastMoss reads, the 5% cut, the table `playbook_content` (shop, window, video id, creator, product, gmv, views, script, rank). One session, together with step 2.
+2. **Profile** (`src/playbook/profile.ts`): the Claude pass, the JSON, the evidence ids, the weekly cron, the shop card showing the profile.
+3. **Placeholders and the three new items** in `seed.ts` and `payloadFor`. Half a session.
+4. **The walk** (`Cruva.tsx`, a new `Walk` view): one step per screen, two columns, approve/skip/rewrite, resume. One session.
+5. **Pending updates and the Monday post**. Half a session.
 6. Tests for the ranking (ties, small shops, the per-view cut), the profile parser (never invents a number), the placeholder substitution in all five languages, the diff that decides "material change".
 
-Two weeks of work in total. Steps 1 to 3 are useful on their own: the profile alone tells the AM what to brief.
+Steps 1 to 3 are useful on their own: the profile alone tells the AM what to brief.
 
 ### 1.8 What needs confirming before step 1
 
@@ -163,7 +165,7 @@ Step 5. Anything older than two days is skipped as stale. Most of Belively's wai
 
 There is a fifth thing to rule out, not a bug: the default "never" list for affiliate includes every intent that escalates by definition (payment, complaint, legal, negotiation), and confidence under 60% escalates. On a creator thread that is often "where is my sample" (fine) but also often "can I get a higher commission" (escalates). If after the fixes most decisions read `escalated`, the never list is the dial.
 
-### 2.3 The fix list
+### 2.3 The fix list (built on 7 October: items 1 to 5; item 6 is the existing Send draft button)
 
 In the order to do them. All in `src/inbox/replies.ts` and `src/inbox/cruva-inbox.ts`, with tests.
 
@@ -174,7 +176,7 @@ In the order to do them. All in `src/inbox/replies.ts` and `src/inbox/cruva-inbo
 5. **A "Why nothing sent" panel on the Replies page per account**: counts of open threads by the gate that stopped them (deferred by master switch, capped, quiet, escalated by intent, under 60%, older than limit, do-not-contact, burst wait, send failed) with the top three threads under each. The data is already computed by `replyBlocker`; this groups it. And a **Run now** button that triggers the sync and the sweep for that account and shows the decisions it took.
 6. **Send check**: a "send test DM to myself" on the Connections page that calls Cruva `send_dm` on a thread you pick, so a Cruva-side send failure is visible without waiting for a real creator.
 
-Items 1 to 3 are a day. Items 4 to 6 another day. Tests: a thread decided under master-off that sends after the switch without a second Claude call; a burst-waited message that goes out ten minutes later; forty unreplied threads on one shop all read within two syncs; the 7-day default on affiliate; the panel counts.
+Tests: a thread decided under master-off that sends after the switch without a second Claude call; a burst-waited message that goes out ten minutes later; forty unreplied threads on one shop all read within two syncs; the 7-day default on affiliate; the panel counts.
 
 ### 2.4 What to do today, before any of that ships
 

@@ -70,7 +70,7 @@ export const ONLY_FILTERS: Record<InboxChannel, { key: string; label: string }[]
 export const MARKET_TZ: Record<string, string> = { DE: 'Europe/Berlin', AT: 'Europe/Vienna', CH: 'Europe/Zurich', FR: 'Europe/Paris', IT: 'Europe/Rome', ES: 'Europe/Madrid', UK: 'Europe/London', GB: 'Europe/London', IE: 'Europe/Dublin', NL: 'Europe/Amsterdam', BE: 'Europe/Brussels', PL: 'Europe/Warsaw', PT: 'Europe/Lisbon', SE: 'Europe/Stockholm', US: 'America/New_York', AU: 'Australia/Sydney' };
 
 export function defaultPolicy(accountId: number, channel: InboxChannel): ReplyPolicy {
-  return { account_id: accountId, channel, mode: 'off', daily_cap: channel === 'affiliate' ? 50 : 100, only: channel === 'affiliate' ? ['not_do_not_contact'] : [], never: INTENTS[channel].filter((i) => i.escalates).map((i) => i.key), auto_intents: [], quiet_from: null, quiet_to: null, max_age_hours: 48, shops_off: [], languages: {}, updated_at: null };
+  return { account_id: accountId, channel, mode: 'off', daily_cap: channel === 'affiliate' ? 50 : 100, only: channel === 'affiliate' ? ['not_do_not_contact'] : [], never: INTENTS[channel].filter((i) => i.escalates).map((i) => i.key), auto_intents: [], quiet_from: null, quiet_to: null, max_age_hours: channel === 'affiliate' ? 168 : 48, shops_off: [], languages: {}, updated_at: null };
 }
 
 export function getPolicy(q: Queries, accountId: number, channel: InboxChannel): ReplyPolicy {
@@ -178,11 +178,45 @@ export function onlyFilterBlocker(policy: ReplyPolicy, ctx: ReplyContext): strin
   return null;
 }
 
+/**
+ * A decision that said "not now" rather than "no": the master switch was off, the cap or quiet hours stopped it,
+ * the message was too fresh, or the model or the send failed. These are looked at again on every pass until they
+ * resolve; everything else (sent, escalated, drafted for the team, no reply needed) is final for that message.
+ */
+export function isDeferred(ev: ReplyEvent, now = Date.now()): boolean {
+  if (ev.decision === 'waiting' || ev.decision === 'capped' || ev.decision === 'quiet') return true;
+  if (ev.decision === 'drafted' && /master switch off/i.test(ev.escalation ?? '')) return true;
+  // Errors retry once an hour, so a dead API key or an empty account does not burn a Claude call every ten minutes.
+  if (ev.decision === 'error') return now - Date.parse(ev.created_at) > 3600000;
+  return false;
+}
+
+/** One line in the creator's language when we answer a message that waited more than a day. */
+const LATE_LINES: Record<string, string> = { en: 'Sorry for the slow reply!', de: 'Sorry für die späte Antwort!', fr: 'Désolé pour la réponse tardive !', it: 'Scusa per la risposta in ritardo!', es: '¡Perdona por la respuesta tardía!', nl: 'Sorry voor het late antwoord!', pl: 'Przepraszam za późną odpowiedź!', pt: 'Desculpa pela resposta tardia!', sv: 'Förlåt för det sena svaret!' };
+export function withLateLine(text: string, language: string | null, theirAt: string | null, now = Date.now()): string {
+  if (!theirAt || now - Date.parse(theirAt) < 24 * 3600000) return text;
+  const line = LATE_LINES[(language ?? 'en').slice(0, 2).toLowerCase()] ?? LATE_LINES.en;
+  return text.startsWith(line) ? text : `${line} ${text}`;
+}
+
+// Passes never overlap: the Cruva sync, the TikTok sync, the sweep and the buttons all queue behind each other,
+// so two passes can never answer the same thread twice.
+let passQueue: Promise<unknown> = Promise.resolve();
+function queued<T>(fn: () => Promise<T>): Promise<T> {
+  const run = passQueue.then(fn, fn);
+  passQueue = run.catch(() => undefined);
+  return run;
+}
+
 export interface ProcessDeps { client?: TtsClient; llm?: Llm; now?: number; send?: (q: Queries, c: InboxConversation, replyId: number, text: string, client: TtsClient) => Promise<unknown> }
 
 /** Run the policy over these conversations (after a sync). Returns the decisions taken. */
-export async function processConversations(q: Queries, ids: number[], deps: ProcessDeps = {}): Promise<Record<ReplyDecision, number>> {
-  const out: Record<ReplyDecision, number> = { auto_sent: 0, drafted: 0, skipped: 0, escalated: 0, capped: 0, quiet: 0, error: 0 };
+export function processConversations(q: Queries, ids: number[], deps: ProcessDeps = {}): Promise<Record<ReplyDecision, number>> {
+  return queued(() => processNow(q, ids, deps));
+}
+
+async function processNow(q: Queries, ids: number[], deps: ProcessDeps = {}): Promise<Record<ReplyDecision, number>> {
+  const out: Record<ReplyDecision, number> = { auto_sent: 0, drafted: 0, skipped: 0, escalated: 0, capped: 0, quiet: 0, error: 0, waiting: 0 };
   if (!ids.length) return out;
   const settings = inboxSettings(q);
   const now = deps.now ?? Date.now();
@@ -191,7 +225,8 @@ export async function processConversations(q: Queries, ids: number[], deps: Proc
   for (const id of [...new Set(ids)]) {
     const c = q.getConversation(id);
     if (!c || !c.account_id || c.status === 'closed' || c.last_sender !== 'them' || !c.last_message_id) continue;
-    if (q.replyEventFor(c.id, c.last_message_id)) continue;
+    const prior = q.replyEventFor(c.id, c.last_message_id);
+    if (prior && !isDeferred(prior, now)) continue;
     const policy = getPolicy(q, c.account_id, c.channel);
     if (policy.mode === 'off' || policy.shops_off.includes(c.tts_shop_id)) continue;
     const messages = q.listMessages(id);
@@ -208,11 +243,35 @@ export async function processConversations(q: Queries, ids: number[], deps: Proc
     };
     if (q.getSetting(`reply_pause:${c.id}`, '') === '1') { record('skipped', { escalation: 'paused by the team' }); continue; }
     if (!c.last_message_at || now - Date.parse(c.last_message_at) > policy.max_age_hours * 3600000) { record('skipped', { escalation: `older than ${policy.max_age_hours}h` }); continue; }
+    // A deferred decision with the reply already written: apply the gates again without calling the model.
+    if (prior && prior.decision !== 'waiting' && prior.context.reply_text) {
+      const text = prior.context.reply_text;
+      const common = { needs_reply: true, intent: prior.intent, confidence: prior.confidence, chips: prior.context.chips, language: prior.language };
+      const tz = tzFor(q, c.market);
+      const again = (decision: ReplyDecision, escalation: string | null) => {
+        if (prior.decision === decision && (prior.escalation ?? '') === (escalation ?? '')) return; // same answer as last time: nothing to record
+        const reply_id = prior.reply_id ?? q.addReply({ conversation_ref: c.id, text, mode: 'draft', created_by: 'auto-reply', in_reply_to: c.last_message_id }).id;
+        record(decision, { ...common, escalation, reply_id, reply_text: text });
+      };
+      if (policy.mode === 'draft') { again('drafted', null); continue; }
+      if (!settings.auto_reply_master) { again('drafted', 'master switch off (Settings)'); continue; }
+      if (inQuietHours(policy, tz, now)) { again('quiet', `quiet hours ${policy.quiet_from}–${policy.quiet_to} (${tz})`); continue; }
+      if (policy.daily_cap !== null && q.countReplyEvents(c.account_id, c.channel, 'auto_sent', startOfDay(tz, now)) >= policy.daily_cap) { again('capped', `daily cap of ${policy.daily_cap} reached`); continue; }
+      const outText = withLateLine(text, prior.language ?? c.language, theirAt, now);
+      const reply = q.addReply({ conversation_ref: c.id, text: outText, mode: 'auto', created_by: 'auto-reply', in_reply_to: c.last_message_id });
+      try {
+        await send(q, c, reply.id, outText, client);
+        record('auto_sent', { ...common, reply_id: reply.id, reply_text: outText });
+      } catch (err) {
+        record('error', { ...common, reply_id: reply.id, reply_text: outText, escalation: `send failed: ${(err as Error).message.slice(0, 200)}` });
+      }
+      continue;
+    }
     const why = prefilter(theirText, last?.type ?? 'TEXT');
     if (why) { record('skipped', { needs_reply: false, intent: 'no_reply_needed', escalation: why }); continue; }
     if (!settings.llm_configured && !deps.llm) { record('error', { escalation: 'ANTHROPIC_API_KEY not set' }); continue; }
     // A burst of messages: wait for the dust to settle so one reply answers them all.
-    if (last && now - Date.parse(last.created_at) < 90000 && c.channel === 'affiliate') continue;
+    if (last && now - Date.parse(last.created_at) < 90000 && c.channel === 'affiliate') { if (prior?.decision !== 'waiting') record('waiting', { escalation: 'message under 90 seconds old: read again on the next pass' }); continue; }
     let ctx: ReplyContext;
     let cls: Classification;
     try {
@@ -261,6 +320,27 @@ export async function processConversations(q: Queries, ids: number[], deps: Proc
 }
 
 /** Errors (no credit, outage) are never retried on their own: a thread is decided once per message. This clears them and runs the pass again. */
+/**
+ * Every open thread the policy should answer but no pass has settled: never decided (it arrived while the read
+ * budget was spent, or in the burst window), or decided "not now". Runs after each sync so a switch flipped on,
+ * a cap raised, quiet hours ending or credit topped up turns the waiting drafts into sent replies, oldest first.
+ */
+export async function sweepDeferred(q: Queries, opts: { accountId?: number; channel?: InboxChannel; source?: 'tts' | 'cruva'; deps?: ProcessDeps } = {}): Promise<{ scanned: number; candidates: number; result: Record<ReplyDecision, number> }> {
+  const now = opts.deps?.now ?? Date.now();
+  const open = q.listOpenConversations({ accountId: opts.accountId, channel: opts.channel, limit: 3000 }).filter((c) => c.account_id && (!opts.source || c.source === opts.source) && !c.conversation_id.startsWith('sample-'));
+  const policies = new Map<string, ReplyPolicy>();
+  const policyOf = (c: InboxConversation) => { const k = `${c.account_id}:${c.channel}`; let p = policies.get(k); if (!p) { p = getPolicy(q, c.account_id!, c.channel); policies.set(k, p); } return p; };
+  const inScope = open.filter((c) => { const p = policyOf(c); return p.mode !== 'off' && !p.shops_off.includes(c.tts_shop_id) && c.last_message_at && now - Date.parse(c.last_message_at) <= p.max_age_hours * 3600000; });
+  const events = q.replyEventsForMessages(inScope.map((c) => ({ conversation_ref: c.id, message_id: c.last_message_id! })));
+  const ids = inScope
+    .filter((c) => { const ev = events.get(`${c.id}:${c.last_message_id}`); return !ev || isDeferred(ev, now); })
+    .sort((a, b) => (a.last_message_at ?? '').localeCompare(b.last_message_at ?? ''))
+    .map((c) => c.id);
+  const result = await processConversations(q, ids, opts.deps);
+  if (Object.values(result).some((n) => n)) log.info(`Reply sweep: ${ids.length} of ${open.length} open thread(s) looked at again${opts.accountId ? ` for account ${opts.accountId}` : ''}`);
+  return { scanned: open.length, candidates: ids.length, result };
+}
+
 export async function retryErrors(q: Queries, accountId: number, channel: InboxChannel, opts: { conversationRefs?: number[]; deps?: ProcessDeps } = {}): Promise<{ retried: number; result: Record<ReplyDecision, number> }> {
   const ids = q.clearReplyErrors(accountId, channel, opts.conversationRefs);
   const result = await processConversations(q, ids, opts.deps);
@@ -334,8 +414,33 @@ export function withState(q: Queries, convs: InboxConversation[]): (InboxConvers
 /** Conversations that need the team, with their latest decision and pending draft. */
 export function waitingFor(q: Queries, accountId: number, channel: InboxChannel, policy: ReplyPolicy, now = Date.now(), open?: InboxConversation[]): RepliesData['waiting'] {
   return withState(q, open ?? q.listOpenConversations({ accountId, channel, limit: 500 }))
-    .filter((c) => (c.event ? ['escalated', 'drafted', 'capped', 'quiet', 'error'].includes(c.event.decision) : c.last_message_at ? now - Date.parse(c.last_message_at) <= policy.max_age_hours * 3600000 : false))
+    .filter((c) => (c.event ? ['escalated', 'drafted', 'capped', 'quiet', 'error', 'waiting'].includes(c.event.decision) : c.last_message_at ? now - Date.parse(c.last_message_at) <= policy.max_age_hours * 3600000 : false))
     .sort((a, b) => (b.last_message_at ?? '').localeCompare(a.last_message_at ?? ''));
+}
+
+/** The waiting threads grouped by what is stopping them, so "why did nothing send" is one glance. */
+export function blockerGroups(q: Queries, waiting: RepliesData['waiting'], intents: { key: string; label: string }[], now = Date.now()): RepliesData['blockers'] {
+  const groups = new Map<string, { reason: string; deferred: boolean; ids: number[]; examples: { id: number; counterpart_name: string | null; last_message_at: string | null }[] }>();
+  for (const w of waiting) {
+    const ev = w.event;
+    const esc = ev?.escalation ?? '';
+    let reason: string; let deferred = false;
+    if (!ev) { reason = replyBlocker(q, w, now) ?? 'Not read yet: waits for the next sync'; deferred = !replyBlocker(q, w, now); }
+    else if (ev.decision === 'waiting') { reason = 'Arrived in the burst window: read again on the next pass'; deferred = true; }
+    else if (ev.decision === 'capped') { reason = 'Daily cap reached: goes out when the cap is raised or tomorrow'; deferred = true; }
+    else if (ev.decision === 'quiet') { reason = 'Quiet hours: goes out when they end'; deferred = true; }
+    else if (ev.decision === 'drafted' && /master switch off/i.test(esc)) { reason = 'Master switch off (Settings › Connections): goes out when it is on'; deferred = true; }
+    else if (ev.decision === 'drafted' && /^only:/i.test(esc)) reason = `Blocked by the only-filter (${esc.replace(/^only:\s*/i, '')})`;
+    else if (ev.decision === 'drafted') reason = 'Draft mode: waits for the team';
+    else if (ev.decision === 'error') { reason = `Error: ${esc.replace(/^send failed: /i, 'send failed: ').slice(0, 80) || 'unknown'}`; deferred = true; }
+    else if (ev.decision === 'escalated') reason = `Needs a human: ${ev.intent ? intents.find((i) => i.key === ev.intent)?.label ?? ev.intent : esc || 'the model asked for one'}${ev.intent && esc ? ` (${esc.replace(/\(\d+%\)/, '').trim()})` : ''}`;
+    else reason = `${ev.decision}${esc ? `: ${esc}` : ''}`;
+    const g = groups.get(reason) ?? { reason, deferred, ids: [], examples: [] };
+    g.ids.push(w.id);
+    if (g.examples.length < 3) g.examples.push({ id: w.id, counterpart_name: w.counterpart_name, last_message_at: w.last_message_at });
+    groups.set(reason, g);
+  }
+  return [...groups.values()].sort((a, b) => b.ids.length - a.ids.length).map((g) => ({ reason: g.reason, deferred: g.deferred, count: g.ids.length, examples: g.examples }));
 }
 
 export function repliesData(q: Queries, account: Account, channel: InboxChannel, scopeLive: (scope: 'customer_service' | 'affiliate_seller') => boolean, now = Date.now(), apps?: { main: boolean; affiliate: boolean }): RepliesData {
@@ -396,6 +501,7 @@ export function repliesData(q: Queries, account: Account, channel: InboxChannel,
       wrong_7d: week.filter((e) => e.feedback === 'wrong').length,
     },
     waiting,
+    blockers: blockerGroups(q, waiting, INTENTS[channel], now),
     log,
     knowledge,
     intents: INTENTS[channel],

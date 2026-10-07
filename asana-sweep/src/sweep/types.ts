@@ -1498,7 +1498,8 @@ export interface ReplyContext {
 // ---- Replies per account: policy, events ----
 
 export type ReplyMode = 'off' | 'draft' | 'auto';
-export type ReplyDecision = 'auto_sent' | 'drafted' | 'skipped' | 'escalated' | 'capped' | 'quiet' | 'error';
+/** `waiting`: the message was under 90 seconds old at the pass and is read again on the next one. */
+export type ReplyDecision = 'auto_sent' | 'drafted' | 'skipped' | 'escalated' | 'capped' | 'quiet' | 'error' | 'waiting';
 
 export interface ReplyPolicy {
   account_id: number;
@@ -1557,6 +1558,8 @@ export interface RepliesData {
   shops: { id: string; name: string; market: string | null; token_ok: boolean; off: boolean; language: string | null; source: 'tts' | 'cruva' }[];
   counts: { replied_today: number; auto_today: number; manual_today: number; cap: number | null; waiting: number; escalated: number; drafts: number; skipped_today: number; median_minutes: number | null; wrong_7d: number };
   waiting: (InboxConversation & { event: ReplyEvent | null; draft: InboxReply | null })[];
+  /** The waiting threads grouped by what stops them; `deferred` groups clear on their own once the cause is lifted. */
+  blockers: { reason: string; deferred: boolean; count: number; examples: { id: number; counterpart_name: string | null; last_message_at: string | null }[] }[];
   log: ReplyEvent[];
   knowledge: { label: string; state: 'ok' | 'warn' | 'missing'; detail: string }[];
   intents: { key: string; label: string; escalates: boolean }[];

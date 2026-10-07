@@ -33,7 +33,7 @@ import type { BdContact, BdFollowup, TtsContact } from '../sweep/types.js';
 import { inboxSettings, sendReply, syncInbox } from '../inbox/sync.js';
 import { syncCruvaInbox } from '../inbox/cruva-inbox.js';
 import { cruvaMcp } from '../cruva/mcp.js';
-import { feedback as replyFeedback, overview as repliesOverview, repliesData, replyBlocker, retryErrors, sampleThread, savePolicy, waitingAll } from '../inbox/replies.js';
+import { feedback as replyFeedback, overview as repliesOverview, repliesData, replyBlocker, retryErrors, sampleThread, savePolicy, sweepDeferred, waitingAll } from '../inbox/replies.js';
 import { buildContext, renderPrompt } from '../inbox/context.js';
 import { draftWithClaude } from '../inbox/llm.js';
 import { LANGUAGE_NAMES } from '../inbox/language.js';
@@ -2617,6 +2617,15 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const refs = Array.isArray(b.conversation_refs) ? b.conversation_refs.map(Number).filter(Number.isInteger) : undefined;
     const out = await retryErrors(q, a.id, channel, { conversationRefs: refs });
     res.json({ ...out, data: repliesData(q, a, channel, scopeLive) });
+  });
+  /** Run now: sync this account's creator inbox (Cruva) and look again at every open thread the policy should answer. */
+  r.post('/replies/:accountId/:channel/run', async (req, res) => {
+    const a = accountParam(req);
+    const channel = channelParam(req);
+    let synced: { shops: number; conversations: number; new_messages: number; errors: string[] } | null = null;
+    if (channel === 'affiliate' && cruvaMcp.configured) { const r2 = await syncCruvaInbox(q, { accountId: a.id }, { sweep: false }); synced = { shops: r2.shops, conversations: r2.conversations, new_messages: r2.new_messages, errors: r2.errors }; }
+    const swept = await sweepDeferred(q, { accountId: a.id, channel });
+    res.json({ synced, swept, data: repliesData(q, a, channel, scopeLive) });
   });
   r.post('/replies/events/:id/feedback', (req, res) => {
     const b = (req.body ?? {}) as { feedback?: 'right' | 'wrong' | null; note?: string; teach?: { title?: string; body?: string } | null };

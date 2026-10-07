@@ -30,6 +30,7 @@ const DECISION: Record<ReplyEvent['decision'], { label: string; cls: string }> =
   capped: { label: 'Over the daily cap', cls: 'warn' },
   quiet: { label: 'Quiet hours', cls: 'muted' },
   error: { label: 'Error', cls: 'crit' },
+  waiting: { label: 'Read again next pass', cls: 'muted' },
 };
 
 function Summary({ channel }: { channel: InboxChannel }) {
@@ -239,7 +240,20 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
 
       {/* Needs a human */}
       <div className="card" style={{ marginBottom: 16 }}>
-        <div className="page-head" style={{ marginBottom: 8 }}><h3 style={{ margin: 0 }}><span className="badge warn">{counts.waiting}</span> Needs a human</h3><div className="actions">{isAdmin && data.waiting.some((w) => w.event?.decision === 'error') && <button className="small" disabled={busy === 'retry'} title="Threads that failed on the model (no credit, an outage) are decided once per message and never retried on their own; this clears those errors and runs the pass again" onClick={() => run('retry', () => api.retryReplies(accountId, channel), (r) => { setData(r.data); setNotice(`${r.retried} thread(s) re-read: ${Object.entries(r.result).filter(([, n]) => n).map(([k, n]) => `${n} ${k}`).join(', ') || 'nothing changed'}.`); })}>{busy === 'retry' ? 'Retrying…' : `Retry ${data.waiting.filter((w) => w.event?.decision === 'error').length} error(s)`}</button>}<span className="sub">Newest first</span></div></div>
+        <div className="page-head" style={{ marginBottom: 8 }}><h3 style={{ margin: 0 }}><span className="badge warn">{counts.waiting}</span> Needs a human</h3><div className="actions">{isAdmin && data.waiting.some((w) => w.event?.decision === 'error') && <button className="small" disabled={busy === 'retry'} title="Threads that failed on the model (no credit, an outage) are decided once per message and never retried on their own; this clears those errors and runs the pass again" onClick={() => run('retry', () => api.retryReplies(accountId, channel), (r) => { setData(r.data); setNotice(`${r.retried} thread(s) re-read: ${Object.entries(r.result).filter(([, n]) => n).map(([k, n]) => `${n} ${k}`).join(', ') || 'nothing changed'}.`); })}>{busy === 'retry' ? 'Retrying…' : `Retry ${data.waiting.filter((w) => w.event?.decision === 'error').length} error(s)`}</button>}{isAdmin && <button className="small" disabled={busy === 'run'} title="Pull this account's creator inbox from Cruva now, then look again at every open thread the policy should answer: deferred decisions (master switch, cap, quiet hours, errors) and threads no pass has read yet" onClick={() => run('run', () => api.runReplies(accountId, channel), (r) => { setData(r.data); const d = Object.entries(r.swept.result).filter(([, n]) => n).map(([k, n]) => `${n} ${k}`).join(', '); setNotice(`${r.synced ? `Synced ${r.synced.conversations} thread(s), ${r.synced.new_messages} new message(s). ` : ''}${r.swept.candidates} of ${r.swept.scanned} open thread(s) looked at again${d ? `: ${d}` : ''}.${r.synced?.errors.length ? ` Errors: ${r.synced.errors.join(' | ')}` : ''}`); })}>{busy === 'run' ? 'Running…' : 'Run now'}</button>}<span className="sub">Newest first</span></div></div>
+        {data.blockers.length > 0 && (
+          <table style={{ marginBottom: 10 }}>
+            <thead><tr><th>Why nothing went out</th><th></th><th>Threads</th><th>For example</th></tr></thead>
+            <tbody>{data.blockers.map((b) => (
+              <tr key={b.reason}>
+                <td>{b.reason}</td>
+                <td>{b.deferred ? <span className="badge muted" title="Clears on its own: the next pass sends these once the cause is lifted">resolves itself</span> : <span className="badge warn" title="Needs a person or a policy change">needs you</span>}</td>
+                <td>{b.count}</td>
+                <td className="sub">{b.examples.map((e) => `${e.counterpart_name ?? who(channel)} (${fmtRelative(e.last_message_at)})`).join(' · ')}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        )}
         {data.waiting.length === 0 ? <p className="sub">Nobody is waiting on this account.</p> : (
           <div className="waitlist">
             {data.waiting.slice(0, 50).map((w) => (
