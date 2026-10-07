@@ -170,12 +170,13 @@ export class PlaybookEngine {
   shops(): PlaybookShop[] {
     const accounts = new Map(this.q.listAccounts().map((a) => [a.id, a]));
     const tts = this.q.listTtsShops();
+    const pulls = new Map(this.q.latestHealthPulls('cruva').filter((p) => p.ok).map((p) => [p.shop_id, p.metrics as Record<string, unknown>]));
     return this.q.listShops('cruva').map((s) => {
       const a = accounts.get(s.account_id);
       const fromName = s.shop_name.match(MARKET_RE)?.[1]?.toUpperCase() ?? null;
       const market = fromName ?? tts.find((t) => t.account_id === s.account_id)?.market ?? (a?.markets ?? '').split(/[,\s/]+/)[0] ?? null;
       const override = this.q.getSetting(`playbook_lang_${s.shop_id}`, '');
-      return { shop_id: s.shop_id, shop_name: s.shop_name, account_id: s.account_id, account_name: a?.name ?? '', am_name: a?.am_name ?? null, market: market || null, language: override || shopLanguage(market), plan: this.q.getSetting(`playbook_plan_${s.shop_id}`, '') || null, remote_counts: {}, checked_at: null, learned: this.learnedFor(s.shop_id), profile: this.q.listProfiles(s.shop_id, 1)[0] ?? null, voice: this.voiceFor(s.shop_id), top_pct: Number(this.q.getSetting(`playbook_top_pct_${s.shop_id}`, '10')) || 10, auto_update: this.q.getSetting(`playbook_auto_update_${s.shop_id}`, '') === '1', market_read: this.q.listMarkets(s.shop_id, 1)[0] ?? null, competitors: this.q.listShopCompetitors(s.shop_id).filter((c) => c.status !== 'rejected').length, error: this.q.getSetting(`playbook_shop_error_${s.shop_id}`, '') || null };
+      return { shop_id: s.shop_id, shop_name: s.shop_name, account_id: s.account_id, account_name: a?.name ?? '', am_name: a?.am_name ?? null, market: market || null, language: override || shopLanguage(market), plan: this.q.getSetting(`playbook_plan_${s.shop_id}`, '') || null, remote_counts: {}, checked_at: null, learned: this.learnedFor(s.shop_id), profile: this.q.listProfiles(s.shop_id, 1)[0] ?? null, voice: this.voiceFor(s.shop_id), top_pct: Number(this.q.getSetting(`playbook_top_pct_${s.shop_id}`, '10')) || 10, auto_update: this.q.getSetting(`playbook_auto_update_${s.shop_id}`, '') === '1', market_read: this.q.listMarkets(s.shop_id, 1)[0] ?? null, competitors: this.q.listShopCompetitors(s.shop_id).filter((c) => c.status !== 'rejected').length, outreach: this.outreachOf(s.shop_id, pulls.get(s.shop_id) ?? null), error: this.q.getSetting(`playbook_shop_error_${s.shop_id}`, '') || null };
     }).filter((s) => accounts.get(s.account_id)?.enabled !== false);
   }
 
@@ -453,7 +454,7 @@ export class PlaybookEngine {
   }
 
   /** Draft every missing, paused or drifted item for the chosen shops into a new rollout, nothing sent to Cruva yet. */
-  prepare(opts: { shop_ids: string[]; keys?: string[]; created_by?: string | null; /** Items to redo even where they are live (an update with the current copy), e.g. after the weekly learning. */ updateKeys?: string[]; note?: string | null; /** false leaves the drafts as the library wrote them; by default they are rewritten in the shop's voice with the content profile in the background. */ tailor?: boolean }): { rollout: PlaybookRollout; drafts: PlaybookDraft[] } {
+  prepare(opts: { shop_ids: string[]; keys?: string[]; created_by?: string | null; /** Items to redo even where they are live (an update with the current copy), e.g. after the weekly learning. */ updateKeys?: string[]; /** Items to create afresh even where one is live or paused (a new month's outreach campaign next to the old one). */ freshKeys?: string[]; note?: string | null; /** false leaves the drafts as the library wrote them; by default they are rewritten in the shop's voice with the content profile in the background. */ tailor?: boolean }): { rollout: PlaybookRollout; drafts: PlaybookDraft[] } {
     const shops = this.shops().filter((s) => opts.shop_ids.includes(s.shop_id));
     if (!shops.length) throw new Error('Pick at least one linked shop.');
     const cells = this.q.listPlaybookCells();
@@ -461,6 +462,7 @@ export class PlaybookEngine {
     const drafts: PlaybookDraft[] = [];
     const wanted = opts.keys?.length ? new Set(opts.keys) : null;
     const redo = new Set(opts.updateKeys ?? []);
+    const fresh = new Set(opts.freshKeys ?? []);
     for (const shop of shops) {
       const items = this.itemsFor(shop.language, shop.shop_id).filter((i) => (!wanted || wanted.has(`${i.kind}:${i.key}`) || wanted.has(i.key)) && !i.config.manual && !['manual', 'sender', 'tag'].includes(i.kind)).sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.name.localeCompare(b.name));
       const cellOf = (i: PlaybookItem) => cells.find((c) => c.shop_id === shop.shop_id && c.kind === i.kind && c.playbook_key === i.key) ?? null;
@@ -473,8 +475,9 @@ export class PlaybookEngine {
         const cell = cellOf(item);
         const st = cell?.status ?? 'unknown';
         const redoLive = st === 'set' && cell?.remote_id && item.kind === 'automation' && (redo.has(`${item.kind}:${item.key}`) || redo.has(item.key));
-        if ((st === 'set' && !redoLive) || st === 'manual') continue;
-        const action: PlaybookDraft['action'] = st === 'paused' ? 'start' : st === 'drift' || redoLive ? 'update' : 'create';
+        const afresh = fresh.has(`${item.kind}:${item.key}`) || fresh.has(item.key);
+        if (((st === 'set' && !redoLive) || st === 'manual') && !afresh) continue;
+        const action: PlaybookDraft['action'] = afresh ? 'create' : st === 'paused' ? 'start' : st === 'drift' || redoLive ? 'update' : 'create';
         let tool: string; let payload: Record<string, unknown>; let copy: string | null = null; let blockers: string[] = []; let inputs: string[] = [];
         if (action === 'start') {
           tool = TOGGLE_TOOL[item.kind] ?? ''; payload = { shop_id: shop.shop_id, [ID_ARG[item.kind] ?? 'id']: cell!.remote_id, status: 'active' };
@@ -487,8 +490,8 @@ export class PlaybookEngine {
         }
         const status: PlaybookDraftStatus = blockers.length ? 'blocked' : inputs.length ? 'needs_input' : 'ready';
         const existingCopy = cell?.remote_copy ?? (copy ? this.nearestCopy(shop.shop_id, cell?.remote_id ?? null) : null);
-        drafts.push(this.q.addRolloutDraft({ existing_copy: existingCopy, rollout_id: rollout.id, shop_id: shop.shop_id, shop_name: shop.shop_name, account_id: shop.account_id, kind: item.kind, key: item.key, name: String(payload.title ?? payload.name ?? item.name), description: item.description, language: item.language === '*' ? shop.language : item.language, action, tool, payload, copy, blockers: [...blockers, ...inputs], status, start_after: action === 'start' ? true : Boolean(item.config.core) && item.kind !== 'automation' ? false : item.kind === 'automation' && (item.config.outreach_audience === 'groups'), save_override: false, remote_id: cell?.remote_id ?? null, remote_name: cell?.remote_name ?? null, order_no: order++ }));
-        if (cell) this.q.setPlaybookCell({ shop_id: shop.shop_id, kind: item.kind, playbook_key: item.key, status: 'queued', note: `in rollout #${rollout.id}` });
+        drafts.push(this.q.addRolloutDraft({ existing_copy: existingCopy, rollout_id: rollout.id, shop_id: shop.shop_id, shop_name: shop.shop_name, account_id: shop.account_id, kind: item.kind, key: item.key, name: String(payload.title ?? payload.name ?? item.name), description: item.description, language: item.language === '*' ? shop.language : item.language, action, tool, payload, copy, blockers: [...blockers, ...inputs], status, start_after: action === 'start' ? true : Boolean(item.config.core) && item.kind !== 'automation' ? false : item.kind === 'automation' && (item.config.outreach_audience === 'groups'), save_override: false, remote_id: afresh ? null : cell?.remote_id ?? null, remote_name: afresh ? null : cell?.remote_name ?? null, order_no: order++ }));
+        if (cell && !afresh) this.q.setPlaybookCell({ shop_id: shop.shop_id, kind: item.kind, playbook_key: item.key, status: 'queued', note: `in rollout #${rollout.id}` });
       }
     }
     liveEvents.emitUpdate({ kind: 'playbook' });
@@ -606,6 +609,71 @@ export class PlaybookEngine {
     this.q.setSetting(`playbook_learned_at_${shopId}`, new Date().toISOString());
     liveEvents.emitUpdate({ kind: 'playbook' });
     return { profile, voice, market, errors };
+  }
+
+  // ---- Always-on outreach: DMs must keep going out; an ended campaign gets a fresh, tailored one ----
+
+  private outreachOf(shopId: string, metrics: Record<string, unknown> | null): PlaybookShop['outreach'] {
+    const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+    const live = this.q.listRemoteRaw(shopId, 'automation').filter((r) => r.enabled && /new_affiliates/i.test(String(r.raw.audience ?? ''))).length;
+    let ended: PlaybookShop['outreach']['ended'] = null;
+    try { const raw = this.q.getSetting(`playbook_outreach_${shopId}`, ''); ended = raw ? (JSON.parse(raw) as PlaybookShop['outreach']['ended']) : null; } catch { ended = null; }
+    return { dms_7d: n(metrics?.dms_sent_7d), silent_days: n(metrics?.dms_silent_days), live, always_on: this.q.getSetting(`playbook_always_on_${shopId}`, '') === '1', ended };
+  }
+
+  /** The month, the live and upcoming promotions for the shop's account and market, and the platform (TikTok-funded) campaigns it takes part in. */
+  seasonFacts(shop: PlaybookShop, now = Date.now()): string[] {
+    const out: string[] = [`Month: ${monthName(shop.language, new Date(now))}${shop.market ? ` · market ${shop.market}` : ''}`];
+    const fmt = (iso: string) => iso.slice(0, 10);
+    const promos = this.q.listPromotions().filter((p) => Date.parse(p.end_at) > now && Date.parse(p.begin_at) < now + 21 * 86400000 && p.targets.some((t) => t.account_id === shop.account_id && (!shop.market || t.market.toUpperCase() === shop.market.toUpperCase()) && t.status !== 'error' && t.status !== 'deactivated'));
+    for (const p of promos.slice(0, 4)) {
+      const discount = p.activity_type === 'SHIPPING_DISCOUNT' ? 'free or discounted shipping' : p.discount_type === 'FIXED_PRICE' ? `fixed price ${p.discount_value ?? ''}` : p.discount_type === 'AMOUNT_OFF' ? `${p.discount_value ?? ''} off` : `${p.discount_value ?? ''}% off`;
+      out.push(`Promotion "${p.name}": ${discount}, ${fmt(p.begin_at)} to ${fmt(p.end_at)} (${Date.parse(p.begin_at) > now ? 'upcoming' : 'live'})`);
+    }
+    const camps = this.q.listAccountCampaigns(shop.account_id).filter((c) => c.participation !== 'none' && (!shop.market || c.market.toUpperCase() === shop.market.toUpperCase()) && Date.parse(c.end_at) > now && Date.parse(c.begin_at) < now + 21 * 86400000);
+    for (const c of camps.slice(0, 4)) out.push(`TikTok campaign "${c.name}": ${c.participation} participation${c.discount_pct !== null ? `, ${c.discount_pct}% off` : ''}${c.sku_scope ? `, ${c.sku_scope}` : ''}, ${fmt(c.begin_at)} to ${fmt(c.end_at)}`);
+    return out.length > 1 ? out : [];
+  }
+
+  /**
+   * Daily: where a shop's outreach has ended (no outreach bot running, or no DM out for three days while one
+   * claims to be), draft this month's outreach campaign afresh, tailored to the shop (voice, what sells, the
+   * competitors, the season and the deals), and start it where Always-on outreach is on; otherwise it waits on
+   * the Cruva card and the monitor flags it. A shop with a replacement still open is left alone.
+   */
+  async ensureOutreach(opts: { shopIds?: string[]; now?: number } = {}): Promise<{ shops: number; drafted: { shop: string; rollout_id: number; started: boolean; reason: string }[]; errors: string[] }> {
+    const now = opts.now ?? Date.now();
+    const out = { shops: 0, drafted: [] as { shop: string; rollout_id: number; started: boolean; reason: string }[], errors: [] as string[] };
+    for (const shop of this.shops().filter((sh) => !opts.shopIds || opts.shopIds.includes(sh.shop_id))) {
+      out.shops += 1;
+      const o = shop.outreach;
+      if (!this.q.listRemoteItems(shop.shop_id).length) continue; // never checked: nothing known
+      const flowing = o.live > 0 && (o.silent_days === null || o.silent_days < 3);
+      if (o.ended) {
+        const ro = this.q.getRollout(o.ended.rollout_id);
+        if (ro && ['draft', 'running'].includes(ro.status)) continue; // the replacement is still being reviewed
+        if (flowing) { this.q.setSetting(`playbook_outreach_${shop.shop_id}`, JSON.stringify({ ...o.ended, resolved_at: new Date(now).toISOString() })); continue; }
+        if (ro && ro.status === 'done' && now - Date.parse(ro.ran_at ?? ro.created_at) < 3 * 86400000) continue; // just started: give Cruva time to send
+      }
+      if (flowing) continue;
+      const reason = o.live === 0 ? 'no outreach automation is running' : `no DM sent for ${o.silent_days} days while ${o.live} outreach bot(s) show as active`;
+      try {
+        const keys = ['automation:monthly_deals_outreach'];
+        const { rollout, drafts } = this.prepare({ shop_ids: [shop.shop_id], keys, freshKeys: keys, created_by: 'always-on outreach', note: `Always-on outreach: ${reason}`, tailor: false });
+        if (!drafts.length) { out.errors.push(`${shop.shop_name}: nothing to draft for the outreach campaign`); continue; }
+        await this.tailorRollout(rollout.id);
+        let started = false;
+        if (o.always_on) {
+          for (const d of this.q.listRolloutDrafts(rollout.id)) if (d.status === 'ready') this.updateDraft(d.id, { status: 'approved', start_after: true });
+          if (this.q.getRollout(rollout.id)?.counts.approved) started = (await this.runRollout(rollout.id, 'always-on outreach')).done > 0;
+        }
+        this.q.setSetting(`playbook_outreach_${shop.shop_id}`, JSON.stringify({ reason, name: drafts[0].name, rollout_id: rollout.id, started, at: new Date(now).toISOString(), resolved_at: null }));
+        out.drafted.push({ shop: shop.shop_name, rollout_id: rollout.id, started, reason });
+      } catch (err) { out.errors.push(`${shop.shop_name}: ${(err as Error).message}`); }
+    }
+    liveEvents.emitUpdate({ kind: 'playbook' });
+    liveEvents.emitUpdate({ kind: 'monitor' });
+    return out;
   }
 
   // ---- Direct competitors and the market read ----
@@ -729,6 +797,7 @@ export class PlaybookEngine {
       ...(shop.voice ? ['', 'The brand\'s voice, learnt from the messages it already runs:', ...voiceFacts(shop.voice).map((l) => `- ${l}`)] : []),
       ...(shop.profile ? ['', 'What sells for this shop right now (from its top videos). Use what fits this message: a hook or content idea in a message about what to film, the product that carries in a message about products, the offer where a deal is mentioned. Do not list it all.', ...profileFacts(shop.profile).map((l) => `- ${l}`)] : []),
       ...((): string[] => { const c = this.campaignFacts(d.shop_id, d.remote_id); return c.length ? ['', 'Campaigns that work on this shop (by replies and GMV); match what they do well:', ...c.map((l) => `- ${l}`)] : []; })(),
+      ...((): string[] => { const f = this.seasonFacts(shop); return f.length ? ['', 'What is on right now for this shop (use it where the message is about deals, timing or why to post now; never invent a deal that is not listed):', ...f.map((l) => `- ${l}`)] : []; })(),
       ...(shop.market_read ? ['', 'What the shop\'s direct competitors are doing right now (their top videos by GMV). Use it where it fits: a trend or hook in a message about what to film, a gap the shop can close; never name a competitor in the message.', ...marketFacts(shop.market_read).map((l) => `- ${l}`)] : []),
       d.existing_copy ? `\nThe shop's existing message for reference (its structure and phrasing are the base when they fit):\n${d.existing_copy.slice(0, 1800)}` : '',
     ].join('\n');

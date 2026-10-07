@@ -48,6 +48,9 @@ export function metricsFromDays(days: CruvaDayRow[], now = Date.now()): CruvaMet
     samples_approved_7d: sum(last7, 'samples_approved'), samples_approved_prev_7d: sum(prev7, 'samples_approved'),
     samples_shipped_7d: sum(last7, 'samples_shipped'), samples_shipped_prev_7d: sum(prev7, 'samples_shipped'),
     videos_posted_7d: sum(last7, 'videos'), video_views_7d: sum(last7, 'views'),
+    dms_sent_28d: sum(done.filter((d) => d.date >= iso(now - 28 * 86400000)), 'dms'),
+    // Days since the last day with a DM out (today counts when it already has one); the window's length when none.
+    dms_silent_days: (() => { const withDm = days.filter((d) => d.dms > 0).map((d) => d.date).sort(); if (!withDm.length) return days.length ? Math.round((now - Date.parse(days[0].date)) / 86400000) : null; return Math.max(0, Math.round((now - Date.parse(withDm[withDm.length - 1])) / 86400000)); })(),
   };
 }
 

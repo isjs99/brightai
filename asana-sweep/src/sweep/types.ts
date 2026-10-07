@@ -1133,6 +1133,7 @@ export interface HealthThresholds {
   /** Cruva */
   sps_min: number;
   dms_drop_pct: number;
+  dms_silent_days: number;
   affiliate_gmv_drop_pct: number;
   /** Returns and CS */
   return_response_grace_hours: number;
@@ -2367,7 +2368,9 @@ export interface PlaybookData {
   rollouts: PlaybookRollout[];
 }
 
-export interface PlaybookShop { shop_id: string; shop_name: string; account_id: number; account_name: string; am_name: string | null; language: string; market: string | null; plan: string | null; remote_counts: Record<string, number>; checked_at: string | null; learned: PlaybookLearned | null; /** Why the last check of this shop failed, or null. */ error: string | null; /** The content profile and voice, when learnt. */ profile: PlaybookProfile | null; voice: PlaybookVoice | null; top_pct: number; auto_update: boolean; /** The latest market read of the shop's direct competitors, when scanned, and how many competitors are confirmed or suggested. */ market_read: PlaybookMarketProfile | null; competitors: number }
+export interface PlaybookShop { shop_id: string; shop_name: string; account_id: number; account_name: string; am_name: string | null; language: string; market: string | null; plan: string | null; remote_counts: Record<string, number>; checked_at: string | null; learned: PlaybookLearned | null; /** Why the last check of this shop failed, or null. */ error: string | null; /** The content profile and voice, when learnt. */ profile: PlaybookProfile | null; voice: PlaybookVoice | null; top_pct: number; auto_update: boolean; /** The latest market read of the shop's direct competitors, when scanned, and how many competitors are confirmed or suggested. */ market_read: PlaybookMarketProfile | null; competitors: number; /** Outreach health: DMs out, days without one, live outreach bots, the Always-on switch and an ended campaign waiting on its replacement. */ outreach: PlaybookOutreach }
+
+export interface PlaybookOutreach { dms_7d: number | null; silent_days: number | null; live: number; always_on: boolean; ended: { reason: string; name: string; rollout_id: number; started: boolean; at: string; resolved_at: string | null } | null }
 
 // ---- Samples: the traffic light, the rules, the shortlist ----
 

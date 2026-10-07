@@ -148,7 +148,7 @@ export class Scheduler {
     // A second pass late morning in case the FastMoss routine ran late.
     this.pullsLateTask = cron.schedule('0 11 * * *', () => void this.dailyPull(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Cruva best practice: re-read every linked shop's setup overnight so the matrix and the monitor rule are current.
-    this.cruvaTask = cron.schedule('20 5 * * *', () => { if (this.playbook.data().mcp_configured) void this.playbook.check(undefined, true).catch((err) => log.warn(`Cruva nightly check: ${(err as Error).message}`)); }, { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
+    this.cruvaTask = cron.schedule('20 5 * * *', () => { if (this.playbook.data().mcp_configured) void this.playbook.check(undefined, true).then(() => this.alwaysOnOutreach()).catch((err) => log.warn(`Cruva nightly check: ${(err as Error).message}`)); }, { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Replies: Monday morning digest of what went out automatically last week, to the default Slack channel.
     this.repliesDigestTask = cron.schedule('50 8 * * 1', () => void this.repliesDigest(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Cruva learning: Monday 05:00, every shop's voice and content profile, and the update rollouts where the profile moved.
@@ -255,6 +255,20 @@ export class Scheduler {
   /** tl;dv call follow-ups, when the key is set, Claude is configured and the switch is on. */
 
   /** Post the weekly replies digest to the default incident channel (or the first account channel). */
+  /** After the nightly check: a fresh outreach campaign for every shop whose outreach ended; one Slack line per shop. */
+  async alwaysOnOutreach(): Promise<void> {
+    if (!config.anthropicApiKey) return;
+    try {
+      const r = await this.playbook.ensureOutreach();
+      if (r.errors.length) log.warn(`Always-on outreach: ${r.errors.slice(0, 5).join(' | ')}`);
+      if (!r.drafted.length || !slackBot.configured) return;
+      const channel = incidentSettings(this.q).default_channel;
+      if (!channel) return;
+      const lines = ['*Always-on outreach*', ...r.drafted.map((d) => `${d.started ? '✅' : '🟡'} ${d.shop}: ${d.reason} → "${d.shop}" outreach ${d.started ? 'started' : 'drafted, waits for approval'} ${config.publicUrl}/cruva?rollout=${d.rollout_id}`)];
+      await slackBot.post(await slackBot.channelId(channel), lines.join('\n'));
+    } catch (err) { log.warn(`Always-on outreach: ${(err as Error).message}`); }
+  }
+
   async weeklyLearning(): Promise<void> {
     if (!config.anthropicApiKey || !cruvaMcp.configured) return;
     try { const r = await this.playbook.weeklyUpdate(); await this.postWeeklyLearning(r); } catch (err) { log.warn(`Cruva weekly learning: ${(err as Error).message}`); }

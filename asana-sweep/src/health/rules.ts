@@ -34,6 +34,7 @@ export const DEFAULT_THRESHOLDS: HealthThresholds = {
   samples_drop_pct: 30,
   sps_min: 3.5,
   dms_drop_pct: 50,
+  dms_silent_days: 3,
   affiliate_gmv_drop_pct: 30,
   return_response_grace_hours: 24,
   cs_response_pct_min: 90,
@@ -68,6 +69,7 @@ export const THRESHOLD_LABELS: Record<keyof HealthThresholds, { label: string; u
   samples_drop_pct: { label: 'Samples approved or shipped down by', unit: '%', group: 'Affiliate' },
   sps_min: { label: 'Shop performance score under', unit: '/5', group: 'Cruva' },
   dms_drop_pct: { label: 'DMs sent down by', unit: '%', group: 'Cruva' },
+  dms_silent_days: { label: 'No DMs sent for', unit: 'days', group: 'Cruva' },
   affiliate_gmv_drop_pct: { label: 'Affiliate GMV down by', unit: '%', group: 'Cruva' },
   return_response_grace_hours: { label: 'Return waiting on the seller for', unit: 'hours', group: 'CS and returns' },
   cs_response_pct_min: { label: 'CS answered within 24h under', unit: '%', group: 'CS and returns' },
@@ -124,6 +126,8 @@ export const WINDSOR_RULES: RuleDef[] = [
 export const CRUVA_RULES: RuleDef[] = [
   { code: 'c_sps_low', title: 'Shop performance score restricts DMs', description: 'The shop performance score is under the threshold; Cruva cannot send DMs until it recovers.', severity: 'crit', source: 'cruva', section: 'Affiliate daily' },
   { code: 'c_sps_drop', title: 'Shop performance score dropped', description: 'The shop performance score fell by more than the threshold since the last pull.', severity: 'warn', source: 'cruva', section: 'Affiliate daily' },
+  { code: 'c_dms_silent', title: 'No DMs going out', description: 'The shop has sent no DMs for the threshold number of days (seven makes it critical): outreach is not running, whatever the automations say.', severity: 'warn', source: 'cruva', section: 'Affiliate daily' },
+  { code: 'c_outreach_ended', title: 'Outreach campaign ended', description: 'The outreach automations have run out or stopped; a fresh campaign for this month was drafted (and started where Always-on outreach is on).', severity: 'warn', source: 'cruva', section: 'Cruva' },
   { code: 'c_dms_stopped', title: 'Outreach stopped', description: 'DMs sent in the last 7 days are down by the threshold, or zero while automations are active.', severity: 'warn', source: 'cruva', section: 'Affiliate daily' },
   { code: 'c_samples_drop', title: 'Sample approvals or shipping down', description: 'Samples approved or shipped in the last 7 days down by the threshold against the week before.', severity: 'warn', source: 'cruva', section: 'Affiliate daily' },
   { code: 'c_samples_waiting', title: 'Sample requests waiting on review', description: 'Sample requests sitting in review longer than the threshold.', severity: 'warn', source: 'cruva', section: 'Affiliate daily' },
@@ -304,7 +308,7 @@ export function evaluateWindsor(shop: ShopRef, rows: WindsorRows, t: HealthThres
 // ---- Cruva ----
 
 /** Metric keys the daily routine posts per Cruva shop (all optional; missing keys skip their rules). */
-export const CRUVA_METRIC_KEYS = ['sps', 'affiliate_gmv_7d', 'affiliate_gmv_prev_7d', 'total_gmv_7d', 'total_gmv_prev_7d', 'dms_sent_7d', 'dms_sent_prev_7d', 'samples_requested_7d', 'samples_approved_7d', 'samples_approved_prev_7d', 'samples_shipped_7d', 'samples_shipped_prev_7d', 'videos_posted_7d', 'videos_with_sales_7d', 'video_views_7d', 'samples_pending_review', 'samples_pending_review_oldest_hours', 'content_pending', 'automations_active', 'automations_total', 'creators_reached_30d', 'creators_with_sales_30d'] as const;
+export const CRUVA_METRIC_KEYS = ['sps', 'affiliate_gmv_7d', 'affiliate_gmv_prev_7d', 'total_gmv_7d', 'total_gmv_prev_7d', 'dms_sent_7d', 'dms_sent_prev_7d', 'dms_sent_28d', 'dms_silent_days', 'samples_requested_7d', 'samples_approved_7d', 'samples_approved_prev_7d', 'samples_shipped_7d', 'samples_shipped_prev_7d', 'videos_posted_7d', 'videos_with_sales_7d', 'video_views_7d', 'samples_pending_review', 'samples_pending_review_oldest_hours', 'content_pending', 'automations_active', 'automations_total', 'creators_reached_30d', 'creators_with_sales_30d'] as const;
 
 export type CruvaMetrics = Partial<Record<(typeof CRUVA_METRIC_KEYS)[number], number | null>>;
 

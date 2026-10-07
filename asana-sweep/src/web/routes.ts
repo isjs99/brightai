@@ -3369,6 +3369,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     try { const r2 = await samples.accept(String(req.params.shopId), ids, actorOf(req)); res.json({ accepted: r2.accepted.length, skipped: r2.skipped, ...samples.data() }); } catch (err) { bad(err); }
   });
 
+  r.post('/playbook/outreach', async (req, res) => { const b = (req.body ?? {}) as { shop_id?: unknown }; try { const r2 = await playbook.ensureOutreach({ shopIds: b.shop_id ? [String(b.shop_id)] : undefined }); res.json({ ...r2, ...playbook.data() }); } catch (err) { bad(err); } });
   // Direct competitors and the market read (Profile > Competitors)
   r.get('/playbook/shops/:shopId/competitors', (req, res) => res.json(playbook.competitors(String(req.params.shopId))));
   r.post('/playbook/shops/:shopId/competitors/suggest', async (req, res) => { try { const r2 = await playbook.suggestCompetitors(String(req.params.shopId)); res.json({ ...r2, ...playbook.competitors(String(req.params.shopId)) }); } catch (err) { bad(err); } });
@@ -3408,6 +3409,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const sb = (req.body ?? {}) as { top_pct?: unknown; auto_update?: unknown };
     if (sb.top_pct !== undefined) q.setSetting(`playbook_top_pct_${String(req.params.shopId)}`, String(Math.max(1, Math.min(25, Math.round(Number(sb.top_pct)) || 10))));
     if (sb.auto_update !== undefined) q.setSetting(`playbook_auto_update_${String(req.params.shopId)}`, sb.auto_update ? '1' : '0');
+    if ((req.body ?? {}).always_on !== undefined) q.setSetting(`playbook_always_on_${String(req.params.shopId)}`, (req.body as { always_on: unknown }).always_on ? '1' : '0');
     const b = (req.body ?? {}) as Record<string, unknown>;
     if (b.language !== undefined) q.setSetting(`playbook_lang_${String(req.params.shopId)}`, String(b.language ?? '').trim());
     liveEvents.emitUpdate({ kind: 'playbook' });

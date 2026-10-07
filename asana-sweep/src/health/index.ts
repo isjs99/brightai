@@ -134,6 +134,11 @@ export class HealthEngine {
   // ---- Rules over the stored pulls ----
 
   /** Cruva rules from the 4-hourly pull: performance score, outreach, samples, content, affiliate GMV, automations, staleness. */
+  /** What the playbook's daily outreach check left for the shop: an ended campaign and the rollout that replaces it. */
+  private outreachState(shopId: string): { reason: string; name: string; rollout_id: number; started: boolean; at: string; resolved_at: string | null } | null {
+    try { const raw = this.q.getSetting(`playbook_outreach_${shopId}`, ''); return raw ? (JSON.parse(raw) as ReturnType<HealthEngine['outreachState']>) : null; } catch { return null; }
+  }
+
   cruvaFlags(enabled: Set<string>, now = Date.now()): Found[] {
     const t = this.thresholds();
     const out: Found[] = [];
@@ -153,6 +158,9 @@ export class HealthEngine {
       if (typeof m.sps === 'number' && typeof prevSps === 'number' && prevSps - m.sps >= 0.3) add('c_sps_drop', 'warn', `shop performance score fell from ${prevSps} to ${m.sps}`);
       const dmsDrop = drop(m.dms_sent_7d, m.dms_sent_prev_7d);
       if ((m.dms_sent_7d === 0 && (m.automations_active ?? 0) > 0) || (dmsDrop !== null && dmsDrop >= t.dms_drop_pct && (m.dms_sent_prev_7d ?? 0) >= 20)) add('c_dms_stopped', 'warn', m.dms_sent_7d === 0 ? `no DMs sent in 7 days while ${m.automations_active} automation(s) are active` : `DMs sent down ${dmsDrop}% on the week before (${m.dms_sent_7d} vs ${m.dms_sent_prev_7d})`);
+      if (typeof m.dms_silent_days === 'number' && m.dms_silent_days >= t.dms_silent_days) add('c_dms_silent', m.dms_silent_days >= 7 ? 'crit' : 'warn', `no DMs sent for ${m.dms_silent_days} days${(m.automations_active ?? 0) > 0 ? ` while ${m.automations_active} automation(s) show as active` : ''}`, `${m.dms_sent_28d ?? 0} DMs in the last 28 days`);
+      const ended = this.outreachState(s.shop_id);
+      if (ended && !ended.resolved_at) add('c_outreach_ended', 'warn', `${ended.reason}; ${ended.started ? `a fresh "${ended.name}" was started` : `"${ended.name}" is drafted and waits for approval`} (rollout #${ended.rollout_id})`, `${config.publicUrl}/cruva?rollout=${ended.rollout_id}&shop=${s.shop_id}`);
       const apprDrop = drop(m.samples_approved_7d, m.samples_approved_prev_7d); const shipDrop = drop(m.samples_shipped_7d, m.samples_shipped_prev_7d);
       if ((apprDrop !== null && apprDrop >= t.samples_drop_pct && (m.samples_approved_prev_7d ?? 0) >= 5) || (shipDrop !== null && shipDrop >= t.samples_drop_pct && (m.samples_shipped_prev_7d ?? 0) >= 5)) add('c_samples_drop', 'warn', `samples approved ${m.samples_approved_7d} vs ${m.samples_approved_prev_7d}, shipped ${m.samples_shipped_7d} vs ${m.samples_shipped_prev_7d} week on week`);
       if ((m.samples_pending_review ?? 0) > 0 && (m.samples_pending_review_oldest_hours ?? 0) > t.samples_review_hours) add('c_samples_waiting', 'warn', `${m.samples_pending_review} sample request(s) waiting on review, oldest ${Math.round((m.samples_pending_review_oldest_hours ?? 0) / 24)} days`);
