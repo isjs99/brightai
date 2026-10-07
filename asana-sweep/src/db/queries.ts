@@ -2725,6 +2725,22 @@ export class Queries {
     return (this.db.prepare(`SELECT * FROM copilot_evidence ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY occurred_at DESC`).all(...params) as Row[]).map((r) => ({ id: r.id as number, account_id: (r.account_id as number | null) ?? null, kind: r.kind as string, ref: r.ref as string, title: r.title as string, text: r.text as string, url: (r.url as string | null) ?? null, occurred_at: (r.occurred_at as string | null) ?? null, indexed_at: r.indexed_at as string }));
   }
 
+  /** Evidence rows without their text: for counts, titles and matching, where loading transcripts would be waste. */
+  listEvidenceHeads(opts: { kinds?: string[]; from?: string | null; unmatchedOnly?: boolean } = {}): { id: number; account_id: number | null; kind: string; title: string; occurred_at: string | null }[] {
+    const where: string[] = []; const params: unknown[] = [];
+    if (opts.kinds?.length) { where.push(`kind IN (${opts.kinds.map(() => '?').join(',')})`); params.push(...opts.kinds); }
+    if (opts.from) { where.push('occurred_at >= ?'); params.push(opts.from); }
+    if (opts.unmatchedOnly) where.push('account_id IS NULL');
+    return (this.db.prepare(`SELECT id, account_id, kind, title, occurred_at FROM copilot_evidence ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY occurred_at DESC`).all(...params) as Row[]).map((r) => ({ id: Number(r.id), account_id: (r.account_id as number | null) ?? null, kind: String(r.kind), title: String(r.title), occurred_at: (r.occurred_at as string | null) ?? null }));
+  }
+
+  /** Rows per account and kind since a date, in one query. */
+  evidenceStats(from: string, kinds: string[]): Map<string, number> {
+    const out = new Map<string, number>();
+    for (const r of this.db.prepare(`SELECT account_id, kind, COUNT(*) AS n FROM copilot_evidence WHERE occurred_at >= ? AND kind IN (${kinds.map(() => '?').join(',')}) GROUP BY account_id, kind`).all(from, ...kinds) as Row[]) out.set(`${r.account_id ?? 'none'}:${r.kind}`, Number(r.n));
+    return out;
+  }
+
   hasEvidence(kind: string, ref: string): boolean {
     return Boolean(this.db.prepare('SELECT 1 FROM copilot_evidence WHERE kind = ? AND ref = ?').get(kind, ref));
   }

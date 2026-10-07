@@ -118,8 +118,8 @@ export class ClientTasks {
     const withChannel = accounts.filter((a) => a.client_slack_channel);
     const withDomain = accounts.filter((a) => a.client_domain);
     const since = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10);
-    const rows = this.q.listEvidence({ kinds: ['slack', 'email', 'call'], from: since });
-    const count = (id: number, kind: string) => rows.filter((r) => r.account_id === id && r.kind === kind).length;
+    const stats = this.q.evidenceStats(since, ['slack', 'email', 'call']);
+    const count = (id: number, kind: string) => stats.get(`${id}:${kind}`) ?? 0;
     const idx = this.deps.copilot?.indexStatus() ?? { last_at: this.q.getSetting('copilot_last_index_at', '') || null, last_error: this.q.getSetting('copilot_last_index_error', '') || null, indexing: false };
     const ie = idx.last_error ?? '';
     const slackErr = /Slack/i.test(ie) ? ie.split(' · ').find((x) => /^Slack/i.test(x)) ?? null : null;
@@ -130,7 +130,7 @@ export class ClientTasks {
       llm: { ok: Boolean(this.llm), label: 'Claude (reads the text into tasks)', detail: this.llm ? `${modelFor('tasks')}` : 'ANTHROPIC_API_KEY not set: pattern matching only', fix: this.llm ? null : 'Set ANTHROPIC_API_KEY and keep credit on the Anthropic account; without it only sentences that read like an ask become tasks.' },
       index: idx,
       accounts: accounts.map((a) => ({ id: a.id, name: a.name, slack: count(a.id, 'slack'), email: count(a.id, 'email'), call: count(a.id, 'call'), missing: [!a.client_slack_channel ? 'Slack channel' : '', !a.client_domain ? 'client domain' : ''].filter(Boolean) })),
-      unmatched_calls: rows.filter((r) => r.kind === 'call' && r.account_id === null && !INTERNAL_CALL_RE.test(r.title)).slice(0, 10).map((r) => ({ title: r.title, occurred_at: r.occurred_at })),
+      unmatched_calls: this.q.listEvidenceHeads({ kinds: ['call'], from: since, unmatchedOnly: true }).filter((r) => !INTERNAL_CALL_RE.test(r.title)).slice(0, 10).map((r) => ({ title: r.title, occurred_at: r.occurred_at })),
     };
   }
 
@@ -171,6 +171,7 @@ export class ClientTasks {
       const accounts = this.q.listAccounts().filter((a) => a.enabled && (!opts.accountId || a.id === opts.accountId));
       const llm = this.llm;
       for (const a of accounts) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
         const rows = this.q.listEvidence({ accountId: a.id, ownOnly: true, kinds: ['slack', 'email', 'call'] }).filter((r) => r.indexed_at >= since || (opts.sinceDays !== undefined && (r.occurred_at ?? '') >= since.slice(0, 10)));
         for (const r of rows) {
           const ref = `${r.kind}:${r.ref}`;

@@ -208,6 +208,7 @@ export class Copilot {
       const stock = projectRows(this.q.listStock(), { coverDays: stockSettings(this.q).default_cover_days });
       const promos = this.q.listPromotions();
       for (const a of accounts) {
+        await new Promise<void>((resolve) => setImmediate(resolve));
         const ids = new Set(shops.filter((s) => s.account_id === a.id).map((s) => s.shop_id));
         const cur = shops.find((s) => s.account_id === a.id)?.currency ?? '€';
         const weeks: string[] = [];

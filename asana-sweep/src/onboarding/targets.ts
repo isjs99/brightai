@@ -44,16 +44,28 @@ const domainOf = (lead: Lead, prospectDomain: string | null): string | null => {
   return prospectDomain ?? (m ? m[1].toLowerCase() : null);
 };
 
+/** The evidence and prospects loaded once, so a refresh over hundreds of leads does not re-read every transcript per lead. */
+export interface TargetContextCache { rows: { kind: string; title: string; text: string; url: string | null; occurred_at: string | null; titleLc: string; headLc: string }[]; prospects: ReturnType<Queries['listProspects']> }
+
+export function targetContextCache(q: Queries): TargetContextCache {
+  return {
+    rows: q.listEvidence({ kinds: ['call', 'email', 'slack', 'sop', 'report'] }).map((r) => ({ kind: r.kind, title: r.title, text: r.text, url: r.url, occurred_at: r.occurred_at, titleLc: r.title.toLowerCase(), headLc: r.text.slice(0, 4000).toLowerCase() })),
+    prospects: q.listProspects(true),
+  };
+}
+
 /** Everything on record that names the lead: calls, emails, Slack, BD notes. Internal calls are skipped. */
-export function gatherTargetContext(q: Queries, lead: Lead): { sources: TargetSource[]; prospect: { status: string; owner: string | null; notes: string | null; contacts: number; domain: string | null } | null } {
+export function gatherTargetContext(q: Queries, lead: Lead, cache?: TargetContextCache): { sources: TargetSource[]; prospect: { status: string; owner: string | null; notes: string | null; contacts: number; domain: string | null } | null } {
+  const c = cache ?? targetContextCache(q);
   const name = lead.name.trim();
   const nameLc = name.toLowerCase();
-  const prospect = q.listProspects(true).find((p) => (p.brand ?? '').toLowerCase() === nameLc || p.shop_name.toLowerCase() === nameLc || p.shop_name.toLowerCase().includes(nameLc) && nameLc.length > 4) ?? null;
+  const prospect = c.prospects.find((p) => (p.brand ?? '').toLowerCase() === nameLc || p.shop_name.toLowerCase() === nameLc || p.shop_name.toLowerCase().includes(nameLc) && nameLc.length > 4) ?? null;
   const domain = domainOf(lead, prospect?.domain ?? null);
-  const mention = (t: string) => { const l = t.toLowerCase(); return l.includes(nameLc) || (domain ? l.includes(domain) : false); };
-  const rows = q.listEvidence({ kinds: ['call', 'email', 'slack', 'sop', 'report'] }).filter((r) => {
-    if (r.kind === 'call' && INTERNAL_CALL_RE.test(r.title) && !mention(r.title)) return false;
-    if (!mention(r.title) && !mention(r.text.slice(0, 4000))) return false;
+  const mentionLc = (l: string) => l.includes(nameLc) || (domain ? l.includes(domain) : false);
+  const mention = (t: string) => mentionLc(t.toLowerCase());
+  const rows = c.rows.filter((r) => {
+    if (r.kind === 'call' && INTERNAL_CALL_RE.test(r.title) && !mentionLc(r.titleLc)) return false;
+    if (!mentionLc(r.titleLc) && !mentionLc(r.headLc)) return false;
     return true;
   });
   const query = `${name} ${domain ?? ''} proposal contract pricing retainer commission call next steps`;
@@ -132,8 +144,8 @@ export class Targets {
     return config.anthropicApiKey ? (s, u) => draftWithClaude(s, u, { maxTokens: 900, feature: 'targets' }) : null;
   }
 
-  async analyse(lead: Lead, opts: { useLlm?: boolean } = {}): Promise<TargetAnalysis> {
-    const ctx = gatherTargetContext(this.q, lead);
+  async analyse(lead: Lead, opts: { useLlm?: boolean; cache?: TargetContextCache } = {}): Promise<TargetAnalysis> {
+    const ctx = gatherTargetContext(this.q, lead, opts.cache);
     let out = rulesAnalysis(lead, ctx);
     const llm = this.llm;
     if (llm && opts.useLlm !== false && !lead.signed && !stageOf(lead.stage).lost) {
@@ -153,15 +165,18 @@ export class Targets {
       const states = this.q.listTargetStates();
       const leads = this.q.listLeads(false).filter((l) => (!opts.leadId || l.id === opts.leadId) && (opts.leadId || (!l.signed && states.get(l.id)?.status !== 'lost')));
       let llmBudget = 80;
+      const cache = targetContextCache(this.q);
       for (const lead of leads) {
         try {
           const st = states.get(lead.id);
           const moved = !st?.analysis || (lead.updated_at > (st.analysis_at ?? '')) || (Date.now() - Date.parse(st.analysis_at ?? '0') > 3 * 86400000);
           const useLlm = opts.useLlm ?? (moved && llmBudget > 0);
           if (useLlm) llmBudget -= 1;
-          await this.analyse(lead, { useLlm });
+          await this.analyse(lead, { useLlm, cache });
           analysed += 1;
         } catch (err) { errors.push(`${lead.name}: ${(err as Error).message}`); }
+        // Let requests and the health check through between leads; the rules pass is synchronous otherwise.
+        await new Promise<void>((resolve) => setImmediate(resolve));
       }
       this.q.setSetting('targets_last_refresh_at', new Date().toISOString());
       this.q.setSetting('targets_last_refresh_error', errors.join(' · ').slice(0, 500));
