@@ -28,6 +28,7 @@ import { StockTracker } from '../stock/index.js';
 import { IncidentEngine } from '../incidents/index.js';
 import { ClientReports } from '../reports/client.js';
 import { PlaybookEngine } from '../playbook/index.js';
+import { cruvaMcp } from '../cruva/mcp.js';
 import { CruvaPuller } from '../cruva/pull.js';
 import { Copilot } from '../copilot/index.js';
 import { ClientTasks } from '../tasks/client-tasks.js';
@@ -72,6 +73,7 @@ export class Scheduler {
   private cruvaTask: ScheduledTask | null = null;
   private repliesDigestTask: ScheduledTask | null = null;
   private auditTask: ScheduledTask | null = null;
+  private learnTask: ScheduledTask | null = null;
   readonly copilot: Copilot;
   readonly clientTasks: ClientTasks;
   readonly cruvaInbox: CruvaInboxWatcher;
@@ -145,6 +147,8 @@ export class Scheduler {
     this.cruvaTask = cron.schedule('20 5 * * *', () => { if (this.playbook.data().mcp_configured) void this.playbook.check(undefined, true).catch((err) => log.warn(`Cruva nightly check: ${(err as Error).message}`)); }, { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Replies: Monday morning digest of what went out automatically last week, to the default Slack channel.
     this.repliesDigestTask = cron.schedule('50 8 * * 1', () => void this.repliesDigest(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
+    // Cruva learning: Monday 05:00, every shop's voice and content profile, and the update rollouts where the profile moved.
+    this.learnTask = cron.schedule('0 5 * * 1', () => void this.weeklyLearning(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Reply audit: Monday and Thursday 07:00, the last three days of automatic replies scored and the fixes applied.
     this.auditTask = cron.schedule('0 7 * * 1,4', () => void this.replyAudit(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Account monitor: rolling scan of every account for the flags the team otherwise catches by hand.
@@ -243,6 +247,23 @@ export class Scheduler {
   /** tl;dv call follow-ups, when the key is set, Claude is configured and the switch is on. */
 
   /** Post the weekly replies digest to the default incident channel (or the first account channel). */
+  async weeklyLearning(): Promise<void> {
+    if (!config.anthropicApiKey || !cruvaMcp.configured) return;
+    try { const r = await this.playbook.weeklyUpdate(); await this.postWeeklyLearning(r); } catch (err) { log.warn(`Cruva weekly learning: ${(err as Error).message}`); }
+  }
+
+  /** Monday post: what the top 5% said per shop, and which bots were updated or wait for approval. */
+  async postWeeklyLearning(r: Awaited<ReturnType<PlaybookEngine['weeklyUpdate']>>): Promise<void> {
+    if (!slackBot.configured) return;
+    const channel = incidentSettings(this.q).default_channel;
+    if (!channel) return;
+    const lines = [`*Cruva weekly learning*: ${r.learned} of ${r.shops} shops profiled from their top videos.`];
+    for (const sh of this.playbook.shops().filter((x) => x.profile)) { const p = sh.profile!; lines.push(`• ${sh.shop_name}: top ${p.top_count} videos ${p.top_gmv} GMV of ${p.total_gmv}${p.hooks[0] ? `, best hook: ${p.hooks[0].group} ("${p.hooks[0].example.slice(0, 60)}")` : ''}${p.top_creators[0] ? `, top creator @${p.top_creators[0].handle}` : ''}`); }
+    for (const ro of r.rollouts) lines.push(`${ro.auto ? '✅' : '🟡'} ${ro.shop}: ${ro.reasons.join('; ')} → rollout #${ro.rollout_id}${ro.auto ? ` applied (${ro.done} bots)` : ' waits for approval'} ${config.publicUrl}/cruva?rollout=${ro.rollout_id}`);
+    if (r.errors.length) lines.push(`Errors: ${r.errors.slice(0, 5).join(' | ')}`);
+    try { await slackBot.post(await slackBot.channelId(channel), lines.slice(0, 40).join('\n')); } catch (err) { log.warn(`Cruva weekly post: ${(err as Error).message}`); }
+  }
+
   async replyAudit(): Promise<void> {
     if (!config.anthropicApiKey) return;
     try { const audit = await runAudit(this.q); await this.postAudit(audit); } catch (err) { log.warn(`Reply audit: ${(err as Error).message}`); }
@@ -401,6 +422,7 @@ export class Scheduler {
     this.leads.stop();
     this.inbox.stop();
     this.auditTask?.stop();
+    this.learnTask?.stop();
     this.stock.stop();
     this.copilot.stop();
     this.clientTasks.stop();

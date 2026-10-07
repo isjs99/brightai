@@ -3385,6 +3385,9 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     try { const result = playbook.importListing(String(req.params.shopId), String((req.body ?? {}).text ?? '')); res.json({ ...result, ...playbook.data() }); } catch (err) { bad(err); }
   });
   r.put('/playbook/shops/:shopId', (req, res) => {
+    const sb = (req.body ?? {}) as { top_pct?: unknown; auto_update?: unknown };
+    if (sb.top_pct !== undefined) q.setSetting(`playbook_top_pct_${String(req.params.shopId)}`, String(Math.max(1, Math.min(20, Math.round(Number(sb.top_pct)) || 5))));
+    if (sb.auto_update !== undefined) q.setSetting(`playbook_auto_update_${String(req.params.shopId)}`, sb.auto_update ? '1' : '0');
     const b = (req.body ?? {}) as Record<string, unknown>;
     if (b.language !== undefined) q.setSetting(`playbook_lang_${String(req.params.shopId)}`, String(b.language ?? '').trim());
     liveEvents.emitUpdate({ kind: 'playbook' });
@@ -3404,6 +3407,26 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     let payload: Record<string, unknown> | undefined;
     if (b.payload !== undefined) { try { payload = typeof b.payload === 'string' ? (JSON.parse(b.payload) as Record<string, unknown>) : (b.payload as Record<string, unknown>); } catch { throw new HttpError(400, 'Payload must be valid JSON.'); } }
     try { res.json(playbook.updateDraft(idParam(req), { copy: b.copy === undefined ? undefined : (b.copy === null ? null : String(b.copy)), payload, status: b.status === undefined ? undefined : (String(b.status) as PlaybookDraftStatus), start_after: b.start_after === undefined ? undefined : bool(b.start_after, false), save_override: b.save_override === undefined ? undefined : bool(b.save_override, false), name: optText(b.name) ?? undefined })); } catch (err) { bad(err); }
+  });
+  /** Learn a shop now: its voice from the copy it runs, and the content profile from its top videos. */
+  r.post('/playbook/shops/:shopId/learn', async (req, res) => {
+    try { const r2 = await playbook.learnShop(String(req.params.shopId)); res.json({ ...r2, ...playbook.data() }); } catch (err) { bad(err); }
+  });
+  r.get('/playbook/shops/:shopId/profile', (req, res) => {
+    const shopId = String(req.params.shopId);
+    const shop = playbook.shops().find((s) => s.shop_id === shopId);
+    if (!shop) throw new HttpError(404, 'Shop not found');
+    res.json({ shop, profiles: q.listProfiles(shopId, 4), videos: q.listContent(shopId), learned_at: q.getSetting(`playbook_learned_at_${shopId}`, '') || null, existing: q.listRemoteRaw(shopId, 'automation').filter((r) => typeof r.raw.copy === 'string' && r.raw.copy).map((r) => ({ remote_id: r.remote_id, name: r.name, enabled: r.enabled, copy: String(r.raw.copy), sent: r.raw.sent ?? null, replies: r.raw.replies ?? null, gmv: r.raw.gmv ?? null })) });
+  });
+  r.post('/playbook/drafts/:id/tailor', async (req, res) => {
+    try { res.json(await playbook.tailorDraft(idParam(req), { instruction: optText((req.body ?? {}).instruction) })); } catch (err) { bad(err); }
+  });
+  r.post('/playbook/rollouts/:id/tailor', async (req, res) => {
+    try { const r2 = await playbook.tailorRollout(idParam(req)); res.json({ ...r2, ...playbook.drafts(idParam(req)) }); } catch (err) { bad(err); }
+  });
+  r.post('/playbook/weekly', async (req, res) => {
+    const wb = (req.body ?? {}) as { shop_id?: unknown };
+    try { const r2 = await playbook.weeklyUpdate(typeof wb.shop_id === 'string' ? { shopIds: [wb.shop_id] } : {}); await scheduler.postWeeklyLearning(r2); res.json(r2); } catch (err) { bad(err); }
   });
   r.put('/playbook/rollouts/:id/walk', (req, res) => {
     const b = (req.body ?? {}) as { shop_id?: unknown; index?: unknown };

@@ -644,3 +644,6 @@ ol.sources { padding-left: 20px; font-size: 12.5px; } ol.sources li { margin-bot
 .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; } @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
 .actions-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; } .actions-list li.dim { opacity: .55; }
 tr.wrong td { background: var(--crit-bg); } tr.sel td { background: var(--surface-2); }
+
+.walk-known { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; } .walk-existing { border: 1px dashed var(--border); border-radius: 8px; padding: 6px 10px; }
+.badge.accent { background: var(--accent-bg, var(--surface-2)); }

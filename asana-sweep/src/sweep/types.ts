@@ -2239,6 +2239,8 @@ export interface PlaybookSetupCell {
   checked_at: string | null;
   applied_at: string | null;
   note: string | null;
+  /** The copy the shop runs today, when the check could read it. */
+  remote_copy?: string | null;
 }
 
 export type PlaybookCellStatus = 'set' | 'paused' | 'drift' | 'missing' | 'manual' | 'unknown' | 'queued' | 'error';
@@ -2285,6 +2287,10 @@ export interface PlaybookDraft {
   payload: Record<string, unknown>;
   /** The editable copy (DM text, invite message or email body), mirrored into the payload on save. */
   copy: string | null;
+  /** The copy the shop runs today for this piece (an update), or its nearest existing message (a create), for reference. */
+  existing_copy?: string | null;
+  /** Set when the copy was rewritten in the shop's voice with the content profile. */
+  tailored_at?: string | null;
   /** Fields the reviewer still has to fill (needs_input) or cannot (blocked). */
   blockers: string[];
   status: PlaybookDraftStatus;
@@ -2298,6 +2304,28 @@ export interface PlaybookDraft {
 }
 
 export interface PlaybookWalkStep { key: string; title: string; why: string }
+
+/** One affiliate video from Cruva's search_videos, with the analysis Cruva already ran on it. */
+export interface PlaybookContentVideo { video_id: string; handle: string; product_id: string | null; products: string[]; gmv: number; units: number; views: number; likes: number; gmv_per_view: number | null; conversion: number | null; post_time: string | null; link: string | null; title: string | null; overview: string | null; transcript: string | null; hooks: { hook: string; score: number | null; explanation: string | null }[]; rank_gmv: number; rank_eff: number | null; top: boolean }
+
+/** What the top videos of a shop have in common, learnt weekly; every claim carries the video ids it came from. */
+export interface PlaybookProfile {
+  learned_at: string; window_from: string; window_to: string; videos: number; top_count: number; top_gmv: number; total_gmv: number;
+  summary: string;
+  hooks: { group: string; example: string; language: string | null; video_ids: string[] }[];
+  formats: { name: string; video_ids: string[] }[];
+  products_carry: { product_id: string; gmv: number; videos: number }[];
+  products_no_gmv: string[];
+  creator_shape: { follower_band: string | null; niches: string[]; first_video_share: number | null; video_ids: string[] };
+  timing: { best_days: string[]; best_hours: string[]; video_ids: string[] };
+  offer: string | null;
+  example_scripts: { handle: string; video_id: string; link: string | null; lines: string }[];
+  content_ideas: string[];
+  top_creators: { handle: string; gmv: number; videos: number }[];
+}
+
+/** The shop's own voice, learnt from the copy already running in Cruva. */
+export interface PlaybookVoice { learned_at: string; samples: { name: string; kind: string; sent: number | null; replies: number | null; copy: string }[]; summary: string; greeting: string | null; signoff: string | null; register: string | null; emoji: string | null; length: string | null; phrases: string[]; avoid: string[] }
 
 export interface PlaybookData {
   items: PlaybookItem[];
@@ -2318,7 +2346,7 @@ export interface PlaybookData {
   rollouts: PlaybookRollout[];
 }
 
-export interface PlaybookShop { shop_id: string; shop_name: string; account_id: number; account_name: string; am_name: string | null; language: string; market: string | null; plan: string | null; remote_counts: Record<string, number>; checked_at: string | null; learned: PlaybookLearned | null; /** Why the last check of this shop failed, or null. */ error: string | null }
+export interface PlaybookShop { shop_id: string; shop_name: string; account_id: number; account_name: string; am_name: string | null; language: string; market: string | null; plan: string | null; remote_counts: Record<string, number>; checked_at: string | null; learned: PlaybookLearned | null; /** Why the last check of this shop failed, or null. */ error: string | null; /** The content profile and voice, when learnt. */ profile: PlaybookProfile | null; voice: PlaybookVoice | null; top_pct: number; auto_update: boolean }
 
 // ---- Client question copilot ----
 

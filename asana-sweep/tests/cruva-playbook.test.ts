@@ -146,7 +146,12 @@ describe('Cruva rollout engine', () => {
     expect(r.errors).toEqual([]);
     const cells = engine.data().cells.filter((c) => c.shop_id === SHOP_ID);
     const st = (kind: string, key: string) => cells.find((c) => c.kind === kind && c.playbook_key === key)?.status;
-    expect(st('automation', 'sample_sent')).toBe('drift'); // exists, active, but the copy is nothing like the library
+    // The shop's own Sample sent copy is nothing like the library's: it is adopted as the shop's standard (a shop-level library item), kept on the cell, and reads as set rather than drift.
+    expect(st('automation', 'sample_sent')).toBe('set');
+    expect(cells.find((c) => c.kind === 'automation' && c.playbook_key === 'sample_sent')!.remote_copy).toMatch(/Something completely different/);
+    const adopted = engine.data().items.find((i) => i.kind === 'automation' && i.key === 'sample_sent' && i.language === `shop:${SHOP_ID}`)!;
+    expect(adopted.source).toBe('cruva');
+    expect(String((adopted.config.dm_messages as { content?: string }[])[0]?.content)).toMatch(/Something completely different/);
     expect(st('automation', 'content_not_posted')).toBe('paused');
     expect(st('automation', 'first_outreach')).toBe('set'); // "New outreach" is active; "First outreach" completed is ignored
     expect(st('automation', 'delivered')).toBe('missing');
@@ -174,10 +179,11 @@ describe('Cruva rollout engine', () => {
     const state = { autos: AUTOMATIONS, created: [] as { tool: string; args: Record<string, unknown> }[] };
     const engine = new PlaybookEngine(q, fakeMcp(state), async () => 'Salut [affiliate_name], réécrit.');
     engine.seed();
+    q.setSetting('playbook_adopt_existing', '0'); // keep the drift so the update path is exercised
     await engine.syncShops();
     await engine.check(SHOP_ID, true);
     const shopId = SHOP_ID;
-    const { rollout, drafts } = engine.prepare({ shop_ids: [shopId], created_by: 'Isaac' });
+    const { rollout, drafts } = engine.prepare({ shop_ids: [shopId], created_by: 'Isaac', tailor: false });
     expect(rollout.status).toBe('draft');
     const byKey = (kind: string, key: string) => drafts.find((d) => d.kind === kind && d.key === key)!;
     // Groups come before the bots that need them, and the bot references the group drafted in this rollout.

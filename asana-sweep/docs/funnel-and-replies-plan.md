@@ -7,7 +7,7 @@ Plan only. Nothing here is built yet.
 
 ---
 
-## Part 1: the funnel that learns from the top 5%
+## Part 1: the funnel that learns from the top 5% (built 8 October: content pull, profile, voice from the existing Cruva copy, tailored drafts, Monday updates; the three new library items of 1.4 are not added, tailoring covers them)
 
 ### 1.1 What exists today
 

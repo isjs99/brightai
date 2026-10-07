@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import type { PlaybookCellStatus, PlaybookData, PlaybookDraft, PlaybookDraftStatus, PlaybookItem, PlaybookKind, PlaybookRollout, PlaybookSetupCell, PlaybookShop } from '../../../sweep/types';
 import { api, fmtRelative, useActor, useLiveUpdates } from '../api';
 import CruvaWalk from './CruvaWalk';
+import CruvaProfile from './CruvaProfile';
 import { useIsAdmin } from '../session';
 import { useAccountScope, useAllowedAccounts, useInScope } from '../hubs';
 import { GroupsHead, useOpenGroups, type GroupLight } from '../groups';
@@ -56,6 +57,7 @@ export default function CruvaPage() {
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [menu, setMenu] = useState(false);
   const [dialog, setDialog] = useState<'library' | 'rollouts' | 'link' | null>(null);
+  const [profileOf, setProfileOf] = useState<PlaybookShop | null>(null);
   const [cellOpen, setCellOpen] = useState<{ shop: PlaybookShop; col: Column; cell: PlaybookSetupCell | null } | null>(null);
   const [view, setView] = useState<'cards' | 'grid'>(() => { try { return localStorage.getItem('cruva_view') === 'grid' ? 'grid' : 'cards'; } catch { return 'cards'; } });
   useEffect(() => { try { localStorage.setItem('cruva_view', view); } catch { /* private window */ } }, [view]);
@@ -203,11 +205,13 @@ export default function CruvaPage() {
                   {c.drift.length > 0 && <div><span className="badge muted">differs</span> {names(c.drift, c.shops.length).join(', ')}</div>}
                   {c.errors > 0 && <div className="check-err sub">{c.errors} shop{c.errors === 1 ? '' : 's'} failed the last check</div>}
                   {c.checked && !c.missingCore.length && !c.paused.length && !c.drift.length && <div className="sub">Every core piece is live.</div>}
+                  {(() => { const sh = c.shops.find((x) => x.profile); const pr = sh?.profile; return pr ? <div className="cc-learned"><span className="badge accent" title={`Learnt ${fmtRelative(pr.learned_at)} from ${pr.videos} videos`}>top {pr.top_count}</span> {pr.hooks[0] ? <>best hook <b>{pr.hooks[0].group}</b>: "{pr.hooks[0].example.slice(0, 70)}"</> : pr.summary.slice(0, 120)}{pr.top_creators[0] ? <span className="sub"> · @{pr.top_creators[0].handle}</span> : null}{pr.products_carry.length ? <span className="sub"> · {pr.products_carry.length} product{pr.products_carry.length === 1 ? '' : 's'} carry</span> : null}{sh?.voice ? <span className="badge muted" style={{ marginLeft: 6 }} title={sh.voice.summary}>voice learnt</span> : null}</div> : null; })()}
                   {c.learned.length > 0 && <div className="sub cc-learned">Known from the shop: {c.learned.some((l) => l.brief_link) ? 'brief link' : 'no brief link'} · {[...new Set(c.learned.flatMap((l) => l.categories))].length} categories · {[...new Set(c.learned.flatMap((l) => l.products))].length} products{c.learned.some((l) => l.sender_emails.length) ? ' · sender email' : ' · no sender email'}</div>}
                 </div>
                 <div className="actions cc-actions">
                   {isAdmin && (c.drafting ? <button className="small primary" onClick={() => openRollout(c.drafting!.id, { shop: c.shops[0].shop_id })}>Continue rollout #{c.drafting.id}</button> : <button className="small primary" disabled={busy !== null || !c.checked || (!c.missingCore.length && !c.missingExtra.length && !c.paused.length && !c.drift.length)} onClick={() => prepareAccount(c)}>{busy === `prep${c.account_id}` ? 'Preparing…' : 'Prepare rollout'}</button>)}
                   {isAdmin && <button className="small" disabled={busy !== null || data.checking} onClick={() => checkAccount(c)}>{busy === `chk${c.account_id}` ? 'Checking…' : 'Check now'}</button>}
+                  <button className="small" onClick={() => setProfileOf(c.shops[0])} title="Top videos, what sells, the shop's voice and its existing messages">{c.shops.some((x) => x.profile || x.voice) ? 'Profile' : 'Learn'}</button>
                   <button className="small" onClick={() => { groups.setAll([c.account_id], true); setView('grid'); }}>Grid</button>
                 </div>
               </div>
@@ -280,6 +284,10 @@ export default function CruvaPage() {
 
       </>)}
 
+      {profileOf && <Modal title={`${profileOf.shop_name}: what sells and how the shop writes`} wide onClose={() => setProfileOf(null)}>
+        {(() => { const siblings = data.shops.filter((x) => x.account_id === profileOf.account_id); return siblings.length > 1 ? <div className="presets" style={{ marginBottom: 8 }}>{siblings.map((x) => <button key={x.shop_id} className={x.shop_id === profileOf.shop_id ? 'active' : ''} onClick={() => setProfileOf(x)}>{x.shop_name}</button>)}</div> : null; })()}
+        <CruvaProfile key={profileOf.shop_id} shopId={profileOf.shop_id} isAdmin={isAdmin} onChanged={load} />
+      </Modal>}
       {cellOpen && <Modal title={`${cellOpen.col.name} · ${cellOpen.shop.shop_name}`} onClose={() => setCellOpen(null)}><CellDetail {...cellOpen} data={data} isAdmin={isAdmin} run={run} onClose={() => setCellOpen(null)} /></Modal>}
       {dialog === 'rollouts' && <Modal title="Rollouts" wide onClose={() => setDialog(null)}>
         {data.rollouts.length === 0 ? <p className="sub">No rollouts yet.</p> : (

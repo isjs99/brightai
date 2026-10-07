@@ -92,6 +92,8 @@ import type {
   ReplyAuditAction,
   ReplyAuditItem,
   ReplyAuditSummary,
+  PlaybookContentVideo,
+  PlaybookProfile,
 } from '../sweep/types.js';
 import { isSignedStage, leadKey, matchPerson, type SheetLead } from '../leads/sheet.js';
 import { fastmossShopUrl, launchFlags, matchesAccountName, outreachComplete, riseBand, riseScore } from '../bd/score.js';
@@ -2287,7 +2289,11 @@ export class Queries {
   }
 
   listPlaybookCells(): PlaybookSetupCell[] {
-    return (this.db.prepare('SELECT * FROM cruva_setup').all() as Row[]).map((r) => ({ shop_id: r.shop_id as string, kind: r.kind as PlaybookKind, playbook_key: r.playbook_key as string, status: r.status as PlaybookSetupCell['status'], remote_id: (r.remote_id as string | null) ?? null, remote_name: (r.remote_name as string | null) ?? null, checked_at: (r.checked_at as string | null) ?? null, applied_at: (r.applied_at as string | null) ?? null, note: (r.note as string | null) ?? null }));
+    return (this.db.prepare('SELECT * FROM cruva_setup').all() as Row[]).map((r) => ({ shop_id: r.shop_id as string, kind: r.kind as PlaybookKind, playbook_key: r.playbook_key as string, status: r.status as PlaybookSetupCell['status'], remote_id: (r.remote_id as string | null) ?? null, remote_name: (r.remote_name as string | null) ?? null, checked_at: (r.checked_at as string | null) ?? null, applied_at: (r.applied_at as string | null) ?? null, note: (r.note as string | null) ?? null, remote_copy: (r.remote_copy as string | null) ?? null }));
+  }
+
+  setPlaybookCellCopy(shopId: string, kind: PlaybookKind, key: string, copy: string | null): void {
+    this.db.prepare('UPDATE cruva_setup SET remote_copy = ? WHERE shop_id = ? AND kind = ? AND playbook_key = ?').run(copy, shopId, kind, key);
   }
 
   setPlaybookCell(c: { shop_id: string; kind: PlaybookKind; playbook_key: string; status: PlaybookSetupCell['status']; remote_id?: string | null; remote_name?: string | null; checked_at?: string | null; applied_at?: string | null; note?: string | null }): void {
@@ -2304,6 +2310,48 @@ export class Queries {
     let n = 0;
     this.db.transaction(() => { del.run(shopId, kind); for (const i of items) n += ins.run(shopId, kind, i.remote_id, i.name, i.enabled ? 1 : 0, i.raw === undefined ? null : JSON.stringify(i.raw).slice(0, 20000), now).changes; })();
     return n;
+  }
+
+  /** The stored raw fields of a shop's remote objects (listing fields, detail, any copy fetched later). */
+  listRemoteRaw(shopId: string, kind?: PlaybookKind): { remote_id: string; name: string; enabled: boolean; raw: Record<string, unknown> }[] {
+    const rows = (kind ? this.db.prepare('SELECT remote_id, name, enabled, raw_json FROM cruva_remote_items WHERE shop_id = ? AND kind = ?').all(shopId, kind) : this.db.prepare('SELECT remote_id, name, enabled, raw_json FROM cruva_remote_items WHERE shop_id = ?').all(shopId)) as Row[];
+    return rows.map((r) => ({ remote_id: r.remote_id as string, name: r.name as string, enabled: Boolean(r.enabled), raw: parseJson<Record<string, unknown>>(r.raw_json, {}) }));
+  }
+
+  patchRemoteRaw(shopId: string, kind: PlaybookKind, remoteId: string, patch: Record<string, unknown>): void {
+    const r = this.db.prepare('SELECT raw_json FROM cruva_remote_items WHERE shop_id = ? AND kind = ? AND remote_id = ?').get(shopId, kind, remoteId) as Row | undefined;
+    if (!r) return;
+    this.db.prepare('UPDATE cruva_remote_items SET raw_json = ? WHERE shop_id = ? AND kind = ? AND remote_id = ?').run(JSON.stringify({ ...parseJson<Record<string, unknown>>(r.raw_json, {}), ...patch }), shopId, kind, remoteId);
+  }
+
+  // ---- Cruva content and profiles ----
+
+  replaceContent(shopId: string, windowTo: string, rows: PlaybookContentVideo[]): void {
+    const now = new Date().toISOString();
+    this.db.transaction(() => {
+      this.db.prepare('DELETE FROM cruva_content WHERE shop_id = ? AND window_to = ?').run(shopId, windowTo);
+      const ins = this.db.prepare('INSERT INTO cruva_content (shop_id, window_to, video_id, row_json, gmv, top, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+      for (const v of rows) ins.run(shopId, windowTo, v.video_id, JSON.stringify(v), v.gmv, v.top ? 1 : 0, now);
+      // Keep the last four windows per shop.
+      const keep = (this.db.prepare('SELECT DISTINCT window_to FROM cruva_content WHERE shop_id = ? ORDER BY window_to DESC LIMIT 4').all(shopId) as { window_to: string }[]).map((r) => r.window_to);
+      if (keep.length) this.db.prepare(`DELETE FROM cruva_content WHERE shop_id = ? AND window_to NOT IN (${keep.map(() => '?').join(',')})`).run(shopId, ...keep);
+    })();
+  }
+
+  listContent(shopId: string, opts: { topOnly?: boolean; windowTo?: string } = {}): PlaybookContentVideo[] {
+    const win = opts.windowTo ?? (this.db.prepare('SELECT MAX(window_to) AS w FROM cruva_content WHERE shop_id = ?').get(shopId) as { w: string | null }).w;
+    if (!win) return [];
+    return (this.db.prepare(`SELECT row_json FROM cruva_content WHERE shop_id = ? AND window_to = ?${opts.topOnly ? ' AND top = 1' : ''} ORDER BY gmv DESC`).all(shopId, win) as Row[]).map((r) => parseJson<PlaybookContentVideo>(r.row_json, {} as PlaybookContentVideo));
+  }
+
+  addProfile(shopId: string, profile: PlaybookProfile): void {
+    this.db.prepare('INSERT INTO cruva_profiles (shop_id, learned_at, profile_json) VALUES (?, ?, ?)').run(shopId, profile.learned_at, JSON.stringify(profile));
+    this.db.prepare('DELETE FROM cruva_profiles WHERE shop_id = ? AND id NOT IN (SELECT id FROM cruva_profiles WHERE shop_id = ? ORDER BY id DESC LIMIT 8)').run(shopId, shopId);
+  }
+
+  /** Newest first. */
+  listProfiles(shopId: string, limit = 2): PlaybookProfile[] {
+    return (this.db.prepare('SELECT profile_json FROM cruva_profiles WHERE shop_id = ? ORDER BY id DESC LIMIT ?').all(shopId, limit) as Row[]).map((r) => parseJson<PlaybookProfile>(r.profile_json, {} as PlaybookProfile));
   }
 
   listRemoteItems(shopId?: string): { shop_id: string; kind: PlaybookKind; remote_id: string; name: string; enabled: boolean; seen_at: string }[] {
@@ -2347,6 +2395,7 @@ export class Queries {
       action: r.action as PlaybookDraft['action'], tool: r.tool as string, payload: parseJson<Record<string, unknown>>(r.payload_json, {}), copy: (r.copy as string | null) ?? null,
       blockers: parseJson<string[]>(r.blockers_json, []), status: r.status as PlaybookDraftStatus, start_after: Boolean(r.start_after), save_override: Boolean(r.save_override),
       remote_id: (r.remote_id as string | null) ?? null, remote_name: (r.remote_name as string | null) ?? null, result: (r.result as string | null) ?? null, order_no: Number(r.order_no ?? 0), updated_at: r.updated_at as string,
+      existing_copy: (r.existing_copy as string | null) ?? null, tailored_at: (r.tailored_at as string | null) ?? null,
     };
   }
 
@@ -2360,14 +2409,16 @@ export class Queries {
   }
 
   addRolloutDraft(d: Omit<PlaybookDraft, 'id' | 'updated_at' | 'remote_id' | 'remote_name' | 'result'> & { remote_id?: string | null; remote_name?: string | null }): PlaybookDraft {
-    const id = Number(this.db.prepare(`INSERT INTO cruva_drafts (rollout_id, shop_id, shop_name, account_id, kind, key, name, description, language, action, tool, payload_json, copy, blockers_json, status, start_after, save_override, remote_id, remote_name, order_no, updated_at)
-      VALUES (@rollout_id, @shop_id, @shop_name, @account_id, @kind, @key, @name, @description, @language, @action, @tool, @payload_json, @copy, @blockers_json, @status, @start_after, @save_override, @remote_id, @remote_name, @order_no, @updated_at)`)
-      .run({ rollout_id: d.rollout_id, shop_id: d.shop_id, shop_name: d.shop_name, account_id: d.account_id, kind: d.kind, key: d.key, name: d.name, description: d.description, language: d.language, action: d.action, tool: d.tool, payload_json: JSON.stringify(d.payload), copy: d.copy, blockers_json: JSON.stringify(d.blockers), status: d.status, start_after: d.start_after ? 1 : 0, save_override: d.save_override ? 1 : 0, remote_id: d.remote_id ?? null, remote_name: d.remote_name ?? null, order_no: d.order_no, updated_at: new Date().toISOString() }).lastInsertRowid);
+    const id = Number(this.db.prepare(`INSERT INTO cruva_drafts (rollout_id, shop_id, shop_name, account_id, kind, key, name, description, language, action, tool, payload_json, copy, blockers_json, status, start_after, save_override, remote_id, remote_name, order_no, updated_at, existing_copy)
+      VALUES (@rollout_id, @shop_id, @shop_name, @account_id, @kind, @key, @name, @description, @language, @action, @tool, @payload_json, @copy, @blockers_json, @status, @start_after, @save_override, @remote_id, @remote_name, @order_no, @updated_at, @existing_copy)`)
+      .run({ existing_copy: d.existing_copy ?? null, rollout_id: d.rollout_id, shop_id: d.shop_id, shop_name: d.shop_name, account_id: d.account_id, kind: d.kind, key: d.key, name: d.name, description: d.description, language: d.language, action: d.action, tool: d.tool, payload_json: JSON.stringify(d.payload), copy: d.copy, blockers_json: JSON.stringify(d.blockers), status: d.status, start_after: d.start_after ? 1 : 0, save_override: d.save_override ? 1 : 0, remote_id: d.remote_id ?? null, remote_name: d.remote_name ?? null, order_no: d.order_no, updated_at: new Date().toISOString() }).lastInsertRowid);
     return this.getRolloutDraft(id)!;
   }
 
-  updateRolloutDraft(id: number, patch: Partial<Pick<PlaybookDraft, 'payload' | 'copy' | 'blockers' | 'status' | 'start_after' | 'save_override' | 'remote_id' | 'remote_name' | 'result' | 'name'>>): PlaybookDraft | null {
+  updateRolloutDraft(id: number, patch: Partial<Pick<PlaybookDraft, 'payload' | 'copy' | 'blockers' | 'status' | 'start_after' | 'save_override' | 'remote_id' | 'remote_name' | 'result' | 'name' | 'existing_copy' | 'tailored_at'>>): PlaybookDraft | null {
     const sets: string[] = []; const params: Record<string, unknown> = { id, updated_at: new Date().toISOString() };
+    if (patch.existing_copy !== undefined) { sets.push('existing_copy = @existing_copy'); params.existing_copy = patch.existing_copy; }
+    if (patch.tailored_at !== undefined) { sets.push('tailored_at = @tailored_at'); params.tailored_at = patch.tailored_at; }
     if (patch.payload !== undefined) { sets.push('payload_json = @payload_json'); params.payload_json = JSON.stringify(patch.payload); }
     if (patch.copy !== undefined) { sets.push('copy = @copy'); params.copy = patch.copy; }
     if (patch.blockers !== undefined) { sets.push('blockers_json = @blockers_json'); params.blockers_json = JSON.stringify(patch.blockers); }

@@ -30,6 +30,8 @@ export default function CruvaWalk({ id, shopId, data, isAdmin, onBack, onTable, 
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [showJson, setShowJson] = useState(false);
+  const [showExisting, setShowExisting] = useState(true);
+  const shopInfo = useMemo(() => data.shops.find((s) => s.shop_id === shop) ?? null, [data.shops, shop]);
 
   const load = useCallback(() => api.playbookRollout(id).then((r) => { setRollout(r.rollout); setDrafts(r.drafts); setSteps(r.steps); setWalk(r.walk); }).catch((e) => onError((e as Error).message)), [id, onError]);
   useEffect(() => { load(); }, [load]);
@@ -60,6 +62,7 @@ export default function CruvaWalk({ id, shopId, data, isAdmin, onBack, onTable, 
   const approve = (start?: boolean) => run('approve', async () => { if (!cur) return; await saveCopy(); await api.playbookDraftUpdate(cur.id, { status: 'approved', ...(start !== undefined ? { start_after: start } : {}) }); }, () => go((index ?? 0) + 1));
   const skip = () => run('skip', async () => { if (cur) await api.playbookDraftUpdate(cur.id, { status: 'skipped' }); }, () => go((index ?? 0) + 1));
   const unskip = () => run('unskip', async () => { if (cur) await api.playbookDraftUpdate(cur.id, { status: 'ready' }); });
+  const tailor = () => run('tailor', async () => { if (!cur) return; await saveCopy(); await api.playbookTailor(cur.id, instruction || null); }, () => setNotice(`Rewritten in ${cur?.shop_name}'s voice${shopInfo?.profile ? ' with what sells' : ''}.`));
   const applyEnglish = () => run('english', async () => { if (cur) await api.playbookFromEnglish(cur.id, englishEdit); }, () => setNotice(`Rendered into ${LANG[cur?.language ?? ''] ?? cur?.language} from your English.`));
 
   if (!rollout) return <p className="sub">Loading rollout…</p>;
@@ -117,6 +120,13 @@ export default function CruvaWalk({ id, shopId, data, isAdmin, onBack, onTable, 
                   {cur.remote_name && <span className="badge muted" title={cur.remote_id ?? ''}>in Cruva: {cur.remote_name}</span>}
                 </div>
               </div>
+              {(shopInfo?.voice || shopInfo?.profile) && <div className="sub walk-known">{shopInfo.voice ? <span title={shopInfo.voice.summary}><b>Voice:</b> {shopInfo.voice.summary.slice(0, 160)}{shopInfo.voice.summary.length > 160 ? '…' : ''}</span> : null}{shopInfo.profile ? <span> <b>Sells:</b> {shopInfo.profile.hooks[0] ? `${shopInfo.profile.hooks[0].group} hooks` : ''}{shopInfo.profile.products_carry[0] ? `, product ${shopInfo.profile.products_carry[0].product_id}` : ''}{shopInfo.profile.offer ? `, ${shopInfo.profile.offer}` : ''}{shopInfo.profile.timing.best_days[0] ? `, best on ${shopInfo.profile.timing.best_days[0]}` : ''}</span> : null}{cur.tailored_at ? <span className="badge good" style={{ marginLeft: 6 }} title={`Rewritten in the shop's voice ${fmtRelative(cur.tailored_at)}`}>tailored</span> : <span className="badge muted" style={{ marginLeft: 6 }}>library copy</span>}</div>}
+              {cur.existing_copy && (
+                <details open={showExisting} onToggle={(e) => setShowExisting((e.target as HTMLDetailsElement).open)} className="walk-existing">
+                  <summary className="sub" style={{ cursor: 'pointer' }}>{cur.action === 'update' ? 'What the shop runs today for this piece' : 'The shop\'s nearest existing message, for reference'}</summary>
+                  <div className="bubble" style={{ whiteSpace: 'pre-wrap', marginTop: 6, fontSize: 13 }}>{cur.existing_copy}</div>
+                </details>
+              )}
               {cur.blockers.length > 0 && <ul className="flaglist">{cur.blockers.map((b, i) => <li key={i} className={cur.status === 'blocked' ? 'crit' : 'warn'}><span>{b}</span></li>)}</ul>}
               {cur.result && <div className={`banner ${cur.status === 'error' ? 'crit' : 'info'}`} style={{ whiteSpace: 'pre-wrap' }}>{cur.result}</div>}
 
@@ -135,7 +145,7 @@ export default function CruvaWalk({ id, shopId, data, isAdmin, onBack, onTable, 
                   <div>
                     <div className="lbl">{LANG[cur.language] ?? cur.language} · what gets sent</div>
                     <textarea className="copy" value={copy} onChange={(e) => setCopy(e.target.value)} disabled={!isAdmin || done} />
-                    {isAdmin && !done && <div className="inline-form" style={{ marginTop: 6 }}><input type="text" value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder="Steer a rewrite (shorter, mention the bundle…)" style={{ flex: 1, fontSize: 12 }} /><button className="small" disabled={busy !== null} onClick={() => run('rw', async () => { await saveCopy(); await api.playbookDraftRewrite(cur.id, instruction || null); })}>{busy === 'rw' ? 'Rewriting…' : 'Rewrite'}</button>{copy !== (cur.copy ?? '') && <button className="small" disabled={busy !== null} onClick={() => run('save', saveCopy)}>Save</button>}</div>}
+                    {isAdmin && !done && <div className="inline-form" style={{ marginTop: 6 }}><input type="text" value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder="Steer a rewrite (shorter, mention the bundle…)" style={{ flex: 1, fontSize: 12 }} /><button className="small" disabled={busy !== null} onClick={() => run('rw', async () => { await saveCopy(); await api.playbookDraftRewrite(cur.id, instruction || null); })}>{busy === 'rw' ? 'Rewriting…' : 'Rewrite'}</button>{(shopInfo?.voice || shopInfo?.profile) && <button className="small" disabled={busy !== null} title="Rewrite in the shop's own voice, with what sells, starting from its existing message" onClick={tailor}>{busy === 'tailor' ? 'Tailoring…' : 'Tailor to this shop'}</button>}{copy !== (cur.copy ?? '') && <button className="small" disabled={busy !== null} onClick={() => run('save', saveCopy)}>Save</button>}</div>}
                   </div>
                   <div>
                     <div className="lbl">English · the same, for review</div>

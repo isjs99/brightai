@@ -1,5 +1,5 @@
 import type { Queries } from '../db/queries.js';
-import type { Account, PlaybookCellStatus, PlaybookData, PlaybookDraft, PlaybookDraftStatus, PlaybookItem, PlaybookKind, PlaybookLearned, PlaybookRollout, PlaybookSetupCell, PlaybookShop } from '../sweep/types.js';
+import type { Account, PlaybookCellStatus, PlaybookData, PlaybookDraft, PlaybookDraftStatus, PlaybookItem, PlaybookKind, PlaybookLearned, PlaybookProfile, PlaybookRollout, PlaybookSetupCell, PlaybookShop, PlaybookVoice } from '../sweep/types.js';
 import { cruvaCrm, cruvaEndpoints } from '../gmv/cruva.js';
 import { cruvaMcp, dmMessagesFromDetail, idFromResult, inviteDetailsFromDetail, outreachFiltersFromDetail, parseListing, unwrap, type ListingRow, type McpCaller } from '../cruva/mcp.js';
 import { SEED_PLAYBOOK } from './seed.js';
@@ -9,6 +9,8 @@ import { config } from '../config.js';
 import { draftWithClaude } from '../inbox/llm.js';
 import { textHash, translateToEnglish } from '../inbox/translate.js';
 import { fromEnglishPrompt, WALK_STEPS } from './walk.js';
+import { pullContent } from './content.js';
+import { materialChange, parseProfile, parseVoice, profileFacts, profilePrompt, voiceFacts, voicePrompt } from './profile.js';
 
 /**
  * Cruva best-practice rollout. The library (seed.ts, editable) lists what every shop should have; the
@@ -146,6 +148,17 @@ export class PlaybookEngine {
     try { return { ...emptyLearned(), ...(JSON.parse(raw) as Partial<PlaybookLearned>) }; } catch { return null; }
   }
 
+  private voiceFor(shopId: string): PlaybookVoice | null {
+    const raw = this.q.getSetting(`playbook_voice_${shopId}`, '');
+    if (!raw) return null;
+    try { return JSON.parse(raw) as PlaybookVoice; } catch { return null; }
+  }
+
+  private llmOrNull(maxTokens: number, feature: 'playbook' = 'playbook'): ((system: string, user: string) => Promise<string>) | null {
+    if (this.llm !== undefined) return this.llm;
+    return config.anthropicApiKey ? (sys: string, user: string) => draftWithClaude(sys, user, { maxTokens, feature }) : null;
+  }
+
   shops(): PlaybookShop[] {
     const accounts = new Map(this.q.listAccounts().map((a) => [a.id, a]));
     const tts = this.q.listTtsShops();
@@ -154,7 +167,7 @@ export class PlaybookEngine {
       const fromName = s.shop_name.match(MARKET_RE)?.[1]?.toUpperCase() ?? null;
       const market = fromName ?? tts.find((t) => t.account_id === s.account_id)?.market ?? (a?.markets ?? '').split(/[,\s/]+/)[0] ?? null;
       const override = this.q.getSetting(`playbook_lang_${s.shop_id}`, '');
-      return { shop_id: s.shop_id, shop_name: s.shop_name, account_id: s.account_id, account_name: a?.name ?? '', am_name: a?.am_name ?? null, market: market || null, language: override || shopLanguage(market), plan: this.q.getSetting(`playbook_plan_${s.shop_id}`, '') || null, remote_counts: {}, checked_at: null, learned: this.learnedFor(s.shop_id), error: this.q.getSetting(`playbook_shop_error_${s.shop_id}`, '') || null };
+      return { shop_id: s.shop_id, shop_name: s.shop_name, account_id: s.account_id, account_name: a?.name ?? '', am_name: a?.am_name ?? null, market: market || null, language: override || shopLanguage(market), plan: this.q.getSetting(`playbook_plan_${s.shop_id}`, '') || null, remote_counts: {}, checked_at: null, learned: this.learnedFor(s.shop_id), profile: this.q.listProfiles(s.shop_id, 1)[0] ?? null, voice: this.voiceFor(s.shop_id), top_pct: Number(this.q.getSetting(`playbook_top_pct_${s.shop_id}`, '5')) || 5, auto_update: this.q.getSetting(`playbook_auto_update_${s.shop_id}`, '') === '1', error: this.q.getSetting(`playbook_shop_error_${s.shop_id}`, '') || null };
     }).filter((s) => accounts.get(s.account_id)?.enabled !== false);
   }
 
@@ -211,10 +224,11 @@ export class PlaybookEngine {
   private libraryItems(): PlaybookItem[] { return this.q.listPlaybook().filter((i) => i.enabled); }
 
   /** One library entry per kind:key (the language variants collapse), the shop's language preferred. */
-  private itemsFor(language: string): PlaybookItem[] {
+  /** The library as one shop sees it: its own adopted or saved copy first, then its language, then the generic item. */
+  private itemsFor(language: string, shopId?: string): PlaybookItem[] {
     const byKey = new Map<string, PlaybookItem[]>();
-    for (const i of this.libraryItems()) { const k = `${i.kind}:${i.key}`; byKey.set(k, [...(byKey.get(k) ?? []), i]); }
-    const rank = (i: PlaybookItem) => (i.language === language ? 0 : i.language === '*' ? 1 : i.language === 'en' ? 2 : 3);
+    for (const i of this.libraryItems()) { if (i.language.startsWith('shop:') && i.language !== `shop:${shopId ?? ''}`) continue; const k = `${i.kind}:${i.key}`; byKey.set(k, [...(byKey.get(k) ?? []), i]); }
+    const rank = (i: PlaybookItem) => (shopId && i.language === `shop:${shopId}` ? -1 : i.language === language ? 0 : i.language === '*' ? 1 : i.language === 'en' ? 2 : 3);
     return [...byKey.values()].map((list) => [...list].sort((a, b) => rank(a) - rank(b))[0]);
   }
 
@@ -240,9 +254,10 @@ export class PlaybookEngine {
     const brief = (rows.get('brief') ?? [])[0];
     if (brief) learned.brief_link = brief.fields.link ?? brief.detail.match(/https?:\/\/\S+/)?.[0] ?? brief.fields.url ?? learned.brief_link;
     const drift = new Map<string, boolean>();
+    const copies = new Map<string, string>();
     if (deep) {
       // Drift only matters for the lifecycle bots on CRM groups; outreach copy is each shop's own.
-      const items = this.itemsFor(shop.language).filter((i) => i.kind === 'automation' && !i.config.manual && i.config.outreach_audience === 'groups');
+      const items = this.itemsFor(shop.language, shop.shop_id).filter((i) => i.kind === 'automation' && !i.config.manual && i.config.outreach_audience === 'groups');
       const autos = rows.get('automation') ?? [];
       const brand = brandOf(shop.shop_name);
       // Learn categories, products, contact email and timezone from the shop's strongest outreach automations.
@@ -274,13 +289,29 @@ export class PlaybookEngine {
         const dms = dmMessagesFromDetail(d);
         if (!dms) continue;
         const remote = dms.filter((m) => (m.type ?? 'message') !== 'invite_card').map((m) => m.content ?? '').join('\n');
-        drift.set(hit.remote_id, copyKey(remote) !== copyKey(brandify(lib, brand)));
+        copies.set(`${item.kind}:${item.key}`, remote);
+        this.q.patchRemoteRaw(shop.shop_id, 'automation', hit.remote_id, { copy: remote });
+        const differs = copyKey(remote) !== copyKey(brandify(lib, brand));
+        // What the shop already runs is the standard for that shop: adopt it as the shop's own library item the first time, so drafts start from it and it never reads as drift.
+        if (differs && !item.language.startsWith('shop:') && remote.trim() && this.q.getSetting('playbook_adopt_existing', '1') === '1') {
+          this.q.upsertPlaybookItem({ kind: item.kind, key: item.key, language: `shop:${shop.shop_id}`, name: item.name, description: `${shop.shop_name}: the copy running in Cruva, adopted on ${new Date().toISOString().slice(0, 10)}`, config: { ...item.config, dm_messages: dms, adopted_from: hit.remote_id }, source: 'cruva' });
+          drift.set(hit.remote_id, false);
+        } else drift.set(hit.remote_id, differs);
+      }
+      // The copy of the shop's strongest messages, for the voice and as the reference next to every draft.
+      const strongest = [...autos].sort((a, b) => gmv(b) - gmv(a) || Number((b.fields.sent ?? '0').replace(/[^\d]/g, '')) - Number((a.fields.sent ?? '0').replace(/[^\d]/g, ''))).slice(0, 8);
+      for (const r of strongest) {
+        const d = await fetchDetail(r.remote_id);
+        const dms = dmMessagesFromDetail(d);
+        const copy = dms?.filter((m) => (m.type ?? 'message') !== 'invite_card').map((m) => m.content ?? '').join('\n').trim();
+        if (copy) this.q.patchRemoteRaw(shop.shop_id, 'automation', r.remote_id, { copy, sent: Number((r.fields.sent ?? '').replace(/[^\d]/g, '')) || null, replies: Number((r.fields.replies ?? '').replace(/[^\d]/g, '')) || null, gmv: gmv(r) });
       }
     }
     if (!learned.contact_email) learned.contact_email = `team+${norm(brandOf(shop.shop_name)).replace(/\s+/g, '')}@brightform.agency`;
     if (!learned.timezone) learned.timezone = MARKET_TZ[(shop.market ?? '').toUpperCase()] ?? 'Europe/Madrid';
     this.q.setSetting(`playbook_learned_${shop.shop_id}`, JSON.stringify(learned));
     this.reconcile(shop.shop_id, drift);
+    for (const [k, copy] of copies) { const [kind, key] = k.split(':'); this.q.setPlaybookCellCopy(shop.shop_id, kind as PlaybookKind, key, copy); }
   }
 
   /** Recompute every cell for one shop from the stored remote items. */
@@ -289,7 +320,7 @@ export class PlaybookEngine {
     const shop = this.shops().find((s) => s.shop_id === shopId);
     const now = new Date().toISOString();
     const cells = this.q.listPlaybookCells();
-    for (const item of this.itemsFor(shop?.language ?? 'en')) {
+    for (const item of this.itemsFor(shop?.language ?? 'en', shopId)) {
       const cur = cells.find((c) => c.shop_id === shopId && c.kind === item.kind && c.playbook_key === item.key);
       const manual = Boolean(item.config.manual) || item.kind === 'manual';
       const pool = remote.filter((r) => r.kind === item.kind || (item.kind === 'tag' && r.kind === 'tag'));
@@ -413,15 +444,16 @@ export class PlaybookEngine {
   }
 
   /** Draft every missing, paused or drifted item for the chosen shops into a new rollout, nothing sent to Cruva yet. */
-  prepare(opts: { shop_ids: string[]; keys?: string[]; created_by?: string | null }): { rollout: PlaybookRollout; drafts: PlaybookDraft[] } {
+  prepare(opts: { shop_ids: string[]; keys?: string[]; created_by?: string | null; /** Items to redo even where they are live (an update with the current copy), e.g. after the weekly learning. */ updateKeys?: string[]; note?: string | null; /** false leaves the drafts as the library wrote them; by default they are rewritten in the shop's voice with the content profile in the background. */ tailor?: boolean }): { rollout: PlaybookRollout; drafts: PlaybookDraft[] } {
     const shops = this.shops().filter((s) => opts.shop_ids.includes(s.shop_id));
     if (!shops.length) throw new Error('Pick at least one linked shop.');
     const cells = this.q.listPlaybookCells();
-    const rollout = this.q.createRollout(shops.map((s) => s.shop_id), opts.created_by ?? null);
+    const rollout = this.q.createRollout(shops.map((s) => s.shop_id), opts.created_by ?? null, opts.note ?? null);
     const drafts: PlaybookDraft[] = [];
     const wanted = opts.keys?.length ? new Set(opts.keys) : null;
+    const redo = new Set(opts.updateKeys ?? []);
     for (const shop of shops) {
-      const items = this.itemsFor(shop.language).filter((i) => (!wanted || wanted.has(`${i.kind}:${i.key}`) || wanted.has(i.key)) && !i.config.manual && !['manual', 'sender', 'tag'].includes(i.kind)).sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.name.localeCompare(b.name));
+      const items = this.itemsFor(shop.language, shop.shop_id).filter((i) => (!wanted || wanted.has(`${i.kind}:${i.key}`) || wanted.has(i.key)) && !i.config.manual && !['manual', 'sender', 'tag'].includes(i.kind)).sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.name.localeCompare(b.name));
       const cellOf = (i: PlaybookItem) => cells.find((c) => c.shop_id === shop.shop_id && c.kind === i.kind && c.playbook_key === i.key) ?? null;
       const groupIds = new Map<string, string>(); const listIds = new Map<string, string>();
       for (const c of cells.filter((c) => c.shop_id === shop.shop_id && c.remote_id && ['set', 'paused', 'drift'].includes(c.status))) { if (c.kind === 'group') groupIds.set(c.playbook_key, c.remote_id!); if (c.kind === 'list') listIds.set(c.playbook_key, c.remote_id!); }
@@ -431,8 +463,9 @@ export class PlaybookEngine {
       for (const item of items) {
         const cell = cellOf(item);
         const st = cell?.status ?? 'unknown';
-        if (st === 'set' || st === 'manual') continue;
-        const action: PlaybookDraft['action'] = st === 'paused' ? 'start' : st === 'drift' ? 'update' : 'create';
+        const redoLive = st === 'set' && cell?.remote_id && item.kind === 'automation' && (redo.has(`${item.kind}:${item.key}`) || redo.has(item.key));
+        if ((st === 'set' && !redoLive) || st === 'manual') continue;
+        const action: PlaybookDraft['action'] = st === 'paused' ? 'start' : st === 'drift' || redoLive ? 'update' : 'create';
         let tool: string; let payload: Record<string, unknown>; let copy: string | null = null; let blockers: string[] = []; let inputs: string[] = [];
         if (action === 'start') {
           tool = TOGGLE_TOOL[item.kind] ?? ''; payload = { shop_id: shop.shop_id, [ID_ARG[item.kind] ?? 'id']: cell!.remote_id, status: 'active' };
@@ -444,12 +477,141 @@ export class PlaybookEngine {
           if (!tool) continue;
         }
         const status: PlaybookDraftStatus = blockers.length ? 'blocked' : inputs.length ? 'needs_input' : 'ready';
-        drafts.push(this.q.addRolloutDraft({ rollout_id: rollout.id, shop_id: shop.shop_id, shop_name: shop.shop_name, account_id: shop.account_id, kind: item.kind, key: item.key, name: String(payload.title ?? payload.name ?? item.name), description: item.description, language: item.language === '*' ? shop.language : item.language, action, tool, payload, copy, blockers: [...blockers, ...inputs], status, start_after: action === 'start' ? true : Boolean(item.config.core) && item.kind !== 'automation' ? false : item.kind === 'automation' && (item.config.outreach_audience === 'groups'), save_override: false, remote_id: cell?.remote_id ?? null, remote_name: cell?.remote_name ?? null, order_no: order++ }));
+        const existingCopy = cell?.remote_copy ?? (copy ? this.nearestCopy(shop.shop_id, cell?.remote_id ?? null) : null);
+        drafts.push(this.q.addRolloutDraft({ existing_copy: existingCopy, rollout_id: rollout.id, shop_id: shop.shop_id, shop_name: shop.shop_name, account_id: shop.account_id, kind: item.kind, key: item.key, name: String(payload.title ?? payload.name ?? item.name), description: item.description, language: item.language === '*' ? shop.language : item.language, action, tool, payload, copy, blockers: [...blockers, ...inputs], status, start_after: action === 'start' ? true : Boolean(item.config.core) && item.kind !== 'automation' ? false : item.kind === 'automation' && (item.config.outreach_audience === 'groups'), save_override: false, remote_id: cell?.remote_id ?? null, remote_name: cell?.remote_name ?? null, order_no: order++ }));
         if (cell) this.q.setPlaybookCell({ shop_id: shop.shop_id, kind: item.kind, playbook_key: item.key, status: 'queued', note: `in rollout #${rollout.id}` });
       }
     }
     liveEvents.emitUpdate({ kind: 'playbook' });
+    if (opts.tailor !== false && drafts.some((d) => d.copy) && shops.some((sh) => sh.voice || sh.profile)) void this.tailorRollout(rollout.id).catch((err) => log.warn(`Cruva tailoring: ${(err as Error).message}`));
     return { rollout: this.q.getRollout(rollout.id)!, drafts };
+  }
+
+  /** The copy of the shop's strongest existing message, as the reference next to a draft that creates something new. */
+  private nearestCopy(shopId: string, exceptRemoteId: string | null): string | null {
+    const withCopy = this.q.listRemoteRaw(shopId, 'automation').filter((r) => typeof r.raw.copy === 'string' && r.raw.copy && r.remote_id !== exceptRemoteId).sort((a, b) => Number(b.raw.gmv ?? 0) - Number(a.raw.gmv ?? 0) || Number(b.raw.sent ?? 0) - Number(a.raw.sent ?? 0));
+    return withCopy[0] ? `${withCopy[0].name}:\n${String(withCopy[0].raw.copy)}` : null;
+  }
+
+  // ---- Learning: the shop's voice from the copy it runs, and the content profile from its top videos ----
+
+  async learnVoice(shop: PlaybookShop): Promise<PlaybookVoice | null> {
+    const llm = this.llmOrNull(900);
+    if (!llm) throw new Error('ANTHROPIC_API_KEY is not set.');
+    let raws = this.q.listRemoteRaw(shop.shop_id, 'automation').filter((r) => typeof r.raw.copy === 'string' && r.raw.copy);
+    if (!raws.length && this.mcp.configured) {
+      // No copy stored yet: read the strongest automations now.
+      for (const r of this.q.listRemoteRaw(shop.shop_id, 'automation').slice(0, 8)) {
+        try { const t = await this.mcp.call('list_automations', { shop_id: shop.shop_id, campaign_id: r.remote_id }); const d = parseListing(t)[0]?.detail ?? unwrap(t); const dms = dmMessagesFromDetail(d); const copy = dms?.filter((m) => (m.type ?? 'message') !== 'invite_card').map((m) => m.content ?? '').join('\n').trim(); if (copy) this.q.patchRemoteRaw(shop.shop_id, 'automation', r.remote_id, { copy }); } catch { /* next */ }
+      }
+      raws = this.q.listRemoteRaw(shop.shop_id, 'automation').filter((r) => typeof r.raw.copy === 'string' && r.raw.copy);
+    }
+    if (!raws.length) return null;
+    const samples = raws.sort((a, b) => Number(b.raw.gmv ?? 0) - Number(a.raw.gmv ?? 0) || Number(b.raw.sent ?? 0) - Number(a.raw.sent ?? 0)).slice(0, 6).map((r) => ({ name: r.name, kind: 'automation', sent: r.raw.sent === undefined ? null : Number(r.raw.sent) || null, replies: r.raw.replies === undefined ? null : Number(r.raw.replies) || null, copy: String(r.raw.copy).slice(0, 2000) }));
+    const { system, user } = voicePrompt({ shop_name: shop.shop_name, language: shop.language, samples });
+    const voice = parseVoice(await llm(system, user), samples);
+    this.q.setSetting(`playbook_voice_${shop.shop_id}`, JSON.stringify(voice));
+    return voice;
+  }
+
+  async learnProfile(shop: PlaybookShop, now = Date.now()): Promise<PlaybookProfile | null> {
+    if (!this.mcp.configured) throw new Error('CRUVA_API_KEY is not set.');
+    const llm = this.llmOrNull(2500);
+    if (!llm) throw new Error('ANTHROPIC_API_KEY is not set.');
+    const to = new Date(now).toISOString().slice(0, 10); const from = new Date(now - 28 * 86400000).toISOString().slice(0, 10);
+    const { videos, total } = await pullContent(this.mcp, shop.shop_id, { from, to, pct: shop.top_pct });
+    this.q.replaceContent(shop.shop_id, to, videos);
+    const top = videos.filter((v) => v.top);
+    if (!top.length) return null;
+    const contrast = videos.filter((v) => !v.top).slice(0, 15);
+    const { system, user } = profilePrompt({ shop_name: shop.shop_name, language: shop.language, market: shop.market, top, all: [...top, ...contrast], total, window_from: from, window_to: to });
+    const profile = parseProfile(await llm(system, user), videos, { window_from: from, window_to: to, total, now });
+    this.q.addProfile(shop.shop_id, profile);
+    // The top creators get the VIP tag when the shop has one; best effort, Cruva's tag tools vary.
+    const vip = this.q.listPlaybookCells().find((c) => c.shop_id === shop.shop_id && c.kind === 'tag' && c.playbook_key === 'vip' && c.status === 'set');
+    if (vip && profile.top_creators.length) { try { await this.mcp.call('tag_creators', { shop_id: shop.shop_id, handles: profile.top_creators.slice(0, 20).map((c) => c.handle), tags: ['VIP'] }); } catch (err) { log.info(`Cruva VIP tag on ${shop.shop_name}: ${(err as Error).message}`); } }
+    return profile;
+  }
+
+  /** Both passes for one shop; errors come back as text rather than stopping the others. */
+  async learnShop(shopId: string): Promise<{ profile: PlaybookProfile | null; voice: PlaybookVoice | null; errors: string[] }> {
+    const shop = this.shops().find((s) => s.shop_id === shopId);
+    if (!shop) throw new Error('Shop not found');
+    const errors: string[] = [];
+    let voice: PlaybookVoice | null = null; let profile: PlaybookProfile | null = null;
+    try { voice = await this.learnVoice(shop); } catch (err) { errors.push(`voice: ${(err as Error).message}`); }
+    try { profile = await this.learnProfile(shop); } catch (err) { errors.push(`content: ${(err as Error).message}`); }
+    this.q.setSetting(`playbook_learned_at_${shopId}`, new Date().toISOString());
+    liveEvents.emitUpdate({ kind: 'playbook' });
+    return { profile, voice, errors };
+  }
+
+  /** Rewrite one draft's copy in the shop's voice with the content profile; the existing copy (an update) or the nearest message is the base, the library copy the checklist of what must be in it. */
+  async tailorDraft(id: number, opts: { instruction?: string | null; now?: number } = {}): Promise<PlaybookDraft> {
+    const d = this.q.getRolloutDraft(id);
+    if (!d) throw new Error('Draft not found');
+    if (!d.copy) throw new Error('This draft has no message.');
+    if (['done', 'undone'].includes(d.status)) throw new Error('This draft has already run.');
+    const shop = this.shops().find((s) => s.shop_id === d.shop_id);
+    if (!shop) throw new Error('Shop not found');
+    const llm = this.llmOrNull(1000);
+    if (!llm) throw new Error('ANTHROPIC_API_KEY is not set.');
+    if (!shop.voice && !shop.profile && !opts.instruction) return d;
+    const lang = ({ de: 'German', fr: 'French', it: 'Italian', es: 'Spanish', nl: 'Dutch', pl: 'Polish' } as Record<string, string>)[d.language] ?? 'English';
+    const brand = brandOf(d.shop_name);
+    const system = [
+      `You write TikTok Shop creator messages for ${brand} in ${lang}, in the brand's own voice. The message has a job (what the library copy below asks for); keep that job, every fact in it, and every placeholder exactly as written ([affiliate_name], [brand], [brief_link], [month], URLs). No hashtags, no corporate filler. Output only the message.`,
+      ...(shop.voice ? ['', 'The brand\'s voice, learnt from the messages it already runs:', ...voiceFacts(shop.voice).map((l) => `- ${l}`)] : []),
+      ...(shop.profile ? ['', 'What sells for this shop right now (from its top videos). Use what fits this message: a hook or content idea in a message about what to film, the product that carries in a message about products, the offer where a deal is mentioned. Do not list it all.', ...profileFacts(shop.profile).map((l) => `- ${l}`)] : []),
+      d.existing_copy ? `\nThe shop's existing message for reference (its structure and phrasing are the base when they fit):\n${d.existing_copy.slice(0, 1800)}` : '',
+    ].join('\n');
+    const user = `${opts.instruction ? `Instruction from the team: ${opts.instruction}\n\n` : ''}Library copy (the job and the facts):\n\n${d.copy}`;
+    const text = (await llm(system, user)).trim().replace(/^["“]|["”]$/g, '');
+    if (!text) return d;
+    const updated = this.updateDraft(id, { copy: text, save_override: true });
+    this.q.updateRolloutDraft(id, { tailored_at: new Date(opts.now ?? Date.now()).toISOString() });
+    liveEvents.emitUpdate({ kind: 'playbook' });
+    return this.q.getRolloutDraft(id) ?? updated;
+  }
+
+  async tailorRollout(rolloutId: number): Promise<{ tailored: number; errors: string[] }> {
+    const errors: string[] = []; let tailored = 0;
+    for (const d of this.q.listRolloutDrafts(rolloutId)) {
+      if (!d.copy || d.tailored_at || !['ready', 'needs_input', 'blocked'].includes(d.status)) continue;
+      try { await this.tailorDraft(d.id); tailored += 1; } catch (err) { errors.push(`${d.shop_name} / ${d.name}: ${(err as Error).message}`); }
+    }
+    return { tailored, errors };
+  }
+
+  /** Monday: learn every shop again; where the profile moved, redo the live lifecycle bots as an update rollout (approved and run on its own where the shop allows it). */
+  async weeklyUpdate(opts: { shopIds?: string[] } = {}): Promise<{ shops: number; learned: number; rollouts: { shop: string; rollout_id: number; reasons: string[]; auto: boolean; done: number }[]; errors: string[] }> {
+    const out = { shops: 0, learned: 0, rollouts: [] as { shop: string; rollout_id: number; reasons: string[]; auto: boolean; done: number }[], errors: [] as string[] };
+    const LIFECYCLE = ['sample_sent', 'delivered', 'first_sale', 'content_not_posted', 'no_post_10d', 'rejected', 'push_more_videos'];
+    for (const shop of this.shops().filter((sh) => !opts.shopIds || opts.shopIds.includes(sh.shop_id))) {
+      out.shops += 1;
+      const before = this.q.listProfiles(shop.shop_id, 1)[0] ?? null;
+      const r = await this.learnShop(shop.shop_id);
+      out.errors.push(...r.errors.map((e) => `${shop.shop_name}: ${e}`));
+      if (!r.profile) continue;
+      out.learned += 1;
+      const reasons = materialChange(before, r.profile);
+      if (!reasons.length) continue;
+      const cells = this.q.listPlaybookCells().filter((c) => c.shop_id === shop.shop_id && c.kind === 'automation' && c.status === 'set' && c.remote_id && LIFECYCLE.includes(c.playbook_key));
+      if (!cells.length) continue;
+      const keys = cells.map((c) => `automation:${c.playbook_key}`);
+      try {
+        const { rollout } = this.prepare({ shop_ids: [shop.shop_id], keys, updateKeys: keys, created_by: 'weekly learning', note: `Weekly learning: ${reasons.join('; ')}`, tailor: false });
+        await this.tailorRollout(rollout.id);
+        let done = 0;
+        if (shop.auto_update) {
+          for (const d of this.q.listRolloutDrafts(rollout.id)) if (d.status === 'ready') this.updateDraft(d.id, { status: 'approved' });
+          if (this.q.getRollout(rollout.id)?.counts.approved) done = (await this.runRollout(rollout.id, 'weekly learning')).done;
+        }
+        out.rollouts.push({ shop: shop.shop_name, rollout_id: rollout.id, reasons, auto: shop.auto_update, done });
+      } catch (err) { out.errors.push(`${shop.shop_name}: ${(err as Error).message}`); }
+    }
+    liveEvents.emitUpdate({ kind: 'playbook' });
+    return out;
   }
 
   drafts(rolloutId: number): { rollout: PlaybookRollout; drafts: PlaybookDraft[]; walk: Record<string, number>; steps: typeof WALK_STEPS } {

@@ -1798,6 +1798,20 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 50,
+    name: 'cruva content, profiles, remote copy, tailored drafts',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE cruva_content (shop_id TEXT NOT NULL, window_to TEXT NOT NULL, video_id TEXT NOT NULL, row_json TEXT NOT NULL, gmv REAL NOT NULL DEFAULT 0, top INTEGER NOT NULL DEFAULT 0, fetched_at TEXT NOT NULL, PRIMARY KEY (shop_id, window_to, video_id));
+        CREATE TABLE cruva_profiles (id INTEGER PRIMARY KEY AUTOINCREMENT, shop_id TEXT NOT NULL, learned_at TEXT NOT NULL, profile_json TEXT NOT NULL);
+        CREATE INDEX cruva_profiles_shop ON cruva_profiles(shop_id, id DESC);
+        ALTER TABLE cruva_setup ADD COLUMN remote_copy TEXT;
+        ALTER TABLE cruva_drafts ADD COLUMN existing_copy TEXT;
+        ALTER TABLE cruva_drafts ADD COLUMN tailored_at TEXT;
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {
