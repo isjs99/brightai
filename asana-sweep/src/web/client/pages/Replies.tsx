@@ -149,6 +149,16 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
   };
   const save = (p: Parameters<typeof api.saveReplyPolicy>[2], key = 'policy') => run(key, () => api.saveReplyPolicy(accountId, channel, p), setData);
 
+  // Hooks stay above the early return.
+  useEffect(() => { try { localStorage.setItem('replies_english', english ? '1' : '0'); } catch { /* private window */ } }, [english]);
+  useEffect(() => {
+    if (!english || !data) return;
+    const visible = data.log.filter((e) => logFilter === 'all' || (logFilter === 'wrong' ? e.feedback === 'wrong' : e.decision === logFilter)).slice(0, 80);
+    request([
+      ...data.waiting.slice(0, 50).flatMap((w) => [{ text: w.last_message_text, lang: w.language }, { text: w.draft?.text, lang: w.language }]),
+      ...(logOpen ? visible.flatMap((e) => [{ text: e.context.their_text, lang: e.language }, { text: e.context.reply_text, lang: e.language }]) : []),
+    ]);
+  }, [english, data, logOpen, logFilter, request]);
   if (!data) return <p>{error ?? 'Loading…'}</p>;
   const { policy, counts } = data;
   const cap = capDraft === undefined ? policy.daily_cap : capDraft;
@@ -158,14 +168,6 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
     save({ mode });
   };
   const log = data.log.filter((e) => logFilter === 'all' || (logFilter === 'wrong' ? e.feedback === 'wrong' : e.decision === logFilter));
-  useEffect(() => { try { localStorage.setItem('replies_english', english ? '1' : '0'); } catch { /* private window */ } }, [english]);
-  useEffect(() => {
-    if (!english) return;
-    request([
-      ...data.waiting.slice(0, 50).flatMap((w) => [{ text: w.last_message_text, lang: w.language }, { text: w.draft?.text, lang: w.language }]),
-      ...(logOpen ? log.slice(0, 80).flatMap((e) => [{ text: e.context.their_text, lang: e.language }, { text: e.context.reply_text, lang: e.language }]) : []),
-    ]);
-  }, [english, data, logOpen, logFilter, request]); // eslint-disable-line react-hooks/exhaustive-deps
   const path = channel === 'cs' ? '/customer-service' : '/creators';
 
   return (
