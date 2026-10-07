@@ -148,6 +148,11 @@ function rowToCheck(r: Row): Check {
 export class Queries {
   constructor(private db: Database.Database) {}
 
+  /** Rises with every row this connection writes; a payload cached against it is fresh while it is equal. */
+  changeStamp(): number {
+    return Number((this.db.prepare('SELECT total_changes() AS n').get() as { n: number }).n);
+  }
+
   // ---- Accounts ----
 
   listAccounts(): Account[] {
@@ -999,7 +1004,7 @@ export class Queries {
     return { id: r.id as number, prospect_id: r.prospect_id as number, channel: (r.channel as BdOutreachEvent['channel']) ?? null, action: r.action as BdOutreachEvent['action'], note: (r.note as string | null) ?? null, contact_name: (r.contact_name as string | null) ?? null, actor: (r.actor as string | null) ?? null, created_at: r.created_at as string };
   }
 
-  private rowToProspect(r: Row, contacts: BdContact[], outreachLog: BdOutreachEvent[] = []): BdProspect {
+  private rowToProspect(r: Row, contacts: BdContact[], outreachLog: BdOutreachEvent[] = [], outreachCount = outreachLog.length): BdProspect {
     const o = { outreach_tts_am: Boolean(r.outreach_tts_am), outreach_gmail: Boolean(r.outreach_gmail), outreach_linkedin: Boolean(r.outreach_linkedin) };
     return {
       id: r.id as number,
@@ -1050,24 +1055,40 @@ export class Queries {
       updated_at: r.updated_at as string,
       contacts,
       outreach_log: outreachLog,
+      outreach_count: outreachCount,
     };
   }
 
   private static PROSPECT_SELECT = `SELECT p.*, o.name AS owner_name, (p.notes LIKE 'Existing client%') AS is_client FROM bd_prospects p LEFT JOIN people o ON o.id = p.owner_id`;
 
-  listProspects(includeArchived = false): BdProspect[] {
+  /**
+   * Every prospect with its contacts and outreach history. `logLimit` keeps only the newest events per prospect
+   * (the page shows the latest few and the count); server jobs that read the whole history leave it unset.
+   */
+  listProspects(includeArchived = false, opts: { logLimit?: number } = {}): BdProspect[] {
     const contacts = new Map<number, BdContact[]>();
     for (const r of this.db.prepare('SELECT * FROM bd_contacts ORDER BY enriched DESC, id').all() as Row[]) {
       const c = this.rowToContact(r);
-      contacts.set(c.prospect_id, [...(contacts.get(c.prospect_id) ?? []), c]);
+      const list = contacts.get(c.prospect_id);
+      if (list) list.push(c); else contacts.set(c.prospect_id, [c]);
     }
     const logs = new Map<number, BdOutreachEvent[]>();
-    for (const r of this.db.prepare('SELECT * FROM bd_outreach_log ORDER BY created_at DESC, id DESC').all() as Row[]) {
+    const logSql = opts.logLimit
+      ? `SELECT * FROM (SELECT l.*, ROW_NUMBER() OVER (PARTITION BY prospect_id ORDER BY created_at DESC, id DESC) AS rn FROM bd_outreach_log l) WHERE rn <= ${Math.max(1, Math.floor(opts.logLimit))} ORDER BY created_at DESC, id DESC`
+      : 'SELECT * FROM bd_outreach_log ORDER BY created_at DESC, id DESC';
+    for (const r of this.db.prepare(logSql).all() as Row[]) {
       const e = this.rowToOutreach(r);
-      logs.set(e.prospect_id, [...(logs.get(e.prospect_id) ?? []), e]);
+      const list = logs.get(e.prospect_id);
+      if (list) list.push(e); else logs.set(e.prospect_id, [e]);
     }
+    const counts = new Map<number, number>();
+    if (opts.logLimit) for (const r of this.db.prepare('SELECT prospect_id, COUNT(*) AS n FROM bd_outreach_log GROUP BY prospect_id').all() as Row[]) counts.set(r.prospect_id as number, Number(r.n));
     const where = includeArchived ? '' : 'WHERE p.archived = 0';
-    return (this.db.prepare(`${Queries.PROSPECT_SELECT} ${where} ORDER BY p.market, p.gmv_7d DESC, p.shop_name COLLATE NOCASE`).all() as Row[]).map((r) => this.rowToProspect(r, contacts.get(r.id as number) ?? [], logs.get(r.id as number) ?? []));
+    return (this.db.prepare(`${Queries.PROSPECT_SELECT} ${where} ORDER BY p.market, p.gmv_7d DESC, p.shop_name COLLATE NOCASE`).all() as Row[]).map((r) => {
+      const id = r.id as number;
+      const log = logs.get(id) ?? [];
+      return this.rowToProspect(r, contacts.get(id) ?? [], log, opts.logLimit ? counts.get(id) ?? 0 : log.length);
+    });
   }
 
   getProspect(id: number): BdProspect | null {
@@ -1075,7 +1096,8 @@ export class Queries {
     if (!r) return null;
     const contacts = (this.db.prepare('SELECT * FROM bd_contacts WHERE prospect_id = ? ORDER BY enriched DESC, id').all(id) as Row[]).map((c) => this.rowToContact(c));
     const log = (this.db.prepare('SELECT * FROM bd_outreach_log WHERE prospect_id = ? ORDER BY created_at DESC, id DESC LIMIT 100').all(id) as Row[]).map((e) => this.rowToOutreach(e));
-    return this.rowToProspect(r, contacts, log);
+    const count = Number((this.db.prepare('SELECT COUNT(*) AS n FROM bd_outreach_log WHERE prospect_id = ?').get(id) as { n: number }).n);
+    return this.rowToProspect(r, contacts, log, count);
   }
 
   /** Insert new shops or refresh the numbers of ones we already track (by seller id). Never touches status, owner or outreach. */
@@ -1575,8 +1597,22 @@ export class Queries {
     return { id: r.id as number, shop_id: r.shop_id as string, account_id: (r.account_id as number | null) ?? null, source: r.source as HealthSource, pull_date: r.pull_date as string, pulled_at: r.pulled_at as string, ok: Boolean(r.ok), error: (r.error as string | null) ?? null, metrics: parse<Record<string, unknown>>(r.metrics_json, {}), rows: parse<Record<string, unknown>>(r.rows_json, {}) };
   }
 
-  /** The most recent pull per shop for a source (any date). */
+  private pullsCache = new Map<HealthSource, { stamp: number; rows: HealthPullRow[] }>();
+
+  /**
+   * The most recent pull per shop for a source (any date). The row payloads are large JSON (analytics days, products,
+   * orders) and the monitor reads them several times per page, so the parsed rows are kept until something is written.
+   */
   latestHealthPulls(source: HealthSource): HealthPullRow[] {
+    const stamp = this.changeStamp();
+    const hit = this.pullsCache.get(source);
+    if (hit && hit.stamp === stamp) return hit.rows;
+    const rows = this.readLatestHealthPulls(source);
+    this.pullsCache.set(source, { stamp, rows });
+    return rows;
+  }
+
+  private readLatestHealthPulls(source: HealthSource): HealthPullRow[] {
     return (this.db.prepare('SELECT p.* FROM health_pulls p WHERE p.source = ? AND p.pull_date = (SELECT MAX(pull_date) FROM health_pulls x WHERE x.shop_id = p.shop_id AND x.source = p.source) ORDER BY p.shop_id').all(source) as Row[]).map((r) => this.rowToPull(r));
   }
 

@@ -661,7 +661,9 @@ export interface BdProspect {
   created_at: string;
   updated_at: string;
   contacts: BdContact[];
+  /** Newest first. The pipeline list carries only the latest few; `outreach_count` is the full number. */
   outreach_log: BdOutreachEvent[];
+  outreach_count: number;
 }
 
 export type BdDraftStatus = 'draft' | 'gmail' | 'queued' | 'sent' | 'discarded';

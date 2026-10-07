@@ -296,6 +296,7 @@ export default function BdPage() {
                   {isAdmin && <button className="small danger" style={{ marginLeft: 6 }} onClick={() => run(`e${e.id}`, () => api.deleteOutreachEvent(e.id))}>×</button>}
                 </li>
               ))}
+              {p.outreach_count > p.outreach_log.length && <li className="sub">and {p.outreach_count - p.outreach_log.length} older {p.outreach_count - p.outreach_log.length === 1 ? 'entry' : 'entries'}</li>}
             </ul>
           )}
           {isAdmin && <div className="actions" style={{ marginTop: 6 }}><button className="small" onClick={() => addNote(p)}>+ Note</button></div>}
@@ -572,7 +573,7 @@ export default function BdPage() {
                     <b>{p.shop_name}</b>{p.brand && p.brand !== p.shop_name && <span className="sub"> · {p.brand}</span>}
                     {p.fastmoss_url && <> <a href={p.fastmoss_url} target="_blank" rel="noreferrer" className="sub" title="Open on FastMoss">FastMoss ↗</a></>}
                     {p.is_client && <> <span className="badge muted">client</span></>}
-                    <div className="sub">{p.contacts.length ? `${p.contacts.length} contact${p.contacts.length === 1 ? '' : 's'}` : 'no contacts'}{p.contacts.some((c) => c.email) ? ' · email' : ''}{p.outreach_log.length ? ` · ${p.outreach_log.length} in history` : ''}{data.draft_state[p.id] && <> · <Link to={`/outreach`} className={`badge ${data.draft_state[p.id] === 'sent' ? 'good' : data.draft_state[p.id] === 'gmail' ? 'accent' : 'muted'}`} title="Open in Outreach emails">{data.draft_state[p.id] === 'sent' ? 'Email sent' : data.draft_state[p.id] === 'gmail' ? 'In Gmail drafts' : 'Drafted'}</Link></>}{data.lark_state[p.id] && <> · <Link to="/outreach?tab=lark" className={`badge ${data.lark_state[p.id] === 'sent' ? 'good' : data.lark_state[p.id] === 'scheduled' ? 'accent' : 'muted'}`} title="Open under Outreach emails › Lark messages">{data.lark_state[p.id] === 'sent' ? 'Lark sent' : data.lark_state[p.id] === 'scheduled' ? 'Lark scheduled' : 'Lark drafted'}</Link></>}</div>
+                    <div className="sub">{p.contacts.length ? `${p.contacts.length} contact${p.contacts.length === 1 ? '' : 's'}` : 'no contacts'}{p.contacts.some((c) => c.email) ? ' · email' : ''}{p.outreach_count ? ` · ${p.outreach_count} in history` : ''}{data.draft_state[p.id] && <> · <Link to={`/outreach`} className={`badge ${data.draft_state[p.id] === 'sent' ? 'good' : data.draft_state[p.id] === 'gmail' ? 'accent' : 'muted'}`} title="Open in Outreach emails">{data.draft_state[p.id] === 'sent' ? 'Email sent' : data.draft_state[p.id] === 'gmail' ? 'In Gmail drafts' : 'Drafted'}</Link></>}{data.lark_state[p.id] && <> · <Link to="/outreach?tab=lark" className={`badge ${data.lark_state[p.id] === 'sent' ? 'good' : data.lark_state[p.id] === 'scheduled' ? 'accent' : 'muted'}`} title="Open under Outreach emails › Lark messages">{data.lark_state[p.id] === 'sent' ? 'Lark sent' : data.lark_state[p.id] === 'scheduled' ? 'Lark scheduled' : 'Lark drafted'}</Link></>}</div>
                   </td>
                   <td>{p.market}</td>
                   <td className="hide-sm sub">{p.category ?? ''}</td>

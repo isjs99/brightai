@@ -1,4 +1,5 @@
 import { recordRequest } from '../perf.js';
+import compression from 'compression';
 import express from 'express';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -13,6 +14,9 @@ export function createApp(q: Queries, scheduler: Scheduler) {
   app.disable('x-powered-by');
   // Hosted behind a reverse proxy (Railway, Fly, nginx): trust it for client IPs and https detection.
   app.set('trust proxy', 1);
+  // Gzip anything over 1 KB: the pipeline and monitor payloads are megabytes of JSON that shrink about ten times.
+  // The live-update stream must not be buffered by it.
+  app.use(compression({ threshold: 1024, filter: (req, res) => req.path !== '/api/events' && req.headers.accept !== 'text/event-stream' && compression.filter(req, res) }));
   app.use(express.json({ limit: '256kb' }));
   app.use((req, res, next) => {
     const started = process.hrtime.bigint();

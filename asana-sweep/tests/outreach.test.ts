@@ -10,7 +10,7 @@ const prospect = (o: Partial<BdProspect> = {}): BdProspect => ({
   rise_score: 0.32, launched_at: '2026-05-16', gmv_started_at: null, new_shop_30d: false, gmv_started_30d: true, age_estimate_days: 22, fastmoss_url: 'https://www.fastmoss.com/shop-marketing/detail/7', is_client: false,
   domain: null, website: null, apollo_org_id: null, status: 'new', owner_id: null, owner_name: null, notes: null,
   outreach_tts_am: false, outreach_gmail: false, outreach_linkedin: true, outreach_tts_am_at: null, outreach_gmail_at: null, outreach_linkedin_at: '2026-09-10T10:00:00.000Z', outreach_complete: false,
-  source: 'fastmoss', pulled_at: '2026-09-16', archived: false, created_at: '', updated_at: '', contacts: [], outreach_log: [], ...o,
+  source: 'fastmoss', pulled_at: '2026-09-16', archived: false, created_at: '', updated_at: '', contacts: [], outreach_log: [], outreach_count: 0, ...o,
 });
 const inputs = { examples: [], pitch: '*Credentials*\n- #1 TikTok Shop Partner in the EU', senderName: 'Isaac Sinclair', senderTitle: 'Co-Founder/CEO, Brightform', bookingUrl: 'https://calendly.com/isaac/30min' };
 const contact = { name: 'Ann Smith', title: 'Founder', email: 'ann@displayz.fr' };

@@ -1276,8 +1276,17 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   const enrichJob = scheduler.enrich;
   const monitor = scheduler.monitor;
 
+  // Built once per database change: every open pipeline tab reloads on the same event, and the list is the largest payload the dashboard serves.
+  let bdCache: { stamp: number; at: number; body: BdData } | null = null;
   const bdData = (): BdData => {
-    const prospects = q.listProspects(false);
+    const stamp = q.changeStamp();
+    if (bdCache && bdCache.stamp === stamp && Date.now() - bdCache.at < 15000) return bdCache.body;
+    const body = buildBdData();
+    bdCache = { stamp, at: Date.now(), body };
+    return body;
+  };
+  const buildBdData = (): BdData => {
+    const prospects = q.listProspects(false, { logLimit: 10 });
     const byMarket = new Map<string, BdCountryRow>();
     for (const p of prospects) {
       const row = byMarket.get(p.market) ?? { market: p.market, prospects: 0, new: 0, in_progress: 0, contacted_any: 0, complete: 0, won: 0, lost: 0, gmv_7d: 0, currency: p.currency };
@@ -2221,7 +2230,12 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
 
   // ---- Account monitor ----
 
-  r.get('/monitor', (_req, res) => res.json(monitor.data()));
+  let monitorCache: { stamp: number; at: number; body: ReturnType<typeof monitor.data> } | null = null;
+  r.get('/monitor', (_req, res) => {
+    const stamp = q.changeStamp();
+    if (!monitorCache || monitorCache.stamp !== stamp || Date.now() - monitorCache.at > 5000) monitorCache = { stamp, at: Date.now(), body: monitor.data() };
+    res.json(monitorCache.body);
+  });
 
   r.post('/monitor/scan', async (_req, res) => {
     const r = await monitor.scan();
