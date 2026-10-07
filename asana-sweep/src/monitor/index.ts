@@ -56,6 +56,11 @@ export class AccountMonitor {
     return Math.max(5, Number(this.q.getSetting('monitor_interval_minutes', '15')) || 15);
   }
 
+  /** The scan state only, for the sync strip: no flags, no health, no account rows. */
+  status(): { last_scan_at: string | null; last_scan_error: string | null; scanning: boolean; interval_minutes: number; tts_configured: boolean } {
+    return { last_scan_at: this.q.getSetting('monitor_last_scan_at', '') || null, last_scan_error: this.q.getSetting('monitor_last_scan_error', '') || null, scanning: this.scanning, interval_minutes: this.intervalMinutes, tts_configured: this.client.configured };
+  }
+
   data(): MonitorData {
     const flags = this.q.listFlags(false);
     const health = this.health ?? new HealthEngine(this.q);

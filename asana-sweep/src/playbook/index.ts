@@ -156,6 +156,11 @@ export class PlaybookEngine {
     }).filter((s) => accounts.get(s.account_id)?.enabled !== false);
   }
 
+  /** Check state only, for the sync strip. */
+  status(): { mcp_configured: boolean; cruva_configured: boolean; last_check_at: string | null; last_error: string | null; checking: boolean } {
+    return { mcp_configured: this.mcp.configured, cruva_configured: cruvaCrm.configured, last_check_at: this.q.getSetting('playbook_last_check_at', '') || null, last_error: this.q.getSetting('playbook_last_error', '') || null, checking: this.checking };
+  }
+
   data(): PlaybookData {
     const remote = this.q.listRemoteItems();
     const shops = this.shops().map((s) => {

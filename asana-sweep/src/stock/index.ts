@@ -110,6 +110,11 @@ export class StockTracker {
     };
   }
 
+  /** Scan state only, for the sync strip. */
+  status(): { last_scan_at: string | null; last_scan_error: string | null; scanning: boolean; tts_configured: boolean; cruva_configured: boolean } {
+    return { last_scan_at: this.q.getSetting('stock_last_scan_at', '') || null, last_scan_error: this.q.getSetting('stock_last_scan_error', '') || null, scanning: this.scanning, tts_configured: this.client.configured, cruva_configured: cruvaRest.configured };
+  }
+
   data(): StockData {
     const s = stockSettings(this.q);
     const all = projectRows(this.q.listStock(), { coverDays: s.default_cover_days, leadDays: s.default_lead_days, critDays: s.crit_days, warnDays: s.warn_days });

@@ -14,10 +14,14 @@ installLlm(q);
 startPerfMonitor();
 
 const scheduler = new Scheduler(q);
-scheduler.start();
 
+// Listen first, then start the jobs: the health check and the pages answer while the boot work (pulls import,
+// enterprise alerts, the first syncs) runs, instead of waiting behind it.
 const app = createApp(q, scheduler);
-const server = app.listen(config.port, () => log.info(`Dashboard listening on ${config.publicUrl} (port ${config.port})`));
+const server = app.listen(config.port, () => {
+  log.info(`Dashboard listening on ${config.publicUrl} (port ${config.port})`);
+  setImmediate(() => { try { scheduler.start(); } catch (err) { log.error(`Scheduler start failed: ${(err as Error).message}`); } });
+});
 
 const shutdown = () => {
   log.info('Shutting down');

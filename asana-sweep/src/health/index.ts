@@ -727,6 +727,11 @@ export class HealthEngine {
     return { accounts: accountIds.length, shops, findings, assessments, errors, account_ids: accountIds };
   }
 
+  /** Pull state only, for the sync strip. */
+  status(): { windsor_configured: boolean; last_pull_at: string | null; last_pull_error: string | null; pulling: boolean; tts_last_pull_at: string | null; tts_last_pull_error: string | null; pulling_tts: boolean } {
+    return { windsor_configured: this.client.configured, last_pull_at: this.q.getSetting('health_last_pull_at', '') || null, last_pull_error: this.q.getSetting('health_last_pull_error', '') || null, pulling: this.pulling, tts_last_pull_at: this.q.getSetting('tts_last_pull_at', '') || null, tts_last_pull_error: this.q.getSetting('tts_last_pull_error', '') || null, pulling_tts: this.pullingTts };
+  }
+
   data(): HealthSummary {
     const accounts = new Map(this.q.listAccounts().map((a) => [a.id, a.name]));
     const shopNames = new Map(this.q.listShops().map((s) => [s.shop_id, s.shop_name]));

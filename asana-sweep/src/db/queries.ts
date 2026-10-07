@@ -2736,6 +2736,13 @@ export class Queries {
     return (this.db.prepare(`SELECT id, account_id, kind, title, occurred_at FROM copilot_evidence ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY occurred_at DESC`).all(...params) as Row[]).map((r) => ({ id: Number(r.id), account_id: (r.account_id as number | null) ?? null, kind: String(r.kind), title: String(r.title), occurred_at: (r.occurred_at as string | null) ?? null }));
   }
 
+  /** Rows per account, in one query (no text loaded). */
+  evidenceCountByAccount(): Map<number, number> {
+    const out = new Map<number, number>();
+    for (const r of this.db.prepare('SELECT account_id, COUNT(*) AS n FROM copilot_evidence WHERE account_id IS NOT NULL GROUP BY account_id').all() as Row[]) out.set(Number(r.account_id), Number(r.n));
+    return out;
+  }
+
   /** Rows per account and kind since a date, in one query. */
   evidenceStats(from: string, kinds: string[]): Map<string, number> {
     const out = new Map<string, number>();

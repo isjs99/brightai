@@ -52,6 +52,7 @@ import { projectionCsv } from '../stock/index.js';
 import { columnsFromHeader, FBT_FIELDS, fbtManifestCsv, fbtPlan, fbtProfile, fbtSummary, fbtTemplateCsv } from '../stock/fbt.js';
 import { currentMonth as pnlCurrentMonth, pnlCsv, pnlData, pnlSummary } from '../pnl/index.js';
 import { syncStatus } from '../scheduler/sync-status.js';
+import type { SyncStatus } from '../sweep/types.js';
 import { inboxSettings as inboxSettingsOf } from '../inbox/sync.js';
 import type { FbtField, FbtProfile, OnboardingTerms, PitchBrief, PitchDeck, PitchesData, PitchSlide, PitchStat, PnlForecastInputs, PnlInputs, ReportSchedule } from '../sweep/types.js';
 import { researchPitch } from '../pitch/research.js';
@@ -2817,16 +2818,19 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   });
 
   // ---- What scans when (every Accounts tab) ----
+  // The strip at the top of every Accounts tab, polled by every open tab: cheap status reads only, cached for 10 s.
+  let syncCache: { at: number; body: SyncStatus } | null = null;
   r.get('/sync/status', (_req, res) => {
-    const m = scheduler.monitor.data();
-    const h = scheduler.health.data();
+    if (syncCache && Date.now() - syncCache.at < 10000) { res.json(syncCache.body); return; }
+    const m = scheduler.monitor.status();
+    const h = scheduler.health.status();
     const cp = scheduler.cruvaPull.status();
-    const st = scheduler.stock.data();
-    const pb = scheduler.playbook.data();
+    const st = scheduler.stock.status();
+    const pb = scheduler.playbook.status();
     const ib = inboxSettingsOf(q);
-    const co = scheduler.copilot.data();
+    const co = scheduler.copilot.status();
     const w = windsorStatus(q);
-    res.json(syncStatus(q, {
+    const body = syncStatus(q, {
       monitor: { last_scan_at: m.last_scan_at, last_scan_error: m.last_scan_error, scanning: m.scanning, interval_minutes: m.interval_minutes },
       health: { configured: h.windsor_configured, last_pull_at: h.last_pull_at, last_pull_error: h.last_pull_error, pulling: h.pulling, tts_last_pull_at: h.tts_last_pull_at, tts_last_pull_error: h.tts_last_pull_error, pulling_tts: h.pulling_tts, tts_configured: m.tts_configured },
       cruvaPull: { configured: cp.configured, running: cp.running, last_run_at: cp.last_run_at, last_error: cp.last_error },
@@ -2839,7 +2843,9 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
       reportsQueue: { last_tick_at: q.getSetting('reports_queue_last_tick_at', '') || null },
       windsor: { configured: w.configured, last_sync_at: w.last_sync_at, last_error: w.last_error },
       tldv: { configured: co.tldv_configured, last_check_at: q.getSetting('tldv_last_check_at', '') || null },
-    }));
+    });
+    syncCache = { at: Date.now(), body };
+    res.json(body);
   });
 
   // ---- Ad hoc client tasks ----

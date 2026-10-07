@@ -156,8 +156,7 @@ export class Copilot {
   }
 
   private evidenceCountsByAccount(): Map<number, number> {
-    const m = new Map<number, number>();
-    for (const e of this.q.listEvidence()) if (e.account_id) m.set(e.account_id, (m.get(e.account_id) ?? 0) + 1);
+    const m = this.q.evidenceCountByAccount();
     return m;
   }
 
@@ -172,6 +171,12 @@ export class Copilot {
 
   indexStatus(): { last_at: string | null; last_error: string | null; indexing: boolean } {
     return { last_at: this.q.getSetting('copilot_last_index_at', '') || null, last_error: this.q.getSetting('copilot_last_index_error', '') || null, indexing: this.indexing };
+  }
+
+  /** Sources and index state only, for the sync strip. */
+  status(): { slack_configured: boolean; gmail_connected: boolean; tldv_configured: boolean; last_index_at: string | null; last_index_error: string | null } {
+    const i = this.indexStatus();
+    return { slack_configured: (this.deps.slack ?? slackBot).configured, gmail_connected: Boolean(this.deps.gmail?.connected), tldv_configured: (this.deps.tldv ?? tldv).configured, last_index_at: i.last_at, last_index_error: i.last_error };
   }
 
   stop(): void {
