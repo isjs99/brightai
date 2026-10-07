@@ -516,7 +516,7 @@ export class PlaybookEngine {
 
   async learnProfile(shop: PlaybookShop, now = Date.now()): Promise<PlaybookProfile | null> {
     if (!this.mcp.configured) throw new Error('CRUVA_API_KEY is not set.');
-    const llm = this.llmOrNull(4000);
+    const llm = this.llmOrNull(8000);
     if (!llm) throw new Error('ANTHROPIC_API_KEY is not set.');
     const to = new Date(now).toISOString().slice(0, 10); const from = new Date(now - 28 * 86400000).toISOString().slice(0, 10);
     const { videos, total } = await pullContent(this.mcp, shop.shop_id, { from, to, pct: shop.top_pct });

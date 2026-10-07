@@ -60,7 +60,25 @@ export function modelFor(feature: LlmFeature): string {
   return hooks.modelFor?.(feature) ?? defaultModelFor(feature);
 }
 
-export interface DraftOpts { apiKey?: string; model?: string; fetchFn?: typeof fetch; maxTokens?: number; feature?: LlmFeature; accountId?: number | null; ref?: string | null }
+export interface DraftOpts { apiKey?: string; model?: string; fetchFn?: typeof fetch; maxTokens?: number; feature?: LlmFeature; accountId?: number | null; ref?: string | null; /** How hard the model thinks on models that take it; low by default, these are utility tasks. */ effort?: 'low' | 'medium' | 'high' }
+
+/** Claude 5 models and Haiku 5.5 think by default; the thinking counts against max_tokens, so those calls get headroom. */
+export const thinksByDefault = (model: string): boolean => /claude-(sonnet-5|opus-5|haiku-5|fable|mythos)/.test(model);
+/** output_config.effort is accepted from the 4.6 generation on; Haiku 4.5 and older reject it. */
+export const takesEffort = (model: string): boolean => !/claude-(haiku-4-5|sonnet-4-5|opus-4-5|3-)/.test(model);
+const THINKING_HEADROOM = 4000;
+
+/** The request body for one call: the text budget asked for, plus room for the model's thinking where it thinks on its own. */
+export function requestBody(model: string, system: string, user: string, opts: DraftOpts): Record<string, unknown> {
+  const asked = opts.maxTokens ?? 600;
+  return {
+    model,
+    max_tokens: thinksByDefault(model) ? asked + THINKING_HEADROOM : asked,
+    ...(takesEffort(model) ? { output_config: { effort: opts.effort ?? 'low' } } : {}),
+    system,
+    messages: [{ role: 'user', content: user }],
+  };
+}
 
 /** Turn Anthropic's error into the sentence the team needs to read. */
 export function explainApiError(status: number, message: string): string {
@@ -86,7 +104,7 @@ export async function draftWithClaude(system: string, user: string, opts: DraftO
     res = await (opts.fetchFn ?? fetch)('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model, max_tokens: opts.maxTokens ?? 600, system, messages: [{ role: 'user', content: user }] }),
+      body: JSON.stringify(requestBody(model, system, user, opts)),
     });
   } catch (err) {
     done(false, `network: ${(err as Error).message}`);
@@ -101,7 +119,7 @@ export async function draftWithClaude(system: string, user: string, opts: DraftO
   }
   const text = (data?.content ?? []).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('').trim();
   if (!text) { const why = `stop_reason ${data?.stop_reason ?? 'unknown'}, blocks ${(data?.content ?? []).map((b) => b.type).join('+') || 'none'}`; done(false, `empty reply (${why})`); throw new Error(`Claude returned an empty reply (${why}).`); }
-  if (data?.stop_reason === 'max_tokens') { done(true, null); throw new Error(`Claude's reply was cut off at ${opts.maxTokens ?? 600} tokens; the task needs a higher limit.`); }
+  if (data?.stop_reason === 'max_tokens') { done(true, null); throw new Error(`Claude's reply was cut off at the ${opts.maxTokens ?? 600}-token limit; the task needs a higher limit.`); }
   done(true, null);
   return text.replace(/^["“]|["”]$/g, '').trim();
 }

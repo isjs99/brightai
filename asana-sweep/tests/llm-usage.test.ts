@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Queries } from '../src/db/queries';
 import { openTestDb } from '../src/db/index';
-import { configureLlm, draftWithClaude, estimateCost, explainApiError, LlmBudgetError, modelFor } from '../src/inbox/llm';
+import { configureLlm, draftWithClaude, estimateCost, explainApiError, LlmBudgetError, modelFor, requestBody } from '../src/inbox/llm';
 import { installLlm, llmSettings, llmUsageData, saveLlmSettings } from '../src/llm/usage';
 import { withCosts } from '../src/inbox/replies';
 import { ClientTasks } from '../src/tasks/client-tasks';
@@ -16,6 +16,17 @@ describe('Claude cost and models', () => {
     expect(explainApiError(400, 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.')).toMatch(/no credit left: top up at console.anthropic.com/);
     expect(explainApiError(401, 'invalid x-api-key')).toMatch(/401/);
     expect(explainApiError(529, 'overloaded')).toMatch(/overloaded/);
+  });
+
+  it('gives the Claude 5 models room to think and keeps effort low, and leaves Haiku 4.5 alone', () => {
+    const b = requestBody('claude-sonnet-5', 's', 'u', { maxTokens: 4000 });
+    expect(b.max_tokens).toBe(8000);
+    expect(b.output_config).toEqual({ effort: 'low' });
+    expect(requestBody('claude-opus-5-5', 's', 'u', { effort: 'high' })).toMatchObject({ max_tokens: 4600, output_config: { effort: 'high' } });
+    const h = requestBody('claude-haiku-4-5', 's', 'u', { maxTokens: 900 });
+    expect(h.max_tokens).toBe(900);
+    expect(h).not.toHaveProperty('output_config');
+    expect(requestBody('claude-sonnet-4-6', 's', 'u', {})).toMatchObject({ max_tokens: 600, output_config: { effort: 'low' } });
   });
 
   it('records every call with its tokens and cost, picks the model per feature, and stops automatic work at the budget', async () => {
