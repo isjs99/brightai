@@ -516,16 +516,19 @@ export class PlaybookEngine {
 
   async learnProfile(shop: PlaybookShop, now = Date.now()): Promise<PlaybookProfile | null> {
     if (!this.mcp.configured) throw new Error('CRUVA_API_KEY is not set.');
-    const llm = this.llmOrNull(2500);
+    const llm = this.llmOrNull(4000);
     if (!llm) throw new Error('ANTHROPIC_API_KEY is not set.');
     const to = new Date(now).toISOString().slice(0, 10); const from = new Date(now - 28 * 86400000).toISOString().slice(0, 10);
     const { videos, total } = await pullContent(this.mcp, shop.shop_id, { from, to, pct: shop.top_pct });
     this.q.replaceContent(shop.shop_id, to, videos);
     const top = videos.filter((v) => v.top);
     if (!top.length) return null;
-    const contrast = videos.filter((v) => !v.top).slice(0, 15);
-    const { system, user } = profilePrompt({ shop_name: shop.shop_name, language: shop.language, market: shop.market, top, all: [...top, ...contrast], total, window_from: from, window_to: to });
-    const profile = parseProfile(await llm(system, user), videos, { window_from: from, window_to: to, total, now });
+    const contrast = videos.filter((v) => !v.top).slice(0, 8);
+    const { system, user } = profilePrompt({ shop_name: shop.shop_name, language: shop.language, market: shop.market, top: top.slice(0, 30), all: [...top.slice(0, 30), ...contrast], total, window_from: from, window_to: to });
+    // One retry: an empty or cut-off reply from the model is rare and usually passes the second time.
+    let raw: string;
+    try { raw = await llm(system, user); } catch (err) { if (!/empty reply|cut off/.test((err as Error).message)) throw err; log.warn(`Cruva profile for ${shop.shop_name}: ${(err as Error).message}; retrying once`); raw = await llm(system, user); }
+    const profile = parseProfile(raw, videos, { window_from: from, window_to: to, total, now });
     this.q.addProfile(shop.shop_id, profile);
     // The top creators get the VIP tag when the shop has one; best effort, Cruva's tag tools vary.
     const vip = this.q.listPlaybookCells().find((c) => c.shop_id === shop.shop_id && c.kind === 'tag' && c.playbook_key === 'vip' && c.status === 'set');

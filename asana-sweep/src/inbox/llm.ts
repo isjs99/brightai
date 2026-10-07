@@ -92,7 +92,7 @@ export async function draftWithClaude(system: string, user: string, opts: DraftO
     done(false, `network: ${(err as Error).message}`);
     throw err;
   }
-  const data = (await res.json().catch(() => null)) as { content?: { type: string; text?: string }[]; usage?: Partial<LlmUsage>; error?: { message?: string } } | null;
+  const data = (await res.json().catch(() => null)) as { content?: { type: string; text?: string }[]; usage?: Partial<LlmUsage>; error?: { message?: string }; stop_reason?: string } | null;
   if (data?.usage) { usage.input_tokens = Number(data.usage.input_tokens ?? 0); usage.output_tokens = Number(data.usage.output_tokens ?? 0); usage.cache_read_input_tokens = Number(data.usage.cache_read_input_tokens ?? 0); usage.cache_creation_input_tokens = Number(data.usage.cache_creation_input_tokens ?? 0); }
   if (!res.ok) {
     const msg = explainApiError(res.status, data?.error?.message ?? res.statusText);
@@ -100,7 +100,8 @@ export async function draftWithClaude(system: string, user: string, opts: DraftO
     throw new Error(msg);
   }
   const text = (data?.content ?? []).filter((b) => b.type === 'text').map((b) => b.text ?? '').join('').trim();
-  if (!text) { done(false, 'empty reply'); throw new Error('Claude returned an empty reply.'); }
+  if (!text) { const why = `stop_reason ${data?.stop_reason ?? 'unknown'}, blocks ${(data?.content ?? []).map((b) => b.type).join('+') || 'none'}`; done(false, `empty reply (${why})`); throw new Error(`Claude returned an empty reply (${why}).`); }
+  if (data?.stop_reason === 'max_tokens') { done(true, null); throw new Error(`Claude's reply was cut off at ${opts.maxTokens ?? 600} tokens; the task needs a higher limit.`); }
   done(true, null);
   return text.replace(/^["“]|["”]$/g, '').trim();
 }

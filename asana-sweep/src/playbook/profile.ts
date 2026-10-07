@@ -19,9 +19,9 @@ export function profilePrompt(input: { shop_name: string; language: string; mark
   const fmt = (v: PlaybookContentVideo) => [
     `- video ${v.video_id} by @${v.handle} · GMV ${Math.round(v.gmv)} · ${v.units} units · ${v.views} views · ${v.gmv_per_view !== null ? `${v.gmv_per_view} per view` : ''} · posted ${postDate(v.post_time) ?? '?'}${v.post_time ? ` (${DAYS[new Date(postDate(v.post_time) ?? '').getUTCDay()] ?? ''})` : ''} · products ${v.products.join(', ') || v.product_id || '?'}${v.rank_eff && v.rank_eff <= 5 ? ' · top by GMV per view' : ''}`,
     v.title ? `  title: ${v.title.slice(0, 160)}` : '',
-    v.overview ? `  overview: ${v.overview.slice(0, 400)}` : '',
+    v.overview ? `  overview: ${v.overview.slice(0, 260)}` : '',
     v.hooks.length ? `  hooks: ${v.hooks.slice(0, 3).map((h) => `"${h.hook}"${h.score !== null ? ` (${h.score})` : ''}`).join(' | ')}` : '',
-    v.transcript ? `  transcript: ${v.transcript.slice(0, 700)}` : '',
+    v.transcript ? `  transcript: ${v.transcript.slice(0, 450)}` : '',
   ].filter(Boolean).join('\n');
   const restGmv = input.all.filter((v) => !v.top).reduce((n, v) => n + v.gmv, 0);
   const user = [
