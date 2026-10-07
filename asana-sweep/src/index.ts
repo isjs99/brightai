@@ -19,7 +19,7 @@ const scheduler = new Scheduler(q);
 // enterprise alerts, the first syncs) runs, instead of waiting behind it.
 const app = createApp(q, scheduler);
 const server = app.listen(config.port, () => {
-  log.info(`Dashboard listening on ${config.publicUrl} (port ${config.port})`);
+  log.info(`Dashboard listening on ${config.publicUrl} (port ${config.port}), build ${process.env.GIT_SHA?.trim() || "dev"}`);
   setImmediate(() => { try { scheduler.start(); } catch (err) { log.error(`Scheduler start failed: ${(err as Error).message}`); } });
 });
 

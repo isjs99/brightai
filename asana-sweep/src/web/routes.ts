@@ -130,7 +130,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   };
 
   // ---- Public ----
-  r.get('/health', (_req, res) => res.json({ ok: true, ...perfSnapshot() }));
+  r.get('/health', (_req, res) => res.json({ ok: true, build: process.env.GIT_SHA?.trim() || 'dev', ...perfSnapshot() }));
 
   // Brute-force guard for the shared password: 10 failed attempts per IP, then a 15 minute lockout.
   const attempts = new Map<string, { count: number; until: number }>();
