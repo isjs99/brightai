@@ -8,7 +8,7 @@ import { log } from '../logger.js';
 import { config } from '../config.js';
 import { draftWithClaude } from '../inbox/llm.js';
 import { textHash, translateToEnglish } from '../inbox/translate.js';
-import { fromEnglishPrompt, WALK_STEPS } from './walk.js';
+import { fromEnglishPrompt, WALK_STEPS, walkIndexOf } from './walk.js';
 import { pullContent } from './content.js';
 import { materialChange, parseProfile, parseVoice, profileFacts, profilePrompt, voiceFacts, voicePrompt } from './profile.js';
 
@@ -167,7 +167,7 @@ export class PlaybookEngine {
       const fromName = s.shop_name.match(MARKET_RE)?.[1]?.toUpperCase() ?? null;
       const market = fromName ?? tts.find((t) => t.account_id === s.account_id)?.market ?? (a?.markets ?? '').split(/[,\s/]+/)[0] ?? null;
       const override = this.q.getSetting(`playbook_lang_${s.shop_id}`, '');
-      return { shop_id: s.shop_id, shop_name: s.shop_name, account_id: s.account_id, account_name: a?.name ?? '', am_name: a?.am_name ?? null, market: market || null, language: override || shopLanguage(market), plan: this.q.getSetting(`playbook_plan_${s.shop_id}`, '') || null, remote_counts: {}, checked_at: null, learned: this.learnedFor(s.shop_id), profile: this.q.listProfiles(s.shop_id, 1)[0] ?? null, voice: this.voiceFor(s.shop_id), top_pct: Number(this.q.getSetting(`playbook_top_pct_${s.shop_id}`, '5')) || 5, auto_update: this.q.getSetting(`playbook_auto_update_${s.shop_id}`, '') === '1', error: this.q.getSetting(`playbook_shop_error_${s.shop_id}`, '') || null };
+      return { shop_id: s.shop_id, shop_name: s.shop_name, account_id: s.account_id, account_name: a?.name ?? '', am_name: a?.am_name ?? null, market: market || null, language: override || shopLanguage(market), plan: this.q.getSetting(`playbook_plan_${s.shop_id}`, '') || null, remote_counts: {}, checked_at: null, learned: this.learnedFor(s.shop_id), profile: this.q.listProfiles(s.shop_id, 1)[0] ?? null, voice: this.voiceFor(s.shop_id), top_pct: Number(this.q.getSetting(`playbook_top_pct_${s.shop_id}`, '10')) || 10, auto_update: this.q.getSetting(`playbook_auto_update_${s.shop_id}`, '') === '1', error: this.q.getSetting(`playbook_shop_error_${s.shop_id}`, '') || null };
     }).filter((s) => accounts.get(s.account_id)?.enabled !== false);
   }
 
@@ -204,7 +204,7 @@ export class PlaybookEngine {
       if (known.has(r.remote_id)) continue;
       const brand = norm(brandOf(r.name));
       const acc = accounts.find((a) => norm(a.name) === brand) ?? accounts.find((a) => brand.startsWith(norm(a.name)) || norm(a.name).startsWith(brand));
-      if (acc && !/external/i.test(r.name)) { this.q.addShop(acc.id, r.remote_id, r.name.trim(), 'EUR', 'cruva'); linked += 1; } else unlinked.push({ shop_id: r.remote_id, shop_name: r.name.trim(), plan: r.fields.plan ?? null });
+      if (acc && !/external/i.test(r.name)) { this.q.addShop(acc.id, r.remote_id, r.name.trim(), 'EUR', 'cruva'); linked += 1; this.learnSoon(r.remote_id); } else unlinked.push({ shop_id: r.remote_id, shop_name: r.name.trim(), plan: r.fields.plan ?? null });
     }
     this.q.setSetting('playbook_unlinked_json', JSON.stringify(unlinked));
     liveEvents.emitUpdate({ kind: 'playbook' });
@@ -213,6 +213,7 @@ export class PlaybookEngine {
 
   linkShop(shopId: string, shopName: string, accountId: number): void {
     this.q.addShop(accountId, shopId, shopName, 'EUR', 'cruva');
+    this.learnSoon(shopId);
     let unlinked: PlaybookData['unlinked'] = [];
     try { unlinked = JSON.parse(this.q.getSetting('playbook_unlinked_json', '[]')) as PlaybookData['unlinked']; } catch { unlinked = []; }
     this.q.setSetting('playbook_unlinked_json', JSON.stringify(unlinked.filter((u) => u.shop_id !== shopId)));
@@ -483,7 +484,7 @@ export class PlaybookEngine {
       }
     }
     liveEvents.emitUpdate({ kind: 'playbook' });
-    if (opts.tailor !== false && drafts.some((d) => d.copy) && shops.some((sh) => sh.voice || sh.profile)) void this.tailorRollout(rollout.id).catch((err) => log.warn(`Cruva tailoring: ${(err as Error).message}`));
+    if (opts.tailor !== false && drafts.some((d) => d.copy) && shops.some((sh) => sh.voice || sh.profile || this.campaignFacts(sh.shop_id, null).length)) void this.tailorRollout(rollout.id).catch((err) => log.warn(`Cruva tailoring: ${(err as Error).message}`));
     return { rollout: this.q.getRollout(rollout.id)!, drafts };
   }
 
@@ -494,6 +495,51 @@ export class PlaybookEngine {
   }
 
   // ---- Learning: the shop's voice from the copy it runs, and the content profile from its top videos ----
+
+  private learnQueue: Promise<unknown> = Promise.resolve();
+  /** Learn a shop in the background, one at a time, without anyone pressing anything (a newly linked shop, a shop that was never learnt). */
+  learnSoon(shopId: string): void {
+    if (!this.mcp.configured || (this.llm === undefined && !config.anthropicApiKey)) return;
+    this.learnQueue = this.learnQueue.then(async () => {
+      const shop = this.shops().find((sh) => sh.shop_id === shopId);
+      if (!shop || (shop.profile && shop.voice)) return;
+      if (!this.q.listRemoteItems(shopId).length) { try { await this.checkShop(shop, true); } catch (err) { log.warn(`Cruva learn ${shop.shop_name}: check failed: ${(err as Error).message}`); } }
+      const r = await this.learnShop(shopId);
+      if (r.errors.length) log.warn(`Cruva learn ${shop.shop_name}: ${r.errors.join(' | ')}`);
+      else log.info(`Cruva learnt ${shop.shop_name}: ${r.profile ? `top ${r.profile.top_count} of ${r.profile.videos} videos` : 'no videos'}${r.voice ? ', voice' : ''}`);
+    }).catch((err) => log.warn(`Cruva learn: ${(err as Error).message}`));
+  }
+
+  /** Every linked shop without a profile or a voice, queued for learning (after boot and after a sync). */
+  learnMissing(): number {
+    const missing = this.shops().filter((sh) => !sh.profile || !sh.voice);
+    for (const sh of missing) this.learnSoon(sh.shop_id);
+    return missing.length;
+  }
+
+  /** Learn now when the shop has not been learnt, so a rollout is always tailored to it. */
+  async ensureLearned(shopId: string): Promise<void> {
+    const shop = this.shops().find((sh) => sh.shop_id === shopId);
+    if (!shop || (shop.profile && shop.voice)) return;
+    await this.learnQueue; // a background learn of this shop may be running
+    const again = this.shops().find((sh) => sh.shop_id === shopId);
+    if (again && again.profile && again.voice) return;
+    const r = await this.learnShop(shopId);
+    if (r.errors.length) log.warn(`Cruva learn ${shop.shop_name}: ${r.errors.join(' | ')}`);
+  }
+
+  /** Prepare for the walk: the shops learnt first where they were not, the drafts written, then tailored in walk order in the background. */
+  async prepareTailored(opts: Parameters<PlaybookEngine['prepare']>[0]): Promise<{ rollout: PlaybookRollout; drafts: PlaybookDraft[] }> {
+    for (const id of opts.shop_ids) { try { await this.ensureLearned(id); } catch (err) { log.warn(`Cruva learn before prepare: ${(err as Error).message}`); } }
+    return this.prepare(opts);
+  }
+
+  /** The campaigns that work on the shop, by replies and GMV, as lines for the tailoring prompt. */
+  private campaignFacts(shopId: string, exceptRemoteId: string | null): string[] {
+    const rows = this.q.listRemoteRaw(shopId, 'automation').filter((r) => typeof r.raw.copy === 'string' && r.raw.copy && r.remote_id !== exceptRemoteId);
+    const score = (r: (typeof rows)[number]) => Number(r.raw.gmv ?? 0) * 10 + Number(r.raw.replies ?? 0);
+    return rows.sort((a, b) => score(b) - score(a)).slice(0, 3).map((r) => { const sent = Number(r.raw.sent ?? 0); const replies = Number(r.raw.replies ?? 0); const gmv = Number(r.raw.gmv ?? 0); return `"${r.name}"${r.enabled ? '' : ' (stopped)'}: ${sent ? `sent ${sent.toLocaleString()}, ` : ''}${replies ? `${replies} replies${sent ? ` (${((replies / sent) * 100).toFixed(1)}%)` : ''}, ` : ''}${gmv ? `${Math.round(gmv).toLocaleString()} GMV` : 'no GMV yet'}. Opens: "${String(r.raw.copy).split('\n').filter((l) => l.trim())[0]?.slice(0, 120) ?? ''}"`; });
+  }
 
   async learnVoice(shop: PlaybookShop): Promise<PlaybookVoice | null> {
     const llm = this.llmOrNull(900);
@@ -559,13 +605,14 @@ export class PlaybookEngine {
     if (!shop) throw new Error('Shop not found');
     const llm = this.llmOrNull(1000);
     if (!llm) throw new Error('ANTHROPIC_API_KEY is not set.');
-    if (!shop.voice && !shop.profile && !opts.instruction) return d;
+    if (!shop.voice && !shop.profile && !opts.instruction && !this.campaignFacts(d.shop_id, d.remote_id).length) return d;
     const lang = ({ de: 'German', fr: 'French', it: 'Italian', es: 'Spanish', nl: 'Dutch', pl: 'Polish' } as Record<string, string>)[d.language] ?? 'English';
     const brand = brandOf(d.shop_name);
     const system = [
       `You write TikTok Shop creator messages for ${brand} in ${lang}, in the brand's own voice. The message has a job (what the library copy below asks for); keep that job, every fact in it, and every placeholder exactly as written ([affiliate_name], [brand], [brief_link], [month], URLs). No hashtags, no corporate filler. Output only the message.`,
       ...(shop.voice ? ['', 'The brand\'s voice, learnt from the messages it already runs:', ...voiceFacts(shop.voice).map((l) => `- ${l}`)] : []),
       ...(shop.profile ? ['', 'What sells for this shop right now (from its top videos). Use what fits this message: a hook or content idea in a message about what to film, the product that carries in a message about products, the offer where a deal is mentioned. Do not list it all.', ...profileFacts(shop.profile).map((l) => `- ${l}`)] : []),
+      ...((): string[] => { const c = this.campaignFacts(d.shop_id, d.remote_id); return c.length ? ['', 'Campaigns that work on this shop (by replies and GMV); match what they do well:', ...c.map((l) => `- ${l}`)] : []; })(),
       d.existing_copy ? `\nThe shop's existing message for reference (its structure and phrasing are the base when they fit):\n${d.existing_copy.slice(0, 1800)}` : '',
     ].join('\n');
     const user = `${opts.instruction ? `Instruction from the team: ${opts.instruction}\n\n` : ''}Library copy (the job and the facts):\n\n${d.copy}`;
@@ -577,12 +624,22 @@ export class PlaybookEngine {
     return this.q.getRolloutDraft(id) ?? updated;
   }
 
+  tailoringState(rolloutId: number): { running: boolean; done: number; total: number; errors: string[] } {
+    try { return { running: false, done: 0, total: 0, errors: [], ...(JSON.parse(this.q.getSetting(`playbook_tailoring_${rolloutId}`, '') || '{}') as Partial<{ running: boolean; done: number; total: number; errors: string[] }>) }; } catch { return { running: false, done: 0, total: 0, errors: [] }; }
+  }
+
+  /** Tailor every draft in the rollout, in the order the walk shows them, so the first step is ready first; progress is kept so the walk can show it. */
   async tailorRollout(rolloutId: number): Promise<{ tailored: number; errors: string[] }> {
     const errors: string[] = []; let tailored = 0;
-    for (const d of this.q.listRolloutDrafts(rolloutId)) {
-      if (!d.copy || d.tailored_at || !['ready', 'needs_input', 'blocked'].includes(d.status)) continue;
-      try { await this.tailorDraft(d.id); tailored += 1; } catch (err) { errors.push(`${d.shop_name} / ${d.name}: ${(err as Error).message}`); }
-    }
+    const todo = this.q.listRolloutDrafts(rolloutId).filter((d) => d.copy && !d.tailored_at && ['ready', 'needs_input', 'blocked'].includes(d.status)).sort((a, b) => a.shop_id.localeCompare(b.shop_id) || walkIndexOf(a.kind, a.key) - walkIndexOf(b.kind, b.key) || a.order_no - b.order_no);
+    const state = (running: boolean) => { this.q.setSetting(`playbook_tailoring_${rolloutId}`, JSON.stringify({ running, done: tailored + errors.length, total: todo.length, errors })); liveEvents.emitUpdate({ kind: 'playbook' }); };
+    state(true);
+    try {
+      for (const d of todo) {
+        try { await this.tailorDraft(d.id); tailored += 1; } catch (err) { errors.push(`${d.shop_name} / ${d.name}: ${(err as Error).message}`); }
+        state(true);
+      }
+    } finally { state(false); }
     return { tailored, errors };
   }
 
@@ -617,10 +674,10 @@ export class PlaybookEngine {
     return out;
   }
 
-  drafts(rolloutId: number): { rollout: PlaybookRollout; drafts: PlaybookDraft[]; walk: Record<string, number>; steps: typeof WALK_STEPS } {
+  drafts(rolloutId: number): { rollout: PlaybookRollout; drafts: PlaybookDraft[]; walk: Record<string, number>; steps: typeof WALK_STEPS; tailoring: { running: boolean; done: number; total: number; errors: string[] } } {
     const rollout = this.q.getRollout(rolloutId);
     if (!rollout) throw new Error('Rollout not found');
-    return { rollout, drafts: this.q.listRolloutDrafts(rolloutId), walk: this.walkState(rolloutId), steps: WALK_STEPS };
+    return { rollout, drafts: this.q.listRolloutDrafts(rolloutId), walk: this.walkState(rolloutId), steps: WALK_STEPS, tailoring: this.tailoringState(rolloutId) };
   }
 
   /** Where each shop's walk through a rollout stands (step index), shared between the people reviewing it. */

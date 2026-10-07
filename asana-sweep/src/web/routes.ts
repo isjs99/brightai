@@ -3357,6 +3357,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (!slackBot.configured) return res.json({ configured: false, channels: [] });
     try { res.json({ configured: true, channels: await slackBot.listChannels() }); } catch (err) { throw new HttpError(502, (err as Error).message); }
   });
+  r.post('/playbook/learn-missing', (_req, res) => res.json({ queued: playbook.learnMissing() }));
   r.post('/playbook/shops/sync', async (_req, res) => {
     try { const result = await playbook.syncShops(); res.json({ ...result, ...playbook.data() }); } catch (err) { bad(err); }
   });
@@ -3386,7 +3387,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   });
   r.put('/playbook/shops/:shopId', (req, res) => {
     const sb = (req.body ?? {}) as { top_pct?: unknown; auto_update?: unknown };
-    if (sb.top_pct !== undefined) q.setSetting(`playbook_top_pct_${String(req.params.shopId)}`, String(Math.max(1, Math.min(20, Math.round(Number(sb.top_pct)) || 5))));
+    if (sb.top_pct !== undefined) q.setSetting(`playbook_top_pct_${String(req.params.shopId)}`, String(Math.max(1, Math.min(25, Math.round(Number(sb.top_pct)) || 10))));
     if (sb.auto_update !== undefined) q.setSetting(`playbook_auto_update_${String(req.params.shopId)}`, sb.auto_update ? '1' : '0');
     const b = (req.body ?? {}) as Record<string, unknown>;
     if (b.language !== undefined) q.setSetting(`playbook_lang_${String(req.params.shopId)}`, String(b.language ?? '').trim());
@@ -3394,11 +3395,11 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     res.json(playbook.data());
   });
   /** Draft the missing pieces for the ticked shops into a rollout; nothing goes to Cruva yet. */
-  r.post('/playbook/prepare', (req, res) => {
+  r.post('/playbook/prepare', async (req, res) => {
     const b = (req.body ?? {}) as Record<string, unknown>;
     const shopIds = Array.isArray(b.shop_ids) ? (b.shop_ids as unknown[]).map(String) : [];
     const keys = Array.isArray(b.keys) ? (b.keys as unknown[]).map(String) : [];
-    try { res.status(201).json(playbook.prepare({ shop_ids: shopIds, keys, created_by: actorOf(req) })); } catch (err) { bad(err); }
+    try { res.status(201).json(await playbook.prepareTailored({ shop_ids: shopIds, keys, created_by: actorOf(req) })); } catch (err) { bad(err); }
   });
   r.get('/playbook/rollouts/:id', (req, res) => { try { res.json(playbook.drafts(idParam(req))); } catch (err) { throw new HttpError(404, (err as Error).message); } });
   r.delete('/playbook/rollouts/:id', (req, res) => { playbook.deleteRollout(idParam(req)); res.json(playbook.data()); });

@@ -161,6 +161,8 @@ export class Scheduler {
     // Cruva: stats, score, samples and stock for every linked shop, several times a day; the monitor reads them on its next scan.
     this.cruvaPull.start();
     this.playbook.seed();
+    // Shops never learnt (voice and content profile) are learnt in the background, one at a time, ten minutes after boot.
+    setTimeout(() => { const n = this.playbook.learnMissing(); if (n) log.info(`Cruva: ${n} shop(s) queued for learning`); }, 600000);
     this.copilot.start();
     // Ad hoc client tasks from the client channel, emails and calls, every 30 minutes.
     this.clientTasks.start();

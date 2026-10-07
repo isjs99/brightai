@@ -165,3 +165,38 @@ describe('learning in the engine', () => {
     expect(mcpCalls.filter((c) => c.tool === 'update_automation').every((c) => c.args.campaign_id === 'auto-2')).toBe(true);
   });
 });
+
+describe('learning without anyone pressing anything', () => {
+  it('Prepare learns a shop that was never learnt, tailors in walk order with progress, and the prompt names the campaigns that work', async () => {
+    const q = new Queries(openTestDb());
+    const a = q.createAccount({ name: 'Kijimea', markets: 'DE', am_name: 'Federica', aa_name: null, enabled: true, notes: null, commission_pct: 15, commission_basis: 'gmv', settlement_pct: 100, slack_channel: null, client_slack_channel: null, client_domain: null });
+    const mcp: McpCaller = { configured: true, async call(tool, args) { if (tool === 'search_videos') return args.just_count ? VIDEOS_COUNT : VIDEOS_PAGE; if (tool === 'list_automations') return 'Automations (total: 1):\n\n- September Deals (ID: auto-1) | Status: active | Message: dm | Audience: new_affiliates | Sent: 351,674 | Replies: 457 | GMV: $2246\n'; if (tool.startsWith('list_')) return 'No results.'; return ''; } };
+    const llmCalls: { system: string; user: string }[] = [];
+    const llm = async (system: string, user: string) => { llmCalls.push({ system, user }); if (/describe how the brand/.test(system)) return '{"summary": "Warm du.", "greeting": null, "signoff": "Team Kijimea", "register": "du", "emoji": "light", "length": "medium", "phrases": [], "avoid": []}'; if (/study the TikTok Shop affiliate videos/.test(system)) return JSON.stringify({ summary: 'Problem-first.', hooks: [{ group: 'problem first', example: 'x', language: 'de', video_ids: ['7666225241760288033'] }], formats: [], products_carry: [], products_no_gmv: [], creator_shape: { follower_band: null, niches: [], first_video_share: null, video_ids: [] }, timing: { best_days: [], best_hours: [], video_ids: [] }, offer: null, example_scripts: [], content_ideas: [], top_creators: [] }); if (/in the brand's own voice/.test(system)) return `T(${user.length})`; return 'x'; };
+    const engine = new PlaybookEngine(q, mcp, llm);
+    engine.seed();
+    engine.linkShop('shop-de', 'Kijimea DE', a.id);
+    q.replaceRemoteItems('shop-de', 'automation', [{ remote_id: 'auto-1', name: 'September Deals', enabled: true, raw: { copy: 'Hey [affiliate_name],\nGROSSE NEUIGKEITEN!\nTeam Kijimea', sent: 351674, replies: 457, gmv: 2246 } }]);
+    const now = new Date().toISOString();
+    for (const key of ['sample_sent', 'content_pending', 'first_sale']) q.setPlaybookCell({ shop_id: 'shop-de', kind: 'group', playbook_key: key, status: 'set', remote_id: `g-${key}`, remote_name: key, checked_at: now, applied_at: null, note: null });
+    for (const key of ['delivered', 'sample_sent', 'first_sale']) q.setPlaybookCell({ shop_id: 'shop-de', kind: 'automation', playbook_key: key, status: 'missing', remote_id: null, remote_name: null, checked_at: now, applied_at: null, note: null });
+    expect(engine.learnMissing()).toBeGreaterThanOrEqual(1); // queued in the background (the test database holds other shops too)
+    await engine['learnQueue'];
+    expect(engine.shops().find((s) => s.shop_id === 'shop-de')!.voice).toBeTruthy();
+    // Nothing learnt: Prepare learns first (here already done by the queue), then drafts, then tailors in walk order.
+    const { rollout, drafts } = await engine.prepareTailored({ shop_ids: ['shop-de'], keys: ['automation:sample_sent', 'automation:delivered', 'automation:first_sale'], created_by: 'Isaac' });
+    expect(drafts).toHaveLength(3);
+    await new Promise((r) => setTimeout(r, 50));
+    const state = engine.tailoringState(rollout.id);
+    expect(state).toMatchObject({ running: false, done: 3, total: 3, errors: [] });
+    const tailoredOrder = llmCalls.filter((c) => /in the brand's own voice/.test(c.system)).map((c) => c.user);
+    expect(tailoredOrder).toHaveLength(3);
+    const byKey = (k: string) => q.listRolloutDrafts(rollout.id).find((d) => d.key === k)!;
+    expect(byKey('sample_sent').tailored_at! <= byKey('delivered').tailored_at!).toBe(true);
+    expect(byKey('delivered').tailored_at! <= byKey('first_sale').tailored_at!).toBe(true);
+    const sys = llmCalls.find((c) => /in the brand's own voice/.test(c.system))!.system;
+    expect(sys).toMatch(/Campaigns that work on this shop/);
+    expect(sys).toMatch(/"September Deals": sent 351,674, 457 replies \(0\.1%\), 2,246 GMV/);
+    expect(engine.drafts(rollout.id).tailoring.done).toBe(3);
+  });
+});

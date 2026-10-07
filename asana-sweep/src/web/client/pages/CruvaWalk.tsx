@@ -33,11 +33,15 @@ export default function CruvaWalk({ id, shopId, data, isAdmin, onBack, onTable, 
   const [showExisting, setShowExisting] = useState(true);
   const shopInfo = useMemo(() => data.shops.find((s) => s.shop_id === shop) ?? null, [data.shops, shop]);
 
-  const load = useCallback(() => api.playbookRollout(id).then((r) => { setRollout(r.rollout); setDrafts(r.drafts); setSteps(r.steps); setWalk(r.walk); }).catch((e) => onError((e as Error).message)), [id, onError]);
+  const [tailoring, setTailoring] = useState<{ running: boolean; done: number; total: number; errors: string[] }>({ running: false, done: 0, total: 0, errors: [] });
+  const [campaigns, setCampaigns] = useState<{ name: string; enabled: boolean; copy: string; sent: number | null; replies: number | null; gmv: number | null }[]>([]);
+  const load = useCallback(() => api.playbookRollout(id).then((r) => { setRollout(r.rollout); setDrafts(r.drafts); setSteps(r.steps); setWalk(r.walk); setTailoring(r.tailoring); }).catch((e) => onError((e as Error).message)), [id, onError]);
   useEffect(() => { load(); }, [load]);
   useLiveUpdates((e) => { if (e.kind === 'playbook') load(); });
 
   const stepIndex = useMemo(() => new Map(steps.map((s, i) => [s.key, i])), [steps]);
+  // The shop's existing campaigns with their numbers: the context the drafts were tailored to, shown beside each step.
+  useEffect(() => { if (!shop) return; api.playbookProfile(shop).then((r) => setCampaigns(r.existing.sort((a, b) => Number(b.gmv ?? 0) * 10 + Number(b.replies ?? 0) - (Number(a.gmv ?? 0) * 10 + Number(a.replies ?? 0))).slice(0, 5))).catch(() => setCampaigns([])); }, [shop]);
   const shops = useMemo(() => [...new Map(drafts.map((d) => [d.shop_id, d.shop_name])).entries()], [drafts]);
   useEffect(() => { if (!shop && shops.length) setShop(shops[0][0]); }, [shop, shops]);
   const mine = useMemo(() => drafts.filter((d) => d.shop_id === shop).sort((a, b) => (stepIndex.get(`${a.kind}:${a.key}`) ?? 1000) - (stepIndex.get(`${b.kind}:${b.key}`) ?? 1000) || a.order_no - b.order_no), [drafts, shop, stepIndex]);
@@ -88,6 +92,8 @@ export default function CruvaWalk({ id, shopId, data, isAdmin, onBack, onTable, 
         </div>
       </div>
       {notice && <div className="banner info">{notice}</div>}
+      {tailoring.running && <div className="banner info">Tailoring the drafts to this shop in the shop's voice, with what sells and what its campaigns do well: {tailoring.done} of {tailoring.total} done. Steps are rewritten in walk order, so the next one is usually ready by the time you get to it.</div>}
+      {!tailoring.running && tailoring.errors.length > 0 && <div className="banner warn">Tailoring failed on {tailoring.errors.length} draft{tailoring.errors.length === 1 ? '' : 's'}: {tailoring.errors.slice(0, 3).join(' | ')}. Those show the library copy; Re-tailor redoes one.</div>}
 
       {mine.length === 0 ? <div className="empty">Nothing to draft for this shop: everything the library knows is already in place.</div> : (
         <div className="walk">
@@ -120,11 +126,19 @@ export default function CruvaWalk({ id, shopId, data, isAdmin, onBack, onTable, 
                   {cur.remote_name && <span className="badge muted" title={cur.remote_id ?? ''}>in Cruva: {cur.remote_name}</span>}
                 </div>
               </div>
-              {(shopInfo?.voice || shopInfo?.profile) && <div className="sub walk-known">{shopInfo.voice ? <span title={shopInfo.voice.summary}><b>Voice:</b> {shopInfo.voice.summary.slice(0, 160)}{shopInfo.voice.summary.length > 160 ? '…' : ''}</span> : null}{shopInfo.profile ? <span> <b>Sells:</b> {shopInfo.profile.hooks[0] ? `${shopInfo.profile.hooks[0].group} hooks` : ''}{shopInfo.profile.products_carry[0] ? `, product ${shopInfo.profile.products_carry[0].product_id}` : ''}{shopInfo.profile.offer ? `, ${shopInfo.profile.offer}` : ''}{shopInfo.profile.timing.best_days[0] ? `, best on ${shopInfo.profile.timing.best_days[0]}` : ''}</span> : null}{cur.tailored_at ? <span className="badge good" style={{ marginLeft: 6 }} title={`Rewritten in the shop's voice ${fmtRelative(cur.tailored_at)}`}>tailored</span> : <span className="badge muted" style={{ marginLeft: 6 }}>library copy</span>}</div>}
+              {(shopInfo?.voice || shopInfo?.profile) && <div className="sub walk-known">{shopInfo.voice ? <span title={shopInfo.voice.summary}><b>Voice:</b> {shopInfo.voice.summary.slice(0, 160)}{shopInfo.voice.summary.length > 160 ? '…' : ''}</span> : null}{shopInfo.profile ? <span> <b>Sells:</b> {shopInfo.profile.hooks[0] ? `${shopInfo.profile.hooks[0].group} hooks` : ''}{shopInfo.profile.products_carry[0] ? `, product ${shopInfo.profile.products_carry[0].product_id}` : ''}{shopInfo.profile.offer ? `, ${shopInfo.profile.offer}` : ''}{shopInfo.profile.timing.best_days[0] ? `, best on ${shopInfo.profile.timing.best_days[0]}` : ''}</span> : null}{cur.tailored_at ? <span className="badge good" style={{ marginLeft: 6 }} title={`Rewritten in the shop's voice ${fmtRelative(cur.tailored_at)}`}>tailored</span> : tailoring.running && cur.copy ? <span className="badge warn" style={{ marginLeft: 6 }}>being tailored…</span> : <span className="badge muted" style={{ marginLeft: 6 }}>library copy</span>}</div>}
               {cur.existing_copy && (
                 <details open={showExisting} onToggle={(e) => setShowExisting((e.target as HTMLDetailsElement).open)} className="walk-existing">
                   <summary className="sub" style={{ cursor: 'pointer' }}>{cur.action === 'update' ? 'What the shop runs today for this piece' : 'The shop\'s nearest existing message, for reference'}</summary>
                   <div className="bubble" style={{ whiteSpace: 'pre-wrap', marginTop: 6, fontSize: 13 }}>{cur.existing_copy}</div>
+                </details>
+              )}
+              {campaigns.length > 0 && (
+                <details className="walk-existing">
+                  <summary className="sub" style={{ cursor: 'pointer' }}>What works on this shop: {campaigns.length} campaign{campaigns.length === 1 ? '' : 's'} by replies and GMV (the drafts match them)</summary>
+                  <table style={{ marginTop: 6 }}><thead><tr><th>Campaign</th><th className="num">Sent</th><th className="num">Replies</th><th className="num">GMV</th><th>Opens with</th></tr></thead><tbody>
+                    {campaigns.map((c) => <tr key={c.name}><td>{c.name}{!c.enabled && <span className="sub"> · stopped</span>}</td><td className="num">{c.sent ? Number(c.sent).toLocaleString() : '–'}</td><td className="num">{c.replies ?? '–'}{c.sent && c.replies ? <span className="sub"> ({((Number(c.replies) / Number(c.sent)) * 100).toFixed(1)}%)</span> : null}</td><td className="num">{c.gmv ? Math.round(Number(c.gmv)).toLocaleString() : '–'}</td><td className="sub">{c.copy.split('\n').filter((l) => l.trim())[0]?.slice(0, 90)}</td></tr>)}
+                  </tbody></table>
                 </details>
               )}
               {cur.blockers.length > 0 && <ul className="flaglist">{cur.blockers.map((b, i) => <li key={i} className={cur.status === 'blocked' ? 'crit' : 'warn'}><span>{b}</span></li>)}</ul>}
@@ -145,7 +159,7 @@ export default function CruvaWalk({ id, shopId, data, isAdmin, onBack, onTable, 
                   <div>
                     <div className="lbl">{LANG[cur.language] ?? cur.language} · what gets sent</div>
                     <textarea className="copy" value={copy} onChange={(e) => setCopy(e.target.value)} disabled={!isAdmin || done} />
-                    {isAdmin && !done && <div className="inline-form" style={{ marginTop: 6 }}><input type="text" value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder="Steer a rewrite (shorter, mention the bundle…)" style={{ flex: 1, fontSize: 12 }} /><button className="small" disabled={busy !== null} onClick={() => run('rw', async () => { await saveCopy(); await api.playbookDraftRewrite(cur.id, instruction || null); })}>{busy === 'rw' ? 'Rewriting…' : 'Rewrite'}</button>{(shopInfo?.voice || shopInfo?.profile) && <button className="small" disabled={busy !== null} title="Rewrite in the shop's own voice, with what sells, starting from its existing message" onClick={tailor}>{busy === 'tailor' ? 'Tailoring…' : 'Tailor to this shop'}</button>}{copy !== (cur.copy ?? '') && <button className="small" disabled={busy !== null} onClick={() => run('save', saveCopy)}>Save</button>}</div>}
+                    {isAdmin && !done && <div className="inline-form" style={{ marginTop: 6 }}><input type="text" value={instruction} onChange={(e) => setInstruction(e.target.value)} placeholder="Steer a rewrite (shorter, mention the bundle…)" style={{ flex: 1, fontSize: 12 }} /><button className="small" disabled={busy !== null} onClick={() => run('rw', async () => { await saveCopy(); await api.playbookDraftRewrite(cur.id, instruction || null); })}>{busy === 'rw' ? 'Rewriting…' : 'Rewrite'}</button>{(shopInfo?.voice || shopInfo?.profile || campaigns.length > 0) && <button className="small" disabled={busy !== null || tailoring.running} title="Rewrite again in the shop's own voice, with what sells and what its campaigns do well, starting from its existing message" onClick={tailor}>{busy === 'tailor' ? 'Tailoring…' : cur.tailored_at ? 'Re-tailor' : 'Tailor now'}</button>}{copy !== (cur.copy ?? '') && <button className="small" disabled={busy !== null} onClick={() => run('save', saveCopy)}>Save</button>}</div>}
                   </div>
                   <div>
                     <div className="lbl">English · the same, for review</div>
@@ -168,8 +182,8 @@ export default function CruvaWalk({ id, shopId, data, isAdmin, onBack, onTable, 
                 <button className="small" disabled={(index ?? 0) === 0} onClick={() => go((index ?? 0) - 1)}>◂ Back</button>
                 <span style={{ flex: 1 }} />
                 {isAdmin && !done && (cur.status === 'skipped' ? <button className="small" disabled={busy !== null} onClick={unskip}>Un-skip</button> : <button className="small" disabled={busy !== null} onClick={skip}>Skip</button>)}
-                {isAdmin && !done && cur.status !== 'approved' && cur.kind === 'automation' && cur.action !== 'start' && <button className="small" disabled={busy !== null || cur.status === 'blocked'} onClick={() => approve(true)}>Approve and start</button>}
-                {isAdmin && !done && cur.status !== 'approved' && <button className="small primary" disabled={busy !== null || cur.status === 'blocked'} onClick={() => approve(cur.kind === 'automation' && cur.action !== 'start' ? false : undefined)}>{cur.kind === 'automation' && cur.action !== 'start' ? 'Approve (paused) · next ▸' : 'Approve · next ▸'}</button>}
+                {isAdmin && !done && cur.status !== 'approved' && cur.kind === 'automation' && cur.action !== 'start' && <button className="small" disabled={busy !== null || cur.status === 'blocked' || (tailoring.running && Boolean(cur.copy) && !cur.tailored_at)} onClick={() => approve(true)}>Approve and start</button>}
+                {isAdmin && !done && cur.status !== 'approved' && <button className="small primary" disabled={busy !== null || cur.status === 'blocked' || (tailoring.running && Boolean(cur.copy) && !cur.tailored_at)} title={tailoring.running && cur.copy && !cur.tailored_at ? 'This step is still being tailored' : ''} onClick={() => approve(cur.kind === 'automation' && cur.action !== 'start' ? false : undefined)}>{cur.kind === 'automation' && cur.action !== 'start' ? 'Approve (paused) · next ▸' : 'Approve · next ▸'}</button>}
                 {(cur.status === 'approved' || !isAdmin || done) && <button className="small" onClick={() => go((index ?? 0) + 1)}>Next ▸</button>}
               </div>
             </div>
