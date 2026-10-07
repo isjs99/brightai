@@ -13,6 +13,10 @@ export function openDb(path: string = config.databasePath): DB {
   if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
   const db = new Database(path);
   db.pragma('journal_mode = WAL');
+  // WAL with NORMAL: the log is flushed at checkpoints rather than on every commit. Safe against an app crash
+  // (the OS keeps the WAL); on a network volume FULL made every small write a disk round trip that held the server.
+  db.pragma('synchronous = NORMAL');
+  db.pragma('busy_timeout = 5000');
   db.pragma('foreign_keys = ON');
   runMigrations(db);
   instance = db;

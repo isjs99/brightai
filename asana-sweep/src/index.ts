@@ -3,6 +3,7 @@ import { openDb } from './db/index.js';
 import { Queries } from './db/queries.js';
 import { log } from './logger.js';
 import { installLlm } from './llm/usage.js';
+import { startPerfMonitor } from './perf.js';
 import { Scheduler } from './scheduler/index.js';
 import { createApp } from './web/server.js';
 
@@ -10,6 +11,7 @@ const db = openDb();
 const q = new Queries(db);
 q.failStaleGmvSyncs();
 installLlm(q);
+startPerfMonitor();
 
 const scheduler = new Scheduler(q);
 scheduler.start();

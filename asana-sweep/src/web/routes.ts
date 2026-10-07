@@ -56,6 +56,7 @@ import { inboxSettings as inboxSettingsOf } from '../inbox/sync.js';
 import type { FbtField, FbtProfile, OnboardingTerms, PitchBrief, PitchDeck, PitchesData, PitchSlide, PitchStat, PnlForecastInputs, PnlInputs, ReportSchedule } from '../sweep/types.js';
 import { researchPitch } from '../pitch/research.js';
 import { llmUsageData, saveLlmSettings } from '../llm/usage.js';
+import { perfSnapshot, slowRequests } from '../perf.js';
 import { buildDeck, deckHtml, DEFAULT_BRIEF, normaliseBrief } from '../pitch/deck.js';
 import type { AtsKind, CompetitorAts } from '../sweep/types.js';
 import { periodBounds } from '../reports/client.js';
@@ -128,7 +129,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   };
 
   // ---- Public ----
-  r.get('/health', (_req, res) => res.json({ ok: true }));
+  r.get('/health', (_req, res) => res.json({ ok: true, ...perfSnapshot() }));
 
   // Brute-force guard for the shared password: 10 failed attempts per IP, then a 15 minute lockout.
   const attempts = new Map<string, { count: number; until: number }>();
@@ -3044,6 +3045,9 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   r.post('/competitors/:id/clients', (req, res) => { const c = competitorParam(req); const b = (req.body ?? {}) as Record<string, unknown>; const brand = optText(b.brand); if (!brand) throw new HttpError(400, 'Brand is required.'); competitors.addClient(c.id, { brand, market: optText(b.market)?.toUpperCase() ?? null, evidence: optText(b.evidence), url: optText(b.url), actor: actorOf(req) }); res.json(competitors.detail(c.id)); });
   r.delete('/competitors/:id/clients/:clientId', (req, res) => { const c = competitorParam(req); const cid = Number(req.params.clientId); if (!Number.isInteger(cid)) throw new HttpError(400, 'Bad client id'); q.patchCompetitorClient(cid, { status: 'removed' }); liveEvents.emitUpdate({ kind: 'competitors' }); res.json(competitors.detail(c.id)); });
   r.post('/competitors/:id/notes', (req, res) => { const c = competitorParam(req); const b = (req.body ?? {}) as Record<string, unknown>; const text = optText(b.text); if (!text) throw new HttpError(400, 'Text is required.'); competitors.addNote(c.id, { text, url: optText(b.url), actor: actorOf(req) }); res.json(competitors.detail(c.id)); });
+
+  // ---- Performance: what has been slow (admin) ----
+  r.get('/perf', (_req, res) => res.json({ ...perfSnapshot(), slow_requests: slowRequests() }));
 
   // ---- Claude usage, models and budget ----
   r.get('/llm/usage', (_req, res) => res.json(llmUsageData(q)));

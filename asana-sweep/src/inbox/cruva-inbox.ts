@@ -66,6 +66,7 @@ export async function syncCruvaInbox(q: Queries, opts: { shopId?: string; accoun
   if (!mcp.configured) return { ...result, ok: false, errors: ['CRUVA_API_KEY is not set.'] };
   if (syncing) return { ...result, ok: false, errors: ['Cruva inbox sync already running.'] };
   syncing = true;
+  const startedAt = Date.now();
   const changed: number[] = [];
   try {
     const shops = q.listShops('cruva').filter((s) => s.account_id && (!opts.shopId || s.shop_id === opts.shopId) && (!opts.accountId || s.account_id === opts.accountId));
@@ -121,6 +122,7 @@ export async function syncCruvaInbox(q: Queries, opts: { shopId?: string; accoun
     q.setSetting('cruva_inbox_last_sync_error', (err as Error).message);
   } finally {
     syncing = false;
+    log.info(`Cruva inbox sync: ${result.shops} shop(s), ${result.conversations} thread(s), ${result.new_messages} new message(s) in ${Math.round((Date.now() - startedAt) / 1000)}s${result.errors.length ? `, ${result.errors.length} error(s)` : ''}`);
     if (changed.length || result.errors.length) liveEvents.emitUpdate({ kind: 'inbox' });
   }
   if (result.shops) log.info(`Cruva inbox: ${result.shops} shop(s), ${result.conversations} thread(s), ${result.new_messages} new message(s)${result.auto_replies ? `, ${result.auto_replies} auto-reply` : ''}${result.errors.length ? `, ${result.errors.length} error(s)` : ''}`);

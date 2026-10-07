@@ -1,3 +1,4 @@
+import { recordRequest } from '../perf.js';
 import express from 'express';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -13,6 +14,11 @@ export function createApp(q: Queries, scheduler: Scheduler) {
   // Hosted behind a reverse proxy (Railway, Fly, nginx): trust it for client IPs and https detection.
   app.set('trust proxy', 1);
   app.use(express.json({ limit: '256kb' }));
+  app.use((req, res, next) => {
+    const started = process.hrtime.bigint();
+    res.on('finish', () => recordRequest(req.method, req.path, Number(process.hrtime.bigint() - started) / 1e6));
+    next();
+  });
   app.use((_req, res, next) => {
     // SAMEORIGIN rather than DENY: the Pitch designer previews its own deck in an iframe; other sites still cannot frame us.
     res.setHeader('X-Frame-Options', 'SAMEORIGIN');
