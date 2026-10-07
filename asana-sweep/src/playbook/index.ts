@@ -1,5 +1,5 @@
 import type { Queries } from '../db/queries.js';
-import type { Account, PlaybookCellStatus, PlaybookData, PlaybookDraft, PlaybookDraftStatus, PlaybookItem, PlaybookKind, PlaybookLearned, PlaybookProfile, PlaybookRollout, PlaybookSetupCell, PlaybookShop, PlaybookVoice } from '../sweep/types.js';
+import type { Account, PlaybookCellStatus, PlaybookCompetitor, PlaybookData, PlaybookDraft, PlaybookDraftStatus, PlaybookItem, PlaybookKind, PlaybookLearned, PlaybookMarketProfile, PlaybookProfile, PlaybookRollout, PlaybookSetupCell, PlaybookShop, PlaybookVoice } from '../sweep/types.js';
 import { cruvaCrm, cruvaEndpoints } from '../gmv/cruva.js';
 import { cruvaMcp, dmMessagesFromDetail, idFromResult, inviteDetailsFromDetail, outreachFiltersFromDetail, parseListing, unwrap, type ListingRow, type McpCaller } from '../cruva/mcp.js';
 import { SEED_PLAYBOOK } from './seed.js';
@@ -11,6 +11,8 @@ import { textHash, translateToEnglish } from '../inbox/translate.js';
 import { fromEnglishPrompt, WALK_STEPS, walkIndexOf } from './walk.js';
 import { pullContent } from './content.js';
 import { materialChange, parseProfile, parseVoice, profileFacts, profilePrompt, voiceFacts, voicePrompt } from './profile.js';
+import { marketChange, marketFacts, marketPrompt, marketRegion, parseBrands, parseMarket, parseSuggestions, pickBrand, pullMarket, scriptFromSubtitles, suggestPrompt } from './competitors.js';
+import { fastmoss } from '../bd/fastmoss.js';
 
 /**
  * Cruva best-practice rollout. The library (seed.ts, editable) lists what every shop should have; the
@@ -128,7 +130,13 @@ const copyKey = (s: string) => norm(s.replace(/\[[a-z_ ]+\]/gi, ' ').replace(/ht
 export class PlaybookEngine {
   private checking = false;
   private progress: { done: number; total: number } | null = null;
-  constructor(private q: Queries, private mcp: McpCaller = cruvaMcp, private llm: ((system: string, user: string) => Promise<string>) | null | undefined = undefined) {}
+  constructor(private q: Queries, private mcp: McpCaller = cruvaMcp, private llm: ((system: string, user: string) => Promise<string>) | null | undefined = undefined, private scripts: ((videoId: string) => Promise<string | null>) | null | undefined = undefined) {}
+
+  /** The spoken script of a competitor video, through FastMoss where it is configured (Cruva has no AI insights on other brands' videos). */
+  private scriptReader(): ((videoId: string) => Promise<string | null>) | null {
+    if (this.scripts !== undefined) return this.scripts;
+    return fastmoss.configured ? async (videoId: string) => scriptFromSubtitles(await fastmoss.callTool('video_script_info', { video_id: videoId })) : null;
+  }
 
   /** Seed the library on first run, and add any seed item a later version introduced (edited items are never overwritten). */
   seed(): void {
@@ -167,7 +175,7 @@ export class PlaybookEngine {
       const fromName = s.shop_name.match(MARKET_RE)?.[1]?.toUpperCase() ?? null;
       const market = fromName ?? tts.find((t) => t.account_id === s.account_id)?.market ?? (a?.markets ?? '').split(/[,\s/]+/)[0] ?? null;
       const override = this.q.getSetting(`playbook_lang_${s.shop_id}`, '');
-      return { shop_id: s.shop_id, shop_name: s.shop_name, account_id: s.account_id, account_name: a?.name ?? '', am_name: a?.am_name ?? null, market: market || null, language: override || shopLanguage(market), plan: this.q.getSetting(`playbook_plan_${s.shop_id}`, '') || null, remote_counts: {}, checked_at: null, learned: this.learnedFor(s.shop_id), profile: this.q.listProfiles(s.shop_id, 1)[0] ?? null, voice: this.voiceFor(s.shop_id), top_pct: Number(this.q.getSetting(`playbook_top_pct_${s.shop_id}`, '10')) || 10, auto_update: this.q.getSetting(`playbook_auto_update_${s.shop_id}`, '') === '1', error: this.q.getSetting(`playbook_shop_error_${s.shop_id}`, '') || null };
+      return { shop_id: s.shop_id, shop_name: s.shop_name, account_id: s.account_id, account_name: a?.name ?? '', am_name: a?.am_name ?? null, market: market || null, language: override || shopLanguage(market), plan: this.q.getSetting(`playbook_plan_${s.shop_id}`, '') || null, remote_counts: {}, checked_at: null, learned: this.learnedFor(s.shop_id), profile: this.q.listProfiles(s.shop_id, 1)[0] ?? null, voice: this.voiceFor(s.shop_id), top_pct: Number(this.q.getSetting(`playbook_top_pct_${s.shop_id}`, '10')) || 10, auto_update: this.q.getSetting(`playbook_auto_update_${s.shop_id}`, '') === '1', market_read: this.q.listMarkets(s.shop_id, 1)[0] ?? null, competitors: this.q.listShopCompetitors(s.shop_id).filter((c) => c.status !== 'rejected').length, error: this.q.getSetting(`playbook_shop_error_${s.shop_id}`, '') || null };
     }).filter((s) => accounts.get(s.account_id)?.enabled !== false);
   }
 
@@ -473,7 +481,7 @@ export class PlaybookEngine {
           if (!tool) continue;
         } else {
           const p = this.payloadFor(shop, item, { groupIds, listIds, briefLink: briefCell ? shop.learned?.brief_link ?? null : null, pendingKeys });
-          tool = p.tool; payload = p.payload; copy = p.copy; blockers = p.blockers; inputs = p.inputs;
+          tool = p.tool; payload = item.kind === 'brief' ? briefFromLearning(p.payload, shop) : p.payload; copy = p.copy; blockers = p.blockers; inputs = p.inputs;
           if (action === 'update') { tool = item.kind === 'automation' ? 'update_automation' : tool; if (item.kind === 'automation') payload = { shop_id: shop.shop_id, campaign_id: cell!.remote_id, dm_messages: payload.dm_messages, title: payload.title }; }
           if (!tool) continue;
         }
@@ -484,7 +492,7 @@ export class PlaybookEngine {
       }
     }
     liveEvents.emitUpdate({ kind: 'playbook' });
-    if (opts.tailor !== false && drafts.some((d) => d.copy) && shops.some((sh) => sh.voice || sh.profile || this.campaignFacts(sh.shop_id, null).length)) void this.tailorRollout(rollout.id).catch((err) => log.warn(`Cruva tailoring: ${(err as Error).message}`));
+    if (opts.tailor !== false && drafts.some((d) => d.copy) && shops.some((sh) => sh.voice || sh.profile || sh.market_read || this.campaignFacts(sh.shop_id, null).length)) void this.tailorRollout(rollout.id).catch((err) => log.warn(`Cruva tailoring: ${(err as Error).message}`));
     return { rollout: this.q.getRollout(rollout.id)!, drafts };
   }
 
@@ -583,16 +591,124 @@ export class PlaybookEngine {
   }
 
   /** Both passes for one shop; errors come back as text rather than stopping the others. */
-  async learnShop(shopId: string): Promise<{ profile: PlaybookProfile | null; voice: PlaybookVoice | null; errors: string[] }> {
+  async learnShop(shopId: string): Promise<{ profile: PlaybookProfile | null; voice: PlaybookVoice | null; market: PlaybookMarketProfile | null; errors: string[] }> {
     const shop = this.shops().find((s) => s.shop_id === shopId);
     if (!shop) throw new Error('Shop not found');
     const errors: string[] = [];
     let voice: PlaybookVoice | null = null; let profile: PlaybookProfile | null = null;
     try { voice = await this.learnVoice(shop); } catch (err) { errors.push(`voice: ${(err as Error).message}`); }
     try { profile = await this.learnProfile(shop); } catch (err) { errors.push(`content: ${(err as Error).message}`); }
+    let market: PlaybookMarketProfile | null = null;
+    try {
+      if (!this.q.listShopCompetitors(shopId).length) await this.suggestCompetitors(shopId);
+      market = await this.scanMarket(shopId);
+    } catch (err) { errors.push(`competitors: ${(err as Error).message}`); }
     this.q.setSetting(`playbook_learned_at_${shopId}`, new Date().toISOString());
     liveEvents.emitUpdate({ kind: 'playbook' });
-    return { profile, voice, errors };
+    return { profile, voice, market, errors };
+  }
+
+  // ---- Direct competitors and the market read ----
+
+  competitors(shopId: string): { competitors: PlaybookCompetitor[]; market: PlaybookMarketProfile | null; history: PlaybookMarketProfile[]; brand_id: string | null } {
+    return { competitors: this.q.listShopCompetitors(shopId), market: this.q.listMarkets(shopId, 1)[0] ?? null, history: this.q.listMarkets(shopId, 6), brand_id: this.q.getSetting(`playbook_brand_id_${shopId}`, '') || null };
+  }
+
+  /** The competitors the scan reads: the confirmed ones; until someone confirmed any, the ones Claude proposed as direct. */
+  private usableCompetitors(shopId: string): PlaybookCompetitor[] {
+    const all = this.q.listShopCompetitors(shopId);
+    const confirmed = all.filter((c) => c.status === 'confirmed');
+    return (confirmed.length ? confirmed : all.filter((c) => c.status === 'suggested')).slice(0, 6);
+  }
+
+  /** Look a brand up in Cruva's marketplace index for the shop's market; the shop's own brand id is kept so it is never listed as its own competitor. */
+  private async findBrand(shop: PlaybookShop, name: string): Promise<ReturnType<typeof parseBrands>[number] | null> {
+    const region = marketRegion(shop.market);
+    const text = await this.mcp.call('search_marketplace_brands', { search: name, region, sort: 'gmv', page_size: 10 });
+    return pickBrand(name, parseBrands(text));
+  }
+
+  private async ownBrandId(shop: PlaybookShop): Promise<string | null> {
+    const have = this.q.getSetting(`playbook_brand_id_${shop.shop_id}`, '');
+    if (have) return have;
+    try { const b = await this.findBrand(shop, brandOf(shop.shop_name)); if (b) { this.q.setSetting(`playbook_brand_id_${shop.shop_id}`, b.brand_id); return b.brand_id; } } catch (err) { log.info(`Cruva brand id for ${shop.shop_name}: ${(err as Error).message}`); }
+    return null;
+  }
+
+  /** Claude names the direct competitors; each is verified in the marketplace index (brand id, GMV, creators, videos) before it is listed, as a suggestion to confirm. */
+  async suggestCompetitors(shopId: string): Promise<{ added: PlaybookCompetitor[]; unmatched: string[] }> {
+    const shop = this.shops().find((s) => s.shop_id === shopId);
+    if (!shop) throw new Error('Shop not found');
+    if (!this.mcp.configured) throw new Error('CRUVA_API_KEY is not set.');
+    const llm = this.llmOrNull(1200);
+    if (!llm) throw new Error('ANTHROPIC_API_KEY is not set.');
+    const own = await this.ownBrandId(shop);
+    const known = this.q.listShopCompetitors(shopId);
+    const { system, user } = suggestPrompt({ shop_name: shop.shop_name, brand: brandOf(shop.shop_name), market: shop.market, products: shop.learned?.products ?? [], categories: shop.learned?.categories ?? [], profile_summary: shop.profile?.summary ?? null, known: known.map((c) => c.name) });
+    const ideas = parseSuggestions(await llm(system, user));
+    const added: PlaybookCompetitor[] = []; const unmatched: string[] = [];
+    const ownKey = brandOf(shop.shop_name).toLowerCase().replace(/[^a-z0-9]+/g, '');
+    for (const idea of ideas) {
+      if (idea.name.toLowerCase().replace(/[^a-z0-9]+/g, '') === ownKey) continue;
+      let b: ReturnType<typeof parseBrands>[number] | null = null;
+      try { b = await this.findBrand(shop, idea.name); } catch (err) { unmatched.push(`${idea.name} (${(err as Error).message})`); continue; }
+      if (!b || b.brand_id === own) { unmatched.push(idea.name); continue; }
+      if (known.some((k) => k.brand_id === b!.brand_id)) continue;
+      added.push(this.q.upsertShopCompetitor({ shop_id: shopId, brand_id: b.brand_id, name: b.name, region: marketRegion(shop.market), gmv: b.gmv, creators: b.creators, videos: b.videos, category: b.category, status: 'suggested', reason: `${idea.direct ? 'Direct' : 'Similar'}: ${idea.why}`, source: 'claude' }));
+    }
+    liveEvents.emitUpdate({ kind: 'playbook' });
+    return { added, unmatched };
+  }
+
+  /** A competitor the team names: looked up in the marketplace index and confirmed straight away. */
+  async addCompetitor(shopId: string, name: string): Promise<PlaybookCompetitor> {
+    const shop = this.shops().find((s) => s.shop_id === shopId);
+    if (!shop) throw new Error('Shop not found');
+    if (!this.mcp.configured) throw new Error('CRUVA_API_KEY is not set.');
+    const b = await this.findBrand(shop, name);
+    if (!b) throw new Error(`No brand called "${name}" in the ${marketRegion(shop.market).toUpperCase()} marketplace index in the last 30 days.`);
+    const c = this.q.upsertShopCompetitor({ shop_id: shopId, brand_id: b.brand_id, name: b.name, region: marketRegion(shop.market), gmv: b.gmv, creators: b.creators, videos: b.videos, category: b.category, status: 'confirmed', reason: 'Added by the team', source: 'manual' });
+    const out = c.status === 'confirmed' ? c : (this.q.setShopCompetitorStatus(c.id, 'confirmed') ?? c);
+    liveEvents.emitUpdate({ kind: 'playbook' });
+    return out;
+  }
+
+  setCompetitorStatus(shopId: string, id: number, status: PlaybookCompetitor['status']): PlaybookCompetitor {
+    const c = this.q.listShopCompetitors(shopId).find((x) => x.id === id);
+    if (!c) throw new Error('Competitor not found');
+    const out = this.q.setShopCompetitorStatus(id, status) ?? c;
+    liveEvents.emitUpdate({ kind: 'playbook' });
+    return out;
+  }
+
+  removeCompetitor(shopId: string, id: number): void {
+    if (!this.q.listShopCompetitors(shopId).some((x) => x.id === id)) throw new Error('Competitor not found');
+    this.q.deleteShopCompetitor(id);
+    liveEvents.emitUpdate({ kind: 'playbook' });
+  }
+
+  /** Read the competitors' top videos by GMV and their creators for the last 28 days, the best scripts through FastMoss, and write the market read. Null when there is no competitor to read. */
+  async scanMarket(shopId: string, now = Date.now()): Promise<PlaybookMarketProfile | null> {
+    const shop = this.shops().find((s) => s.shop_id === shopId);
+    if (!shop) throw new Error('Shop not found');
+    if (!this.mcp.configured) throw new Error('CRUVA_API_KEY is not set.');
+    const llm = this.llmOrNull(6000);
+    if (!llm) throw new Error('ANTHROPIC_API_KEY is not set.');
+    const competitors = this.usableCompetitors(shopId);
+    if (!competitors.length) return null;
+    const to = new Date(now).toISOString().slice(0, 10); const from = new Date(now - 28 * 86400000).toISOString().slice(0, 10);
+    const ourHandles = new Set(this.q.listContent(shopId).map((v) => v.handle));
+    const { videos, creators, total, errors } = await pullMarket(this.mcp, competitors, { from, to, region: marketRegion(shop.market), pct: shop.top_pct, scripts: this.scriptReader(), ourHandles });
+    for (const e of errors) log.info(`Cruva market scan ${shop.shop_name}: ${e}`);
+    if (!videos.length && !creators.length) throw new Error(errors[0] ?? 'the competitors had no videos or creators in the window');
+    const { system, user } = marketPrompt({ shop_name: shop.shop_name, brand: brandOf(shop.shop_name), market: shop.market, language: shop.language, competitors, videos, creators, ours: shop.profile, window_from: from, window_to: to, videos_total: total });
+    let raw: string;
+    try { raw = await llm(system, user); } catch (err) { if (!/empty reply|cut off/.test((err as Error).message)) throw err; raw = await llm(system, user); }
+    const market = parseMarket(raw, { competitors, videos, creators, window_from: from, window_to: to, now, videos_total: total, top_pct: shop.top_pct });
+    this.q.addMarket(shopId, market);
+    this.q.markCompetitorsScanned(competitors.map((c) => c.id), new Date(now).toISOString());
+    liveEvents.emitUpdate({ kind: 'playbook' });
+    return market;
   }
 
   /** Rewrite one draft's copy in the shop's voice with the content profile; the existing copy (an update) or the nearest message is the base, the library copy the checklist of what must be in it. */
@@ -605,7 +721,7 @@ export class PlaybookEngine {
     if (!shop) throw new Error('Shop not found');
     const llm = this.llmOrNull(1000);
     if (!llm) throw new Error('ANTHROPIC_API_KEY is not set.');
-    if (!shop.voice && !shop.profile && !opts.instruction && !this.campaignFacts(d.shop_id, d.remote_id).length) return d;
+    if (!shop.voice && !shop.profile && !shop.market_read && !opts.instruction && !this.campaignFacts(d.shop_id, d.remote_id).length) return d;
     const lang = ({ de: 'German', fr: 'French', it: 'Italian', es: 'Spanish', nl: 'Dutch', pl: 'Polish' } as Record<string, string>)[d.language] ?? 'English';
     const brand = brandOf(d.shop_name);
     const system = [
@@ -613,6 +729,7 @@ export class PlaybookEngine {
       ...(shop.voice ? ['', 'The brand\'s voice, learnt from the messages it already runs:', ...voiceFacts(shop.voice).map((l) => `- ${l}`)] : []),
       ...(shop.profile ? ['', 'What sells for this shop right now (from its top videos). Use what fits this message: a hook or content idea in a message about what to film, the product that carries in a message about products, the offer where a deal is mentioned. Do not list it all.', ...profileFacts(shop.profile).map((l) => `- ${l}`)] : []),
       ...((): string[] => { const c = this.campaignFacts(d.shop_id, d.remote_id); return c.length ? ['', 'Campaigns that work on this shop (by replies and GMV); match what they do well:', ...c.map((l) => `- ${l}`)] : []; })(),
+      ...(shop.market_read ? ['', 'What the shop\'s direct competitors are doing right now (their top videos by GMV). Use it where it fits: a trend or hook in a message about what to film, a gap the shop can close; never name a competitor in the message.', ...marketFacts(shop.market_read).map((l) => `- ${l}`)] : []),
       d.existing_copy ? `\nThe shop's existing message for reference (its structure and phrasing are the base when they fit):\n${d.existing_copy.slice(0, 1800)}` : '',
     ].join('\n');
     const user = `${opts.instruction ? `Instruction from the team: ${opts.instruction}\n\n` : ''}Library copy (the job and the facts):\n\n${d.copy}`;
@@ -647,27 +764,33 @@ export class PlaybookEngine {
   async weeklyUpdate(opts: { shopIds?: string[] } = {}): Promise<{ shops: number; learned: number; rollouts: { shop: string; rollout_id: number; reasons: string[]; auto: boolean; done: number }[]; errors: string[] }> {
     const out = { shops: 0, learned: 0, rollouts: [] as { shop: string; rollout_id: number; reasons: string[]; auto: boolean; done: number }[], errors: [] as string[] };
     const LIFECYCLE = ['sample_sent', 'delivered', 'first_sale', 'content_not_posted', 'no_post_10d', 'rejected', 'push_more_videos'];
+    const OUTREACH = ['first_outreach', 'monthly_deals_outreach', 'new_product_outreach'];
     for (const shop of this.shops().filter((sh) => !opts.shopIds || opts.shopIds.includes(sh.shop_id))) {
       out.shops += 1;
       const before = this.q.listProfiles(shop.shop_id, 1)[0] ?? null;
+      const marketBefore = this.q.listMarkets(shop.shop_id, 1)[0] ?? null;
       const r = await this.learnShop(shop.shop_id);
       out.errors.push(...r.errors.map((e) => `${shop.shop_name}: ${e}`));
       if (!r.profile) continue;
       out.learned += 1;
       const reasons = materialChange(before, r.profile);
-      if (!reasons.length) continue;
-      const cells = this.q.listPlaybookCells().filter((c) => c.shop_id === shop.shop_id && c.kind === 'automation' && c.status === 'set' && c.remote_id && LIFECYCLE.includes(c.playbook_key));
+      // A moved market refreshes the outreach bots too (drafted and tailored; outreach always waits for approval).
+      const marketReasons = r.market ? marketChange(marketBefore, r.market) : [];
+      const wanted = [...(reasons.length ? LIFECYCLE : []), ...(reasons.length || marketReasons.length ? OUTREACH : [])];
+      if (!wanted.length) continue;
+      const cells = this.q.listPlaybookCells().filter((c) => c.shop_id === shop.shop_id && c.kind === 'automation' && c.status === 'set' && c.remote_id && wanted.includes(c.playbook_key));
       if (!cells.length) continue;
       const keys = cells.map((c) => `automation:${c.playbook_key}`);
+      const allReasons = [...reasons, ...marketReasons];
       try {
-        const { rollout } = this.prepare({ shop_ids: [shop.shop_id], keys, updateKeys: keys, created_by: 'weekly learning', note: `Weekly learning: ${reasons.join('; ')}`, tailor: false });
+        const { rollout } = this.prepare({ shop_ids: [shop.shop_id], keys, updateKeys: keys, created_by: 'weekly learning', note: `Weekly learning: ${allReasons.join('; ')}`, tailor: false });
         await this.tailorRollout(rollout.id);
         let done = 0;
         if (shop.auto_update) {
-          for (const d of this.q.listRolloutDrafts(rollout.id)) if (d.status === 'ready') this.updateDraft(d.id, { status: 'approved' });
+          for (const d of this.q.listRolloutDrafts(rollout.id)) if (d.status === 'ready' && !OUTREACH.includes(d.key)) this.updateDraft(d.id, { status: 'approved' });
           if (this.q.getRollout(rollout.id)?.counts.approved) done = (await this.runRollout(rollout.id, 'weekly learning')).done;
         }
-        out.rollouts.push({ shop: shop.shop_name, rollout_id: rollout.id, reasons, auto: shop.auto_update, done });
+        out.rollouts.push({ shop: shop.shop_name, rollout_id: rollout.id, reasons: allReasons, auto: shop.auto_update, done });
       } catch (err) { out.errors.push(`${shop.shop_name}: ${(err as Error).message}`); }
     }
     liveEvents.emitUpdate({ kind: 'playbook' });
@@ -854,6 +977,27 @@ export class PlaybookEngine {
 // ---- helpers ----
 
 /** The human copy inside a payload: the last DM message, the invite message, or the email body. */
+/**
+ * The creator brief draft carries what the learning found: the hooks that sell for the shop and for its
+ * direct competitors replace the library's generic hooks, and the content ideas become "do" rules, so the
+ * brief the AM reviews first is already about this shop's market.
+ */
+export function briefFromLearning(payload: Record<string, unknown>, shop: Pick<PlaybookShop, 'profile' | 'market_read'>): Record<string, unknown> {
+  const p = shop.profile; const m = shop.market_read;
+  if (!p && !m) return payload;
+  const hooks = [...(p?.hooks ?? []).map((h) => h.example), ...(m?.hooks ?? []).map((h) => h.example)].map((h) => h.trim()).filter(Boolean);
+  const seen = new Set<string>();
+  const top_hooks = hooks.filter((h) => { const k = h.toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 6);
+  const ideas = [...(p?.content_ideas ?? []), ...(m?.ideas ?? [])].map((x) => x.trim()).filter(Boolean).slice(0, 5);
+  const guidelines = Array.isArray(payload.guidelines) ? (payload.guidelines as { type?: string; description?: string }[]) : [];
+  const have = new Set(guidelines.map((g) => String(g.description ?? '').toLowerCase()));
+  const extra = ideas.filter((i) => !have.has(i.toLowerCase())).map((description) => ({ type: 'do', description }));
+  const out: Record<string, unknown> = { ...payload };
+  if (top_hooks.length) out.top_hooks = top_hooks;
+  if (extra.length) out.guidelines = [...guidelines.filter((g) => g.type === 'do'), ...extra, ...guidelines.filter((g) => g.type !== 'do')];
+  return out;
+}
+
 export function copyOf(payload: Record<string, unknown>): string | null {
   const dms = payload.dm_messages as { type?: string; content?: string }[] | undefined;
   if (Array.isArray(dms)) { const m = [...dms].reverse().find((x) => (x.type ?? 'message') === 'message' && typeof x.content === 'string'); if (m) return m.content!; }

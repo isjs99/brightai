@@ -78,6 +78,7 @@ describe('learning in the engine', () => {
       llmCalls.push({ system, user });
       if (/describe how the brand/.test(system)) return '{"summary": "Warm du, emoji bullets, closes with Team Kijimea.", "greeting": "Hey [affiliate_name] 👋", "signoff": "Team Kijimea 🤍", "register": "du", "emoji": "light", "length": "medium", "phrases": ["Das ist für dich drin"], "avoid": ["Sie"]}';
       if (/study the TikTok Shop affiliate videos/.test(system)) return JSON.stringify({ summary: 'Problem-first hooks sell K53.', hooks: [{ group: 'problem first', example: '13 Tage und alle Schwellungen sind weg.', language: 'de', video_ids: ['7666225241760288033'] }], formats: [], products_carry: [{ product_id: '1729569344482875607' }], products_no_gmv: [], creator_shape: { follower_band: 'mid', niches: [], first_video_share: null, video_ids: [] }, timing: { best_days: ['Friday'], best_hours: [], video_ids: [] }, offer: user.includes('OFFER-B') ? 'Herbst Deals' : 'Sommer Deals', example_scripts: [], content_ideas: ['Vorher/Nachher'], top_creators: [] });
+      if (/compete directly/.test(system)) return '{"competitors": []}';
       if (/in the brand's own voice/.test(system)) return `TAILORED(${user.slice(-30).replace(/\n/g, ' ')})`;
       return 'x';
     };

@@ -75,7 +75,7 @@ import type {
   PlaybookProfile,
   PlaybookVoice,
   PlaybookShop,
-  PlaybookContentVideo,
+  PlaybookCompetitor, PlaybookContentVideo, PlaybookMarketProfile,
   PlaybookDraft,
   PlaybookDraftStatus,
   CopilotData,
@@ -246,6 +246,8 @@ export interface Status {
 
 export type FbtRequested = Record<string, { units?: number; cartons?: number; pallets?: number }>;
 export type FbtPlanData = FbtPlan & { fields: { key: FbtField; label: string }[] };
+
+export type PlaybookCompetitorsData = { competitors: PlaybookCompetitor[]; market: PlaybookMarketProfile | null; history: PlaybookMarketProfile[]; brand_id: string | null };
 
 export const api = {
   me: () => call<{ authenticated: boolean; role: 'admin' | 'am' | null; am_login_enabled: boolean }>('GET', '/me'),
@@ -498,6 +500,12 @@ export const api = {
   playbookProfile: (shopId: string) => call<{ shop: PlaybookShop; profiles: PlaybookProfile[]; videos: PlaybookContentVideo[]; learned_at: string | null; existing: { remote_id: string; name: string; enabled: boolean; copy: string; sent: number | null; replies: number | null; gmv: number | null }[] }>('GET', `/playbook/shops/${encodeURIComponent(shopId)}/profile`),
   playbookTailor: (draftId: number, instruction?: string | null) => call<PlaybookDraft>('POST', `/playbook/drafts/${draftId}/tailor`, { instruction }),
   playbookTailorRollout: (id: number) => call<{ tailored: number; errors: string[]; rollout: PlaybookRollout; drafts: PlaybookDraft[] }>('POST', `/playbook/rollouts/${id}/tailor`, {}),
+  playbookCompetitors: (shopId: string) => call<PlaybookCompetitorsData>('GET', `/playbook/shops/${encodeURIComponent(shopId)}/competitors`),
+  playbookSuggestCompetitors: (shopId: string) => call<PlaybookCompetitorsData & { added: PlaybookCompetitor[]; unmatched: string[] }>('POST', `/playbook/shops/${encodeURIComponent(shopId)}/competitors/suggest`, {}),
+  playbookAddCompetitor: (shopId: string, name: string) => call<PlaybookCompetitorsData & { competitor: PlaybookCompetitor }>('POST', `/playbook/shops/${encodeURIComponent(shopId)}/competitors`, { name }),
+  playbookCompetitorStatus: (shopId: string, id: number, status: PlaybookCompetitor['status']) => call<PlaybookCompetitorsData>('PUT', `/playbook/shops/${encodeURIComponent(shopId)}/competitors/${id}`, { status }),
+  playbookRemoveCompetitor: (shopId: string, id: number) => call<PlaybookCompetitorsData>('DELETE', `/playbook/shops/${encodeURIComponent(shopId)}/competitors/${id}`),
+  playbookScanMarket: (shopId: string) => call<PlaybookCompetitorsData & { market: PlaybookMarketProfile | null }>('POST', `/playbook/shops/${encodeURIComponent(shopId)}/market`, {}),
   playbookWeekly: () => call<{ shops: number; learned: number; rollouts: { shop: string; rollout_id: number; reasons: string[]; auto: boolean; done: number }[]; errors: string[] }>('POST', '/playbook/weekly', {}),
   playbookWalk: (id: number, shopId: string, index: number) => call<{ walk: Record<string, number> }>('PUT', `/playbook/rollouts/${id}/walk`, { shop_id: shopId, index }),
   playbookEnglish: (draftId: number) => call<{ english: string | null }>('POST', `/playbook/drafts/${draftId}/english`, {}),

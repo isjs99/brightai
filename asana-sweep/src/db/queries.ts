@@ -92,7 +92,7 @@ import type {
   ReplyAuditAction,
   ReplyAuditItem,
   ReplyAuditSummary,
-  PlaybookContentVideo,
+  PlaybookCompetitor, PlaybookContentVideo, PlaybookMarketProfile,
   PlaybookProfile,
 } from '../sweep/types.js';
 import { isSignedStage, leadKey, matchPerson, type SheetLead } from '../leads/sheet.js';
@@ -2347,6 +2347,50 @@ export class Queries {
   addProfile(shopId: string, profile: PlaybookProfile): void {
     this.db.prepare('INSERT INTO cruva_profiles (shop_id, learned_at, profile_json) VALUES (?, ?, ?)').run(shopId, profile.learned_at, JSON.stringify(profile));
     this.db.prepare('DELETE FROM cruva_profiles WHERE shop_id = ? AND id NOT IN (SELECT id FROM cruva_profiles WHERE shop_id = ? ORDER BY id DESC LIMIT 8)').run(shopId, shopId);
+  }
+
+  // ---- Competitors and the market read ----
+
+  listShopCompetitors(shopId: string): PlaybookCompetitor[] {
+    return (this.db.prepare("SELECT * FROM cruva_competitors WHERE shop_id = ? ORDER BY CASE status WHEN 'confirmed' THEN 0 WHEN 'suggested' THEN 1 ELSE 2 END, COALESCE(gmv, 0) DESC, id").all(shopId) as Row[]).map((r) => this.competitorRow(r));
+  }
+
+  private competitorRow(r: Row): PlaybookCompetitor {
+    return { id: Number(r.id), shop_id: String(r.shop_id), brand_id: String(r.brand_id), name: String(r.name), region: String(r.region), gmv: r.gmv === null ? null : Number(r.gmv), creators: r.creators === null ? null : Number(r.creators), videos: r.videos === null ? null : Number(r.videos), category: (r.category as string | null) ?? null, status: String(r.status) as PlaybookCompetitor['status'], reason: (r.reason as string | null) ?? null, source: String(r.source) as PlaybookCompetitor['source'], added_at: String(r.added_at), scanned_at: (r.scanned_at as string | null) ?? null };
+  }
+
+  /** Insert or refresh a competitor; an existing row keeps its status (a rejected brand stays rejected) but takes the fresh numbers. */
+  upsertShopCompetitor(c: Omit<PlaybookCompetitor, 'id' | 'added_at' | 'scanned_at'>): PlaybookCompetitor {
+    const have = this.db.prepare('SELECT * FROM cruva_competitors WHERE shop_id = ? AND brand_id = ?').get(c.shop_id, c.brand_id) as Row | undefined;
+    if (have) {
+      this.db.prepare('UPDATE cruva_competitors SET name = ?, region = ?, gmv = ?, creators = ?, videos = ?, category = ?, reason = COALESCE(?, reason), status = CASE WHEN ? = \'manual\' AND status = \'suggested\' THEN \'confirmed\' ELSE status END WHERE id = ?').run(c.name, c.region, c.gmv, c.creators, c.videos, c.category, c.reason, c.source, have.id);
+      return this.competitorRow(this.db.prepare('SELECT * FROM cruva_competitors WHERE id = ?').get(have.id) as Row);
+    }
+    const id = Number(this.db.prepare('INSERT INTO cruva_competitors (shop_id, brand_id, name, region, gmv, creators, videos, category, status, reason, source, added_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(c.shop_id, c.brand_id, c.name, c.region, c.gmv, c.creators, c.videos, c.category, c.status, c.reason, c.source, new Date().toISOString()).lastInsertRowid);
+    return this.competitorRow(this.db.prepare('SELECT * FROM cruva_competitors WHERE id = ?').get(id) as Row);
+  }
+
+  setShopCompetitorStatus(id: number, status: PlaybookCompetitor['status']): PlaybookCompetitor | null {
+    this.db.prepare('UPDATE cruva_competitors SET status = ? WHERE id = ?').run(status, id);
+    const r = this.db.prepare('SELECT * FROM cruva_competitors WHERE id = ?').get(id) as Row | undefined;
+    return r ? this.competitorRow(r) : null;
+  }
+
+  markCompetitorsScanned(ids: number[], at = new Date().toISOString()): void {
+    if (!ids.length) return;
+    this.db.prepare(`UPDATE cruva_competitors SET scanned_at = ? WHERE id IN (${ids.map(() => '?').join(',')})`).run(at, ...ids);
+  }
+
+  deleteShopCompetitor(id: number): void { this.db.prepare('DELETE FROM cruva_competitors WHERE id = ?').run(id); }
+
+  addMarket(shopId: string, profile: PlaybookMarketProfile): void {
+    this.db.prepare('INSERT INTO cruva_market (shop_id, learned_at, profile_json) VALUES (?, ?, ?)').run(shopId, profile.learned_at, JSON.stringify(profile));
+    this.db.prepare('DELETE FROM cruva_market WHERE shop_id = ? AND id NOT IN (SELECT id FROM cruva_market WHERE shop_id = ? ORDER BY id DESC LIMIT 6)').run(shopId, shopId);
+  }
+
+  /** Newest first. */
+  listMarkets(shopId: string, limit = 1): PlaybookMarketProfile[] {
+    return (this.db.prepare('SELECT profile_json FROM cruva_market WHERE shop_id = ? ORDER BY id DESC LIMIT ?').all(shopId, limit) as Row[]).map((r) => parseJson<PlaybookMarketProfile>(r.profile_json, {} as PlaybookMarketProfile));
   }
 
   /** Newest first. */

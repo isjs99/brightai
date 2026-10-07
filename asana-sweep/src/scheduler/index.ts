@@ -260,7 +260,7 @@ export class Scheduler {
     const channel = incidentSettings(this.q).default_channel;
     if (!channel) return;
     const lines = [`*Cruva weekly learning*: ${r.learned} of ${r.shops} shops profiled from their top videos.`];
-    for (const sh of this.playbook.shops().filter((x) => x.profile)) { const p = sh.profile!; lines.push(`• ${sh.shop_name}: top ${p.top_count} videos ${p.top_gmv} GMV of ${p.total_gmv}${p.hooks[0] ? `, best hook: ${p.hooks[0].group} ("${p.hooks[0].example.slice(0, 60)}")` : ''}${p.top_creators[0] ? `, top creator @${p.top_creators[0].handle}` : ''}`); }
+    for (const sh of this.playbook.shops().filter((x) => x.profile)) { const p = sh.profile!; const m = sh.market_read; lines.push(`• ${sh.shop_name}: top ${p.top_count} videos ${p.top_gmv} GMV of ${p.total_gmv}${p.hooks[0] ? `, best hook: ${p.hooks[0].group} ("${p.hooks[0].example.slice(0, 60)}")` : ''}${p.top_creators[0] ? `, top creator @${p.top_creators[0].handle}` : ''}${m ? ` · competitors: ${m.trends[0] ? `${m.trends[0].name}` : m.summary.slice(0, 80)}${m.creators_to_approach.length ? `, ${m.creators_to_approach.length} creators to approach` : ''}` : ''}`); }
     for (const ro of r.rollouts) lines.push(`${ro.auto ? '✅' : '🟡'} ${ro.shop}: ${ro.reasons.join('; ')} → rollout #${ro.rollout_id}${ro.auto ? ` applied (${ro.done} bots)` : ' waits for approval'} ${config.publicUrl}/cruva?rollout=${ro.rollout_id}`);
     if (r.errors.length) lines.push(`Errors: ${r.errors.slice(0, 5).join(' | ')}`);
     try { await slackBot.post(await slackBot.channelId(channel), lines.slice(0, 40).join('\n')); } catch (err) { log.warn(`Cruva weekly post: ${(err as Error).message}`); }

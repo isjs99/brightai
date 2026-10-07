@@ -2327,6 +2327,27 @@ export interface PlaybookProfile {
 /** The shop's own voice, learnt from the copy already running in Cruva. */
 export interface PlaybookVoice { learned_at: string; samples: { name: string; kind: string; sent: number | null; replies: number | null; copy: string }[]; summary: string; greeting: string | null; signoff: string | null; register: string | null; emoji: string | null; length: string | null; phrases: string[]; avoid: string[] }
 
+/** A direct competitor of a shop on TikTok Shop, verified against Cruva's marketplace brand index. */
+export interface PlaybookCompetitor { id: number; shop_id: string; brand_id: string; name: string; region: string; gmv: number | null; creators: number | null; videos: number | null; category: string | null; status: 'suggested' | 'confirmed' | 'rejected'; reason: string | null; source: 'claude' | 'manual'; added_at: string; scanned_at: string | null }
+export interface PlaybookMarketVideo { video_id: string; brand_id: string; brand_name: string; handle: string; gmv: number; views: number; likes: number; comments: number; posted: string | null; product: string | null; product_id: string | null; link: string | null; overview: string | null; hook: string | null; script: string | null; /** In the top slice (same rule as the shop's own videos: top pct by GMV, plus the best by GMV per view). */ top: boolean }
+export interface PlaybookMarketCreator { handle: string; creator_id: string; brand_id: string; brand_name: string; brand_gmv: number; platform_gmv_30d: number; followers: number; /** Also sells for this shop (seen in its own top videos). */ ours: boolean }
+/** The weekly market read: what sells for the shop's direct competitors; every claim carries the video ids it came from. */
+export interface PlaybookMarketProfile {
+  learned_at: string; window_from: string; window_to: string;
+  competitors: { brand_id: string; name: string; gmv: number | null; videos_read: number; creators_read: number }[];
+  /** Videos in the window across the competitors (their totals) and how many made the top slice. */
+  videos_total: number; top_count: number; top_pct: number;
+  summary: string;
+  trends: { name: string; detail: string; brands: string[]; video_ids: string[] }[];
+  hooks: { group: string; example: string; brand: string | null; video_ids: string[] }[];
+  formats: { name: string; video_ids: string[] }[];
+  products: { name: string; brand: string | null; gmv: number; angle: string; video_ids: string[] }[];
+  gaps: string[];
+  ideas: string[];
+  creators_to_approach: { handle: string; creator_id: string; brand: string; brand_gmv: number; platform_gmv_30d: number; followers: number; why: string }[];
+  videos: PlaybookMarketVideo[];
+}
+
 export interface PlaybookData {
   items: PlaybookItem[];
   shops: PlaybookShop[];
@@ -2346,7 +2367,7 @@ export interface PlaybookData {
   rollouts: PlaybookRollout[];
 }
 
-export interface PlaybookShop { shop_id: string; shop_name: string; account_id: number; account_name: string; am_name: string | null; language: string; market: string | null; plan: string | null; remote_counts: Record<string, number>; checked_at: string | null; learned: PlaybookLearned | null; /** Why the last check of this shop failed, or null. */ error: string | null; /** The content profile and voice, when learnt. */ profile: PlaybookProfile | null; voice: PlaybookVoice | null; top_pct: number; auto_update: boolean }
+export interface PlaybookShop { shop_id: string; shop_name: string; account_id: number; account_name: string; am_name: string | null; language: string; market: string | null; plan: string | null; remote_counts: Record<string, number>; checked_at: string | null; learned: PlaybookLearned | null; /** Why the last check of this shop failed, or null. */ error: string | null; /** The content profile and voice, when learnt. */ profile: PlaybookProfile | null; voice: PlaybookVoice | null; top_pct: number; auto_update: boolean; /** The latest market read of the shop's direct competitors, when scanned, and how many competitors are confirmed or suggested. */ market_read: PlaybookMarketProfile | null; competitors: number }
 
 // ---- Client question copilot ----
 

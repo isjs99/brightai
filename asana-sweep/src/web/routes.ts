@@ -3357,6 +3357,13 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (!slackBot.configured) return res.json({ configured: false, channels: [] });
     try { res.json({ configured: true, channels: await slackBot.listChannels() }); } catch (err) { throw new HttpError(502, (err as Error).message); }
   });
+  // Direct competitors and the market read (Profile > Competitors)
+  r.get('/playbook/shops/:shopId/competitors', (req, res) => res.json(playbook.competitors(String(req.params.shopId))));
+  r.post('/playbook/shops/:shopId/competitors/suggest', async (req, res) => { try { const r2 = await playbook.suggestCompetitors(String(req.params.shopId)); res.json({ ...r2, ...playbook.competitors(String(req.params.shopId)) }); } catch (err) { bad(err); } });
+  r.post('/playbook/shops/:shopId/competitors', async (req, res) => { const name = optText((req.body ?? {}).name); if (!name) throw new HttpError(400, 'Brand name is required.'); try { const c = await playbook.addCompetitor(String(req.params.shopId), name); res.json({ competitor: c, ...playbook.competitors(String(req.params.shopId)) }); } catch (err) { bad(err); } });
+  r.put('/playbook/shops/:shopId/competitors/:id', (req, res) => { const status = String((req.body ?? {}).status ?? ''); if (!['suggested', 'confirmed', 'rejected'].includes(status)) throw new HttpError(400, 'Bad status'); playbook.setCompetitorStatus(String(req.params.shopId), Number(req.params.id), status as 'suggested' | 'confirmed' | 'rejected'); res.json(playbook.competitors(String(req.params.shopId))); });
+  r.delete('/playbook/shops/:shopId/competitors/:id', (req, res) => { playbook.removeCompetitor(String(req.params.shopId), Number(req.params.id)); res.json(playbook.competitors(String(req.params.shopId))); });
+  r.post('/playbook/shops/:shopId/market', async (req, res) => { try { const market = await playbook.scanMarket(String(req.params.shopId)); res.json({ ...playbook.competitors(String(req.params.shopId)), market }); } catch (err) { bad(err); } });
   r.post('/playbook/learn-missing', (_req, res) => res.json({ queued: playbook.learnMissing() }));
   r.post('/playbook/shops/sync', async (_req, res) => {
     try { const result = await playbook.syncShops(); res.json({ ...result, ...playbook.data() }); } catch (err) { bad(err); }

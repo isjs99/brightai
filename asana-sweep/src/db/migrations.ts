@@ -1812,6 +1812,17 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 51,
+    name: 'cruva competitors and market reads',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE cruva_competitors (id INTEGER PRIMARY KEY AUTOINCREMENT, shop_id TEXT NOT NULL, brand_id TEXT NOT NULL, name TEXT NOT NULL, region TEXT NOT NULL, gmv REAL, creators INTEGER, videos INTEGER, category TEXT, status TEXT NOT NULL DEFAULT 'suggested', reason TEXT, source TEXT NOT NULL DEFAULT 'claude', added_at TEXT NOT NULL, scanned_at TEXT, UNIQUE (shop_id, brand_id));
+        CREATE TABLE cruva_market (id INTEGER PRIMARY KEY AUTOINCREMENT, shop_id TEXT NOT NULL, learned_at TEXT NOT NULL, profile_json TEXT NOT NULL);
+        CREATE INDEX cruva_market_shop ON cruva_market(shop_id, id DESC);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {
