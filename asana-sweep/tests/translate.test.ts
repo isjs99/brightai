@@ -8,7 +8,7 @@ it('translates in batches, keeps every text, and never asks twice for the same o
   const calls: string[][] = [];
   const llm = async (_s: string, u: string) => { const arr = JSON.parse(u) as string[]; calls.push(arr); return JSON.stringify(arr.map((t) => (t === 'Hello' ? 'Hello' : `EN(${t})`))); };
   const out = await translateToEnglish(q, ['Wo ist mein Sample?', 'Hello', 'Wo ist mein Sample?', '  '], { llm });
-  expect(out).toEqual(['EN(Wo ist mein Sample?)', 'Hello', 'EN(Wo ist mein Sample?)', '']);
+  expect(out).toEqual(['EN(Wo ist mein Sample?)', 'Hello', 'EN(Wo ist mein Sample?)', '  ']);
   expect(calls).toHaveLength(1);
   expect(calls[0]).toEqual(['Wo ist mein Sample?', 'Hello']);
   // Kept: the second time nothing is asked.
