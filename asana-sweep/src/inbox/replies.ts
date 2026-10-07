@@ -70,7 +70,7 @@ export const ONLY_FILTERS: Record<InboxChannel, { key: string; label: string }[]
 export const MARKET_TZ: Record<string, string> = { DE: 'Europe/Berlin', AT: 'Europe/Vienna', CH: 'Europe/Zurich', FR: 'Europe/Paris', IT: 'Europe/Rome', ES: 'Europe/Madrid', UK: 'Europe/London', GB: 'Europe/London', IE: 'Europe/Dublin', NL: 'Europe/Amsterdam', BE: 'Europe/Brussels', PL: 'Europe/Warsaw', PT: 'Europe/Lisbon', SE: 'Europe/Stockholm', US: 'America/New_York', AU: 'Australia/Sydney' };
 
 export function defaultPolicy(accountId: number, channel: InboxChannel): ReplyPolicy {
-  return { account_id: accountId, channel, mode: 'off', daily_cap: channel === 'affiliate' ? 50 : 100, only: channel === 'affiliate' ? ['not_do_not_contact'] : [], never: INTENTS[channel].filter((i) => i.escalates).map((i) => i.key), auto_intents: [], quiet_from: null, quiet_to: null, max_age_hours: channel === 'affiliate' ? 168 : 48, shops_off: [], languages: {}, updated_at: null };
+  return { account_id: accountId, channel, mode: 'off', daily_cap: channel === 'affiliate' ? 50 : 100, answer_all: false, only: channel === 'affiliate' ? ['not_do_not_contact'] : [], never: INTENTS[channel].filter((i) => i.escalates).map((i) => i.key), auto_intents: [], quiet_from: null, quiet_to: null, max_age_hours: channel === 'affiliate' ? 168 : 48, shops_off: [], languages: {}, updated_at: null };
 }
 
 export function getPolicy(q: Queries, accountId: number, channel: InboxChannel): ReplyPolicy {
@@ -276,7 +276,7 @@ async function processNow(q: Queries, ids: number[], deps: ProcessDeps = {}): Pr
     let cls: Classification;
     try {
       ctx = await buildContext(q, c, messages, policy.languages[c.tts_shop_id] ?? null, cruvaRest);
-      const { system, user } = renderPrompt(c, messages, ctx, { json: true, intents: INTENTS[c.channel] });
+      const { system, user } = renderPrompt(c, messages, ctx, { json: true, intents: INTENTS[c.channel], answerAll: policy.answer_all });
       cls = parseClassification(await llm(system, user), c.channel);
     } catch (err) {
       if (err instanceof LlmBudgetError) { log.warn(`Replies paused: ${err.message}`); record('error', { escalation: err.message.slice(0, 200) }); break; }
@@ -288,19 +288,20 @@ async function processNow(q: Queries, ids: number[], deps: ProcessDeps = {}): Pr
     const common = { needs_reply: cls.needs_reply, intent: cls.intent, confidence: cls.confidence, chips, language: ctx.language };
     if (!cls.needs_reply || !cls.reply) { record('skipped', { ...common, needs_reply: false, escalation: cls.escalation ?? 'no answer expected' }); continue; }
     const intentDef = INTENTS[c.channel].find((i) => i.key === cls.intent);
+    // "Answer everything": the topic lists are ignored; the model's own hand-over and a very low confidence are the only brakes.
     const escalation =
       cls.escalate ? (cls.escalation ?? 'model asked for a human')
-      : policy.never.includes(cls.intent) ? `${intentDef?.label ?? cls.intent}: always a human on this account`
-      : intentDef?.escalates ? `${intentDef.label}: needs a human`
-      : cls.confidence < 0.6 ? `low confidence (${Math.round(cls.confidence * 100)}%)`
-      : c.channel === 'cs' && policy.auto_intents.length && !policy.auto_intents.includes(cls.intent) ? `${intentDef?.label ?? cls.intent}: not on the automatic list`
+      : !policy.answer_all && policy.never.includes(cls.intent) ? `${intentDef?.label ?? cls.intent}: always a human on this account`
+      : !policy.answer_all && intentDef?.escalates ? `${intentDef.label}: needs a human`
+      : cls.confidence < (policy.answer_all ? 0.4 : 0.6) ? `low confidence (${Math.round(cls.confidence * 100)}%)`
+      : !policy.answer_all && c.channel === 'cs' && policy.auto_intents.length && !policy.auto_intents.includes(cls.intent) ? `${intentDef?.label ?? cls.intent}: not on the automatic list`
       : !c.can_send && !c.conversation_id.startsWith('sample-') ? 'TikTok does not allow the shop to message this buyer right now'
       : null;
     const sample = c.conversation_id.startsWith('sample-');
     const draft = () => q.addReply({ conversation_ref: c.id, text: cls.reply!, mode: 'draft', created_by: 'auto-reply', in_reply_to: c.last_message_id });
     if (escalation) { const d = draft(); record('escalated', { ...common, escalation, reply_id: d.id, reply_text: cls.reply }); continue; }
     if (policy.mode === 'draft' || sample) { const d = draft(); record('drafted', { ...common, reply_id: d.id, reply_text: cls.reply, escalation: sample ? 'sample thread, never sent' : null }); continue; }
-    const only = onlyFilterBlocker(policy, ctx);
+    const only = policy.answer_all ? null : onlyFilterBlocker(policy, ctx);
     if (only) { const d = draft(); record('drafted', { ...common, escalation: `only: ${only}`, reply_id: d.id, reply_text: cls.reply }); continue; }
     if (!settings.auto_reply_master) { const d = draft(); record('drafted', { ...common, escalation: 'master switch off (Settings)', reply_id: d.id, reply_text: cls.reply }); continue; }
     const tz = tzFor(q, c.market);
@@ -572,6 +573,7 @@ export function savePolicy(q: Queries, accountId: number, channel: InboxChannel,
     channel,
     mode: mode as ReplyPolicy['mode'],
     daily_cap: cap,
+    answer_all: body.answer_all === undefined ? cur.answer_all : Boolean(body.answer_all),
     only: list(body.only, ONLY_FILTERS[channel].map((f) => f.key), cur.only),
     never: list(body.never, INTENTS[channel].map((i) => i.key), cur.never),
     auto_intents: list(body.auto_intents, INTENTS[channel].map((i) => i.key), cur.auto_intents),

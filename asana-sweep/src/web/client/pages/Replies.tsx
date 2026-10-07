@@ -162,9 +162,17 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
           <div className="sub policy-note">
             {policy.mode === 'off' && 'Nothing is drafted or sent. Threads still sync so you can reply by hand.'}
             {policy.mode === 'draft' && `Every ${who(channel)} message gets a drafted reply for the team to approve. Nothing goes out on its own.`}
-            {policy.mode === 'auto' && `Replies go out on their own when they pass the filters below. Anything escalated, over the cap or in quiet hours waits as a draft.`}
+            {policy.mode === 'auto' && (policy.answer_all ? 'Every message that needs an answer gets one, whatever the topic and whoever the creator. The model only hands over when it cannot answer from the facts it has. The cap and quiet hours still apply.' : `Replies go out on their own when they pass the filters below. Anything escalated, over the cap or in quiet hours waits as a draft.`)}
           </div>
         </div>
+        {policy.mode === 'auto' && (
+          <div className="policy-row" style={{ marginTop: 8 }}>
+            <button className={`switch ${policy.answer_all ? 'on' : ''}`} disabled={!isAdmin || busy === 'policy'} title={policy.answer_all ? 'Back to the filters below' : 'Ignore the filters and the topic list: answer everything the model can answer'} onClick={() => save({ answer_all: !policy.answer_all }, 'policy')}>
+              <span className="knob" /> Answer everything
+            </button>
+            <span className="sub">{policy.answer_all ? 'On: the two lists below are ignored. Money, terms, complaints and damaged samples are answered from the facts on record; a legal threat or a missing fact still goes to a person.' : 'Off: only the creators and topics ticked below are answered automatically; the rest wait as drafts.'}</span>
+          </div>
+        )}
         <div className="policy-grid">
           <div className="policy-block">
             <div className="lbl">Automatic replies a day</div>
@@ -185,15 +193,15 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
               <span className="sub">hours</span>
             </div>
           </div>
-          <div className="policy-block">
-            <div className="lbl">Only reply automatically when</div>
+          <div className="policy-block" style={policy.answer_all ? { opacity: 0.45 } : undefined} title={policy.answer_all ? 'Ignored while Answer everything is on' : ''}>
+            <div className="lbl">Only reply automatically when{policy.answer_all ? ' (ignored)' : ''}</div>
             <div className="chips">
               {data.only_filters.map((f) => <button key={f.key} className={`chip ${policy.only.includes(f.key) ? 'on' : ''}`} disabled={!isAdmin} onClick={() => save({ only: toggle(policy.only, f.key) })}>{f.label}</button>)}
             </div>
             <div className="sub">Messages that need an answer but fail a filter wait as drafts.</div>
           </div>
-          <div className="policy-block">
-            <div className="lbl">Always a human for</div>
+          <div className="policy-block" style={policy.answer_all ? { opacity: 0.45 } : undefined} title={policy.answer_all ? 'Ignored while Answer everything is on' : ''}>
+            <div className="lbl">Always a human for{policy.answer_all ? ' (ignored)' : ''}</div>
             <div className="chips">
               {data.intents.filter((i) => i.key !== 'other').map((i) => <button key={i.key} className={`chip ${policy.never.includes(i.key) || i.escalates ? 'on' : ''} ${i.escalates ? 'locked' : ''}`} disabled={!isAdmin || i.escalates} title={i.escalates ? 'Always escalated' : ''} onClick={() => save({ never: toggle(policy.never, i.key) })}>{i.label}</button>)}
             </div>

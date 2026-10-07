@@ -1507,6 +1507,8 @@ export interface ReplyPolicy {
   mode: ReplyMode;
   /** Automatic replies a day in the shop's timezone; null = unlimited. */
   daily_cap: number | null;
+  /** Answer every message that needs one: the only-filters and the always-a-human list are ignored; the model still hands over when it cannot answer from the facts. */
+  answer_all: boolean;
   /** Only reply automatically when every listed condition holds (keys from ONLY_FILTERS). */
   only: string[];
   /** Intents that always wait for a human. */

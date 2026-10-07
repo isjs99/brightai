@@ -149,3 +149,25 @@ describe('Cruva read budget', () => {
     expect(reads.length).toBe(before);
   });
 });
+
+describe('answer everything', () => {
+  it('sends money and complaint intents and ignores the only-filters when the switch is on; escalates them when off', async () => {
+    const { q, account } = setup();
+    savePolicy(q, account.id, 'affiliate', { daily_cap: null, only: ['has_sample'] });
+    const llm = async () => JSON.stringify({ needs_reply: true, intent: 'retainer_or_payment', escalate: false, escalation: null, confidence: 0.75, reply: 'Wir arbeiten nur auf Provisionsbasis, 12%.' });
+    const a = thread(q, 'Zahlt ihr auch ein Fixum?', 3600000, 'fee-off');
+    expect(await processConversations(q, [a], { llm, send })).toMatchObject({ escalated: 1 });
+    expect(eventsFor(q, a)[0].escalation).toMatch(/needs a human|always a human/);
+    const on = savePolicy(q, account.id, 'affiliate', { answer_all: true });
+    expect(on.answer_all).toBe(true);
+    const b = thread(q, 'Zahlt ihr auch ein Fixum?', 3600000, 'fee-on');
+    expect(await processConversations(q, [b], { llm, send })).toMatchObject({ auto_sent: 1 });
+    // The model's own hand-over still wins, and so does a very low confidence.
+    const c = thread(q, 'Ich gehe zum Anwalt.', 3600000, 'legal');
+    expect(await processConversations(q, [c], { llm: async () => JSON.stringify({ needs_reply: true, intent: 'legal', escalate: true, escalation: 'legal threat', confidence: 0.9, reply: 'x' }), send })).toMatchObject({ escalated: 1 });
+    const d = thread(q, '???', 3600000, 'vague');
+    expect(await processConversations(q, [d], { llm: async () => JSON.stringify({ needs_reply: true, intent: 'other', escalate: false, confidence: 0.3, reply: 'Hm?' }), send })).toMatchObject({ escalated: 1 });
+    const data = repliesData(q, account, 'affiliate', () => true);
+    expect(data.policy.answer_all).toBe(true);
+  });
+});

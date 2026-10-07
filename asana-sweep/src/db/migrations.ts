@@ -1776,6 +1776,11 @@ const migrations: Migration[] = [
       db.exec(`UPDATE reply_policies SET max_age_hours = 168 WHERE channel = 'affiliate' AND max_age_hours = 48`);
     },
   },
+  {
+    version: 47,
+    name: 'reply policy: answer everything switch',
+    up: (db) => { db.exec(`ALTER TABLE reply_policies ADD COLUMN answer_all INTEGER NOT NULL DEFAULT 0`); },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {
