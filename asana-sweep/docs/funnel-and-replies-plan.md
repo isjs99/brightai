@@ -187,7 +187,7 @@ Tests: a thread decided under master-off that sends after the switch without a s
 
 ---
 
-## Part 3: the Cruva page, cleaner, with Prepare rollout on every card
+## Part 3: the Cruva page, cleaner, with Prepare rollout on every card (built 7 October: cards, the walk, per-shop progress; the learned strip waits for Part 1)
 
 ### 3.1 What is wrong with the page today
 
@@ -224,7 +224,7 @@ Two additions to the machinery for the walk:
 
 ---
 
-## Part 4: the reply audit, every few days, with a ranking and a report that fixes itself
+## Part 4: the reply audit, every few days, with a ranking and a report that fixes itself (built 7 October, all four steps)
 
 ### 4.1 What it is for
 

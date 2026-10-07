@@ -88,6 +88,10 @@ import type {
   TtsShopRow,
   Person,
   PersonInput,
+  ReplyAudit,
+  ReplyAuditAction,
+  ReplyAuditItem,
+  ReplyAuditSummary,
 } from '../sweep/types.js';
 import { isSignedStage, leadKey, matchPerson, type SheetLead } from '../leads/sheet.js';
 import { fastmossShopUrl, launchFlags, matchesAccountName, outreachComplete, riseBand, riseScore } from '../bd/score.js';
@@ -2376,6 +2380,65 @@ export class Queries {
     if (patch.name !== undefined) { sets.push('name = @name'); params.name = patch.name; }
     if (sets.length) this.db.prepare(`UPDATE cruva_drafts SET ${sets.join(', ')}, updated_at = @updated_at WHERE id = @id`).run(params);
     return this.getRolloutDraft(id);
+  }
+
+  // ---- Reply audits ----
+
+  private rowToAudit(r: Row): ReplyAudit {
+    const empty: ReplyAuditSummary = { by_account: [], by_intent: [], by_language: [], by_rubric: [], red: [] };
+    return { id: r.id as number, started_at: r.started_at as string, finished_at: (r.finished_at as string | null) ?? null, since: r.since as string, sampled: Number(r.sampled ?? 0), mean: r.mean === null || r.mean === undefined ? null : Number(r.mean), prev_mean: null, fail_rate: r.fail_rate === null || r.fail_rate === undefined ? null : Number(r.fail_rate), summary: parseJson<ReplyAuditSummary>(r.summary_json, empty), actions: parseJson<ReplyAuditAction[]>(r.actions_json, []), slack_posted_at: (r.slack_posted_at as string | null) ?? null, error: (r.error as string | null) ?? null };
+  }
+
+  createReplyAudit(since: string, startedAt = new Date().toISOString()): ReplyAudit {
+    const info = this.db.prepare('INSERT INTO reply_audits (started_at, since) VALUES (?, ?)').run(startedAt, since);
+    return this.getReplyAudit(Number(info.lastInsertRowid))!;
+  }
+
+  finishReplyAudit(id: number, r: { sampled: number; mean: number | null; fail_rate: number | null; summary: ReplyAuditSummary; actions: ReplyAuditAction[]; error: string | null }): ReplyAudit {
+    this.db.prepare('UPDATE reply_audits SET finished_at = ?, sampled = ?, mean = ?, fail_rate = ?, summary_json = ?, actions_json = ?, error = ? WHERE id = ?').run(new Date().toISOString(), r.sampled, r.mean, r.fail_rate, JSON.stringify(r.summary), JSON.stringify(r.actions), r.error, id);
+    return this.getReplyAudit(id)!;
+  }
+
+  setReplyAuditActions(id: number, actions: ReplyAuditAction[]): void { this.db.prepare('UPDATE reply_audits SET actions_json = ? WHERE id = ?').run(JSON.stringify(actions), id); }
+  markReplyAuditPosted(id: number): void { this.db.prepare('UPDATE reply_audits SET slack_posted_at = ? WHERE id = ?').run(new Date().toISOString(), id); }
+
+  /** Newest first; `prev_mean` is the mean of the finished run before each. */
+  listReplyAudits(limit = 30): ReplyAudit[] {
+    const rows = (this.db.prepare('SELECT * FROM reply_audits ORDER BY id DESC LIMIT ?').all(limit + 1) as Row[]).map((r) => this.rowToAudit(r));
+    return rows.slice(0, limit).map((a, i) => ({ ...a, prev_mean: rows.slice(i + 1).find((p) => p.finished_at)?.mean ?? null }));
+  }
+
+  getReplyAudit(id: number): ReplyAudit | null {
+    const r = this.db.prepare('SELECT * FROM reply_audits WHERE id = ?').get(id) as Row | undefined;
+    if (!r) return null;
+    const a = this.rowToAudit(r);
+    const prev = this.db.prepare('SELECT mean FROM reply_audits WHERE id < ? AND finished_at IS NOT NULL ORDER BY id DESC LIMIT 1').get(id) as { mean: number | null } | undefined;
+    return { ...a, prev_mean: prev?.mean ?? null };
+  }
+
+  private rowToAuditItem(r: Row): ReplyAuditItem {
+    return { id: r.id as number, audit_id: r.audit_id as number, event_id: r.event_id as number, conversation_ref: r.conversation_ref as number, account_id: (r.account_id as number | null) ?? null, channel: r.channel as InboxChannel, intent: (r.intent as string | null) ?? null, language: (r.language as string | null) ?? null, decision: (r.decision as string) ?? 'auto_sent', scores: parseJson<Record<string, number>>(r.scores_json, {}), total: Number(r.total), fail: Boolean(r.fail), why: (r.why as string | null) ?? '', unverified_claim: (r.unverified_claim as string | null) ?? null, note_key: (r.note_key as string | null) ?? null, note: (r.note as string | null) ?? null, fault: (r.fault as string | null) ?? null, their_text: (r.their_text as string | null) ?? null, reply_text: (r.reply_text as string | null) ?? null, followup_text: (r.followup_text as string | null) ?? null, counterpart: (r.counterpart as string | null) ?? null, created_at: r.created_at as string };
+  }
+
+  addReplyAuditItem(i: Omit<ReplyAuditItem, 'id' | 'created_at'>): ReplyAuditItem {
+    const info = this.db.prepare('INSERT INTO reply_audit_items (audit_id, event_id, conversation_ref, account_id, channel, intent, language, decision, scores_json, total, fail, why, unverified_claim, note_key, note, fault, their_text, reply_text, followup_text, counterpart, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(i.audit_id, i.event_id, i.conversation_ref, i.account_id, i.channel, i.intent, i.language, i.decision, JSON.stringify(i.scores), i.total, i.fail ? 1 : 0, i.why, i.unverified_claim, i.note_key, i.note, i.fault, i.their_text, i.reply_text, i.followup_text, i.counterpart, new Date().toISOString());
+    return this.rowToAuditItem(this.db.prepare('SELECT * FROM reply_audit_items WHERE id = ?').get(Number(info.lastInsertRowid)) as Row);
+  }
+
+  listReplyAuditItems(auditId: number): ReplyAuditItem[] {
+    return (this.db.prepare('SELECT * FROM reply_audit_items WHERE audit_id = ? ORDER BY total ASC, fail DESC, id').all(auditId) as Row[]).map((r) => this.rowToAuditItem(r));
+  }
+
+  /** The latest audit verdict per reply event, for the badges in the log. */
+  auditForEvents(eventIds: number[]): Map<number, { audit_id: number; total: number; fail: boolean; why: string }> {
+    const out = new Map<number, { audit_id: number; total: number; fail: boolean; why: string }>();
+    const ids = [...new Set(eventIds)];
+    for (let i = 0; i < ids.length; i += 400) {
+      const chunk = ids.slice(i, i + 400);
+      for (const r of this.db.prepare(`SELECT event_id, audit_id, total, fail, why FROM reply_audit_items WHERE event_id IN (${chunk.map(() => '?').join(',')}) ORDER BY id`).all(...chunk) as Row[]) out.set(Number(r.event_id), { audit_id: Number(r.audit_id), total: Number(r.total), fail: Boolean(r.fail), why: String(r.why ?? '') });
+    }
+    return out;
   }
 
   // ---- Translations ----

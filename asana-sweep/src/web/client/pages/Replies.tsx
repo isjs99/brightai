@@ -81,6 +81,7 @@ function Summary({ channel }: { channel: InboxChannel }) {
         <div className="actions">
           {meta && !meta.llm_configured && <span className="badge crit" title="Set ANTHROPIC_API_KEY on the server">Model not configured</span>}
           {meta && <span className={`badge ${meta.master_on ? 'good' : 'muted'}`} title="The master switch under Settings › Connections gates every automatic send">Master {meta.master_on ? 'on' : 'off'}</span>}
+          <Link to="/replies/audit" className="small" title="The twice-weekly audit of the replies that went out">Audit ▸</Link>
         </div>
       </div>
       {error && <div className="banner crit">{error}</div>}
@@ -181,6 +182,7 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
           <span className={`badge ${data.channel_ready ? 'good' : 'muted'}`} title={data.channel_note ?? ''}>{data.channel_ready ? 'Channel live' : channel === 'cs' ? 'Scope pending' : 'Not connected'}</span>
           {!data.llm_configured && <span className="badge crit">Model not configured</span>}
           {policy.mode === 'auto' && !data.master_on && <span className="badge warn" title="Settings › Connections › Auto-reply master">Master switch off: drafts only</span>}
+          <Link to="/replies/audit" className="small" title="The twice-weekly audit of the replies that went out">Audit ▸</Link>
           <button className={`small ${english ? 'primary' : ''}`} onClick={() => setEnglish((x) => !x)} title="Show an English translation under every message, draft and reply that is not in English (kept once translated)">{english ? 'Hide English' : 'Show English'}</button>
           <Link to={`${path}`} className="sub">All accounts ▸</Link>
         </div>
@@ -206,6 +208,7 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
             {policy.mode === 'auto' && (policy.answer_all ? 'Every message that needs an answer gets one, whatever the topic and whoever the creator. The model only hands over when it cannot answer from the facts it has. The cap and quiet hours still apply.' : `Replies go out on their own when they pass the filters below. Anything escalated, over the cap or in quiet hours waits as a draft.`)}
           </div>
         </div>
+        {data.audit_nudged.length > 0 && <div className="banner warn" style={{ marginTop: 8 }}>Handed to a human by the <Link to="/replies/audit">audit</Link> on this account: {data.audit_nudged.map((k) => data.intents.find((i) => i.key === k)?.label ?? k).join(', ')}. Restored on its own once they score well again; undo on the audit page.</div>}
         {policy.mode === 'auto' && (
           <div className="policy-row" style={{ marginTop: 8 }}>
             <button className={`switch ${policy.answer_all ? 'on' : ''}`} disabled={!isAdmin || busy === 'policy'} title={policy.answer_all ? 'Back to the filters below' : 'Ignore the filters and the topic list: answer everything the model can answer'} onClick={() => save({ answer_all: !policy.answer_all }, 'policy')}>
@@ -362,6 +365,7 @@ function AccountReplies({ accountId, channel }: { accountId: number; channel: In
                   <b>{e.context.counterpart ?? who(channel)}</b>
                   <span className="sub">{fmtRelative(e.created_at)}{e.language ? ` · ${data.languages[e.language] ?? e.language}` : ''}{e.intent ? ` · ${data.intents.find((i) => i.key === e.intent)?.label ?? e.intent}` : ''}{e.confidence !== null ? ` · ${Math.round(e.confidence * 100)}%` : ''}</span>
                   {e.cost && <span className="badge muted" title={`${e.cost.input.toLocaleString()} tokens in, ${e.cost.output.toLocaleString()} out on ${e.cost.model}`}>{usd(e.cost.usd, 4)} · {e.cost.model.replace('claude-', '')}</span>}
+                  {e.audit && <span className={`badge ${e.audit.fail ? 'crit' : e.audit.total >= 10 ? 'good' : 'warn'}`} title={e.audit.why}>audit {e.audit.fail ? 'fail' : `${e.audit.total}/12`}</span>}
                   {e.feedback === 'right' && <span className="badge good">looks right</span>}
                   {e.feedback === 'wrong' && <span className="badge crit">marked wrong</span>}
                 </div>

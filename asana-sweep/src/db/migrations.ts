@@ -1786,6 +1786,18 @@ const migrations: Migration[] = [
     name: 'translations to English, kept per text',
     up: (db) => { db.exec(`CREATE TABLE translations (hash TEXT PRIMARY KEY, text TEXT NOT NULL, english TEXT NOT NULL, created_at TEXT NOT NULL)`); },
   },
+  {
+    version: 49,
+    name: 'reply audits',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE reply_audits (id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT NOT NULL, finished_at TEXT, since TEXT NOT NULL, sampled INTEGER NOT NULL DEFAULT 0, mean REAL, fail_rate REAL, summary_json TEXT NOT NULL DEFAULT '{}', actions_json TEXT NOT NULL DEFAULT '[]', slack_posted_at TEXT, error TEXT);
+        CREATE TABLE reply_audit_items (id INTEGER PRIMARY KEY AUTOINCREMENT, audit_id INTEGER NOT NULL REFERENCES reply_audits(id) ON DELETE CASCADE, event_id INTEGER NOT NULL, conversation_ref INTEGER NOT NULL, account_id INTEGER, channel TEXT NOT NULL, intent TEXT, language TEXT, decision TEXT NOT NULL DEFAULT 'auto_sent', scores_json TEXT NOT NULL, total INTEGER NOT NULL, fail INTEGER NOT NULL DEFAULT 0, why TEXT, unverified_claim TEXT, note_key TEXT, note TEXT, fault TEXT, their_text TEXT, reply_text TEXT, followup_text TEXT, counterpart TEXT, created_at TEXT NOT NULL);
+        CREATE INDEX reply_audit_items_event ON reply_audit_items(event_id);
+        CREATE INDEX reply_audit_items_audit ON reply_audit_items(audit_id, account_id, channel);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

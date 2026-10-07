@@ -11,6 +11,7 @@ import { LANGUAGE_NAMES } from './language.js';
 import { tts, ttsAffiliate, TtsClient } from '../tts/client.js';
 import { inboxSettings, sendReply } from './sync.js';
 import { cruvaRest } from '../cruva/rest.js';
+import { nudgedIntents, replyRules } from './audit.js';
 
 /**
  * Replies per account and channel. Every new message from a creator or buyer goes through one pass:
@@ -122,7 +123,7 @@ export function inQuietHours(policy: Pick<ReplyPolicy, 'quiet_from' | 'quiet_to'
 
 // ---- The model call ----
 
-export interface Classification { needs_reply: boolean; intent: string; escalate: boolean; escalation: string | null; confidence: number; reply: string | null }
+export interface Classification { needs_reply: boolean; intent: string; escalate: boolean; escalation: string | null; confidence: number; reply: string | null; /** The writer's own check of its draft (facts in the context, policy kept); a false escalates. */ checks: { facts: boolean; policy: boolean } | null }
 
 /** Parse the model's JSON answer; a plain-text answer still becomes a low-confidence draft rather than a lost message. */
 export function parseClassification(raw: string, channel: InboxChannel): Classification {
@@ -135,11 +136,12 @@ export function parseClassification(raw: string, channel: InboxChannel): Classif
       const intent = String(j.intent ?? 'other').toLowerCase().replace(/[^a-z_]/g, '');
       const confidence = typeof j.confidence === 'number' ? Math.max(0, Math.min(1, j.confidence)) : Number(j.confidence) || 0.5;
       const reply = typeof j.reply === 'string' && j.reply.trim() ? j.reply.trim() : null;
-      return { needs_reply: j.needs_reply !== false && Boolean(reply), intent: keys.has(intent) ? intent : 'other', escalate: Boolean(j.escalate), escalation: typeof j.escalation === 'string' && j.escalation.trim() ? j.escalation.trim() : null, confidence, reply };
+      const ck = j.checks && typeof j.checks === 'object' ? (j.checks as Record<string, unknown>) : null;
+      return { needs_reply: j.needs_reply !== false && Boolean(reply), intent: keys.has(intent) ? intent : 'other', escalate: Boolean(j.escalate), escalation: typeof j.escalation === 'string' && j.escalation.trim() ? j.escalation.trim() : null, confidence, reply, checks: ck ? { facts: ck.facts !== false, policy: ck.policy !== false } : null };
     } catch { /* fall through */ }
   }
   const text = raw.trim();
-  return { needs_reply: Boolean(text), intent: 'other', escalate: true, escalation: 'model did not return JSON', confidence: 0.4, reply: text || null };
+  return { needs_reply: Boolean(text), intent: 'other', escalate: true, escalation: 'model did not return JSON', confidence: 0.4, reply: text || null, checks: null };
 }
 
 export type Llm = (system: string, user: string) => Promise<string>;
@@ -276,7 +278,7 @@ async function processNow(q: Queries, ids: number[], deps: ProcessDeps = {}): Pr
     let cls: Classification;
     try {
       ctx = await buildContext(q, c, messages, policy.languages[c.tts_shop_id] ?? null, cruvaRest);
-      const { system, user } = renderPrompt(c, messages, ctx, { json: true, intents: INTENTS[c.channel], answerAll: policy.answer_all });
+      const { system, user } = renderPrompt(c, messages, ctx, { json: true, intents: INTENTS[c.channel], answerAll: policy.answer_all, rules: replyRules(q) });
       cls = parseClassification(await llm(system, user), c.channel);
     } catch (err) {
       if (err instanceof LlmBudgetError) { log.warn(`Replies paused: ${err.message}`); record('error', { escalation: err.message.slice(0, 200) }); break; }
@@ -291,6 +293,9 @@ async function processNow(q: Queries, ids: number[], deps: ProcessDeps = {}): Pr
     // "Answer everything": the topic lists are ignored; the model's own hand-over and a very low confidence are the only brakes.
     const escalation =
       cls.escalate ? (cls.escalation ?? 'model asked for a human')
+      : cls.checks && !cls.checks.facts ? 'self-check: the draft states something not in the facts'
+      : cls.checks && !cls.checks.policy ? 'self-check: the draft crosses a policy line'
+      : nudgedIntents(q, c.account_id, c.channel).includes(cls.intent) ? `${intentDef?.label ?? cls.intent}: handed to a human by the audit until it scores well again`
       : !policy.answer_all && policy.never.includes(cls.intent) ? `${intentDef?.label ?? cls.intent}: always a human on this account`
       : !policy.answer_all && intentDef?.escalates ? `${intentDef.label}: needs a human`
       : cls.confidence < (policy.answer_all ? 0.4 : 0.6) ? `low confidence (${Math.round(cls.confidence * 100)}%)`
@@ -452,7 +457,7 @@ export function repliesData(q: Queries, account: Account, channel: InboxChannel,
   const since = startOfDay(tz, now);
   const sent = q.countRepliesSentSince(account.id, channel, since);
   const waiting = waitingFor(q, account.id, channel, policy, now);
-  const log = withCosts(q, q.listReplyEvents({ accountId: account.id, channel, limit: 300 }));
+  const log = withAudits(q, withCosts(q, q.listReplyEvents({ accountId: account.id, channel, limit: 300 })));
   const week = q.listReplyEvents({ accountId: account.id, channel, since: dayAgo(7, now), limit: 2000 });
   const minutes = log.filter((e) => e.decision === 'auto_sent' && e.created_at >= since && e.context.their_at).map((e) => (Date.parse(e.created_at) - Date.parse(e.context.their_at!)) / 60000).filter((m) => m >= 0 && m < 1440);
   const cruvaShop = cruvaShopFor(q, account.id, null);
@@ -503,6 +508,7 @@ export function repliesData(q: Queries, account: Account, channel: InboxChannel,
     },
     waiting,
     blockers: blockerGroups(q, waiting, INTENTS[channel], now),
+    audit_nudged: nudgedIntents(q, account.id, channel),
     log,
     knowledge,
     intents: INTENTS[channel],
@@ -520,6 +526,12 @@ export function withCosts<T extends Pick<ReplyEvent, 'conversation_ref' | 'messa
 }
 
 /** Open threads for every enabled account, grouped by account and channel, from one query. */
+/** The audit's verdict on each event, when it was sampled. */
+export function withAudits<T extends Pick<ReplyEvent, 'id'>>(q: Queries, events: T[]): (T & { audit: ReplyEvent['audit'] })[] {
+  const m = q.auditForEvents(events.map((e) => e.id));
+  return events.map((e) => ({ ...e, audit: m.get(e.id) ?? null }));
+}
+
 function openByAccount(q: Queries, accounts: Account[]): Map<string, InboxConversation[]> {
   const enabled = new Set(accounts.map((a) => a.id));
   const by = new Map<string, InboxConversation[]>();

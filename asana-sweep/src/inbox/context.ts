@@ -117,7 +117,7 @@ export function buildContextSync(q: Queries, c: InboxConversation, messages: Inb
 const money = (n: number | null | undefined, cur: string | null | undefined) => (n === null || n === undefined ? '' : `${cur ?? ''} ${n}`.trim());
 
 /** Render the context and thread as the prompt for the reply model (classification and reply in one call). */
-export function renderPrompt(c: InboxConversation, messages: InboxMessage[], ctx: ReplyContext, opts: { intents?: { key: string; label: string; escalates: boolean }[]; json?: boolean; /** Answer everything: no intent is marked for a human; hand over only when the facts do not allow an answer. */ answerAll?: boolean } = {}): { system: string; user: string } {
+export function renderPrompt(c: InboxConversation, messages: InboxMessage[], ctx: ReplyContext, opts: { intents?: { key: string; label: string; escalates: boolean }[]; json?: boolean; /** Answer everything: no intent is marked for a human; hand over only when the facts do not allow an answer. */ answerAll?: boolean; /** Standing rules learnt by the audit. */ rules?: string[] } = {}): { system: string; user: string } {
   const brand = ctx.account ?? c.shop_name;
   const cs = c.channel === 'cs';
   const lang = LANGUAGE_NAMES[ctx.language] ?? ctx.language;
@@ -132,9 +132,11 @@ export function renderPrompt(c: InboxConversation, messages: InboxMessage[], ctx
     lines.push('Never promise retainers, fixed fees, paid posts, free products beyond the sample programme, or commission rates other than the ones below. Do not share internal numbers (GMV, margins). Link only to the brief or campaign links below.');
   }
   lines.push('Replace [brand] in any guidance with the brand name.');
+  if (opts.rules?.length) lines.push('', 'Standing rules from the reply audit:', ...opts.rules.map((r) => `- ${r}`));
   if (opts.json) {
     const intents = (opts.intents ?? []).map((i) => `${i.key}${i.escalates && !opts.answerAll ? ' (human)' : ''}`).join(', ');
-    lines.push('', 'Answer with one JSON object and nothing else:', '{"needs_reply": true|false, "intent": "<one of: ' + intents + '>", "escalate": true|false, "escalation": "<why a human must take over, or null>", "confidence": 0..1, "reply": "<the reply text, or null when needs_reply is false>"}',
+    lines.push('', 'Answer with one JSON object and nothing else:', '{"needs_reply": true|false, "intent": "<one of: ' + intents + '>", "escalate": true|false, "escalation": "<why a human must take over, or null>", "confidence": 0..1, "reply": "<the reply text, or null when needs_reply is false>", "checks": {"facts": true|false, "policy": true|false}}',
+      'checks is your honest check of your own reply before you return it: facts is true only when every fact in the reply is in the facts below; policy is true only when the reply promises nothing the rules above forbid. A false on either means the reply waits for a person, so do not soften it.',
       opts.answerAll
         ? 'needs_reply is false for thanks, emojis, reactions, "ok", automatic cards or anything that does not ask or expect something. Answer everything else yourself, including questions about money, terms, complaints and damaged samples, using only the facts below; where a fact is missing say the team will confirm it. escalate is true only for a legal threat, or when no honest reply is possible without a fact you do not have.'
         : 'needs_reply is false for thanks, emojis, reactions, "ok", automatic cards or anything that does not ask or expect something. escalate is true for intents marked (human), for anger or legal threats, for anything about money or terms you cannot confirm from the facts below, and when confidence is under 0.6.');

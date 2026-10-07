@@ -37,6 +37,8 @@ import { feedback as replyFeedback, overview as repliesOverview, repliesData, re
 import { buildContext, renderPrompt } from '../inbox/context.js';
 import { draftWithClaude } from '../inbox/llm.js';
 import { translateToEnglish } from '../inbox/translate.js';
+import { replyRules, runAudit, undoAuditAction } from '../inbox/audit.js';
+let auditRunning = false;
 import { DEFAULT_SECTION_URLS } from '../checklist/links.js';
 import { LANGUAGE_NAMES } from '../inbox/language.js';
 import type { ConversationDetail, ContextEntry, InboxData } from '../sweep/types.js';
@@ -2599,6 +2601,15 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     return a;
   };
   r.get('/replies/summary', (_req, res) => { const o = repliesOverview(q, scopeLive); res.json({ rows: o.rows, waiting: o.waiting, master_on: inboxSettings(q).auto_reply_master, llm_configured: inboxSettings(q).llm_configured }); });
+  r.get('/replies/audit', (_req, res) => { const history = q.listReplyAudits(30); const latest = history.find((a) => a.finished_at) ?? null; res.json({ latest, items: latest ? q.listReplyAuditItems(latest.id) : [], history, rules: replyRules(q), running: auditRunning }); });
+  r.get('/replies/audit/:id', (req, res) => { const a = q.getReplyAudit(idParam(req)); if (!a) throw new HttpError(404, 'Audit not found'); res.json({ audit: a, items: q.listReplyAuditItems(a.id) }); });
+  r.post('/replies/audit/run', async (_req, res) => {
+    if (auditRunning) throw new HttpError(409, 'An audit is already running.');
+    if (!inboxSettings(q).llm_configured) throw new HttpError(400, 'ANTHROPIC_API_KEY is not set.');
+    auditRunning = true;
+    try { const audit = await runAudit(q); await scheduler.postAudit(audit); res.json({ audit, items: q.listReplyAuditItems(audit.id) }); } catch (err) { throw new HttpError(502, (err as Error).message); } finally { auditRunning = false; }
+  });
+  r.post('/replies/audit/:id/undo/:index', (req, res) => { try { res.json({ audit: undoAuditAction(q, idParam(req), Number(req.params.index)) }); } catch (err) { throw new HttpError(400, (err as Error).message); } });
   r.get('/replies/:accountId/:channel', (req, res) => res.json(repliesData(q, accountParam(req), channelParam(req), scopeLive)));
   r.put('/replies/:accountId/:channel/policy', (req, res) => {
     const a = accountParam(req);

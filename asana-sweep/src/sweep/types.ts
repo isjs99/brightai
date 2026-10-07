@@ -1498,6 +1498,26 @@ export interface ReplyContext {
   notes: string[];
 }
 
+// ---- Reply audit ----
+
+export type ReplyAuditAction =
+  | { kind: 'note'; note_id: number; account_id: number; channel: InboxChannel; language: string; note_key: string; title: string; body: string; replies: number; undone: boolean }
+  | { kind: 'rule'; fault: string; rule: string; replies: number; undone: boolean }
+  | { kind: 'nudge'; account_id: number; channel: InboxChannel; intent: string; direction: 'to_human' | 'restored'; fail_rate: number; undone: boolean }
+  | { kind: 'note_disabled' | 'note_checked'; note_id: number; account_id: number; channel: InboxChannel; note_key: string; why: string; undone: boolean };
+
+export interface ReplyAuditRow { n: number; mean: number | null; fail_rate: number | null; prev_mean: number | null; worst: { item_id: number; counterpart: string | null; total: number; fail: boolean; why: string }[] }
+export interface ReplyAuditSummary {
+  by_account: (ReplyAuditRow & { account_id: number; account_name: string; channel: InboxChannel })[];
+  by_intent: (ReplyAuditRow & { channel: InboxChannel; intent: string; label: string })[];
+  by_language: (ReplyAuditRow & { language: string })[];
+  by_rubric: { key: string; label: string; mean: number | null; zeros: number }[];
+  /** Accounts over 10% fails or under 7 mean. */
+  red: string[];
+}
+export interface ReplyAudit { id: number; started_at: string; finished_at: string | null; since: string; sampled: number; mean: number | null; prev_mean: number | null; fail_rate: number | null; summary: ReplyAuditSummary; actions: ReplyAuditAction[]; slack_posted_at: string | null; error: string | null }
+export interface ReplyAuditItem { id: number; audit_id: number; event_id: number; conversation_ref: number; account_id: number | null; channel: InboxChannel; intent: string | null; language: string | null; decision: string; scores: Record<string, number>; total: number; fail: boolean; why: string; unverified_claim: string | null; note_key: string | null; note: string | null; fault: string | null; their_text: string | null; reply_text: string | null; followup_text: string | null; counterpart: string | null; created_at: string }
+
 // ---- Replies per account: policy, events ----
 
 export type ReplyMode = 'off' | 'draft' | 'auto';
@@ -1546,6 +1566,8 @@ export interface ReplyEvent {
   model: string | null;
   /** What the Claude call behind this decision cost (filled in when the event is listed). */
   cost?: { usd: number; input: number; output: number; model: string } | null;
+  /** The audit's verdict on this reply, when it was sampled. */
+  audit?: { audit_id: number; total: number; fail: boolean; why: string } | null;
   feedback: 'right' | 'wrong' | null;
   feedback_note: string | null;
   created_at: string;
@@ -1565,6 +1587,8 @@ export interface RepliesData {
   waiting: (InboxConversation & { event: ReplyEvent | null; draft: InboxReply | null })[];
   /** The waiting threads grouped by what stops them; `deferred` groups clear on their own once the cause is lifted. */
   blockers: { reason: string; deferred: boolean; count: number; examples: { id: number; counterpart_name: string | null; last_message_at: string | null }[] }[];
+  /** Intents the audit handed to a human on this account (restored when they score well again); honoured even with Answer everything on. */
+  audit_nudged: string[];
   log: ReplyEvent[];
   knowledge: { label: string; state: 'ok' | 'warn' | 'missing'; detail: string }[];
   intents: { key: string; label: string; escalates: boolean }[];

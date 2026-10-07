@@ -10,6 +10,8 @@ import { syncGmv } from '../gmv/sync.js';
 import { LeadsWatcher } from '../leads/sync.js';
 import { InboxWatcher } from '../inbox/sync.js';
 import { weeklyDigest } from '../inbox/replies.js';
+import { auditSlackText, runAudit } from '../inbox/audit.js';
+import type { ReplyAudit } from '../sweep/types.js';
 import { incidentSettings } from '../incidents/index.js';
 import { importPullFiles } from '../bd/import.js';
 import { apolloStatus, EnrichJob, refreshApolloCredits } from '../bd/enrich.js';
@@ -69,6 +71,7 @@ export class Scheduler {
   readonly cruvaPull: CruvaPuller;
   private cruvaTask: ScheduledTask | null = null;
   private repliesDigestTask: ScheduledTask | null = null;
+  private auditTask: ScheduledTask | null = null;
   readonly copilot: Copilot;
   readonly clientTasks: ClientTasks;
   readonly cruvaInbox: CruvaInboxWatcher;
@@ -142,6 +145,8 @@ export class Scheduler {
     this.cruvaTask = cron.schedule('20 5 * * *', () => { if (this.playbook.data().mcp_configured) void this.playbook.check(undefined, true).catch((err) => log.warn(`Cruva nightly check: ${(err as Error).message}`)); }, { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Replies: Monday morning digest of what went out automatically last week, to the default Slack channel.
     this.repliesDigestTask = cron.schedule('50 8 * * 1', () => void this.repliesDigest(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
+    // Reply audit: Monday and Thursday 07:00, the last three days of automatic replies scored and the fixes applied.
+    this.auditTask = cron.schedule('0 7 * * 1,4', () => void this.replyAudit(), { timezone: this.q.getSetting('check_timezone', 'Europe/Madrid') });
     // Account monitor: rolling scan of every account for the flags the team otherwise catches by hand.
     this.monitor.start();
     // Account health: the daily Windsor pull, the rules and the AI review, before the AMs start (06:30 Madrid).
@@ -238,6 +243,19 @@ export class Scheduler {
   /** tl;dv call follow-ups, when the key is set, Claude is configured and the switch is on. */
 
   /** Post the weekly replies digest to the default incident channel (or the first account channel). */
+  async replyAudit(): Promise<void> {
+    if (!config.anthropicApiKey) return;
+    try { const audit = await runAudit(this.q); await this.postAudit(audit); } catch (err) { log.warn(`Reply audit: ${(err as Error).message}`); }
+  }
+
+  /** The five-line summary to the incidents default channel. */
+  async postAudit(audit: ReplyAudit): Promise<void> {
+    if (!slackBot.configured || !audit.sampled) return;
+    const channel = incidentSettings(this.q).default_channel;
+    if (!channel) return;
+    try { await slackBot.post(await slackBot.channelId(channel), auditSlackText(audit, config.publicUrl)); this.q.markReplyAuditPosted(audit.id); } catch (err) { log.warn(`Reply audit post: ${(err as Error).message}`); }
+  }
+
   async repliesDigest(): Promise<void> {
     const text = weeklyDigest(this.q);
     if (!text || !slackBot.configured) return;
@@ -382,6 +400,7 @@ export class Scheduler {
     this.competitors.stop();
     this.leads.stop();
     this.inbox.stop();
+    this.auditTask?.stop();
     this.stock.stop();
     this.copilot.stop();
     this.clientTasks.stop();

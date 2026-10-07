@@ -14,6 +14,7 @@ import GmvMaxPage from './pages/GmvMax';
 import LeadsPage from './pages/Leads';
 import BdPage from './pages/Bd';
 import RepliesPage from './pages/Replies';
+import RepliesAuditPage from './pages/RepliesAudit';
 import OutreachPage from './pages/Outreach';
 import InquiriesPage from './pages/Inquiries';
 import MonitorPage from './pages/Monitor';
@@ -111,7 +112,7 @@ function Login({ onDone }: { onDone: (role: Role) => void }) {
 /** Six entries. Each hub owns several paths (its tabs), so the link is active on any of them. */
 const NAV: { to: string; label: string; paths: string[] }[] = [
   { to: '/today', label: 'Today', paths: ['/today'] },
-  { to: '/monitor', label: 'Accounts', paths: ['/monitor', '/checklists', '/calendar', '/promotions', '/gmv-max', '/stock', '/pnl', '/cruva', '/playbook', '/creators', '/customer-service', '/reports', '/copilot'] },
+  { to: '/monitor', label: 'Accounts', paths: ['/monitor', '/checklists', '/calendar', '/promotions', '/gmv-max', '/stock', '/pnl', '/cruva', '/playbook', '/creators', '/customer-service', '/replies/audit', '/reports', '/copilot'] },
   { to: '/targets', label: 'Onboarding', paths: ['/targets', '/onboarding'] },
   { to: '/pitch', label: 'Pitch designer', paths: ['/pitch'] },
   { to: '/inquiries', label: 'Enquiries', paths: ['/inquiries', '/inbox'] },
@@ -198,6 +199,7 @@ export default function App() {
               <Route path="/copilot" element={<AccountHub><CopilotPage /></AccountHub>} />
               <Route path="/creators" element={<AccountHub><RepliesPage channel="affiliate" /></AccountHub>} />
               <Route path="/customer-service" element={<AccountHub><RepliesPage channel="cs" /></AccountHub>} />
+              <Route path="/replies/audit" element={<AccountHub><RepliesAuditPage /></AccountHub>} />
               <Route path="/inbox" element={<Navigate to="/creators" replace />} />
               <Route path="/targets" element={<Hub title="Onboarding" tabs={ONBOARDING_TABS}><TargetsPage /></Hub>} />
               <Route path="/onboarding" element={<Hub title="Onboarding" tabs={ONBOARDING_TABS}><OnboardingPage /></Hub>} />

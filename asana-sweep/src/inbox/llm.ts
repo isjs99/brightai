@@ -7,7 +7,7 @@ import { config } from '../config.js';
  * and a daily budget can stop the automatic features before the account runs dry.
  */
 
-export type LlmFeature = 'reply' | 'tasks' | 'ask' | 'report' | 'targets' | 'competitors' | 'pitch' | 'outreach' | 'incidents' | 'health' | 'playbook' | 'calls' | 'translate' | 'other';
+export type LlmFeature = 'reply' | 'tasks' | 'ask' | 'report' | 'targets' | 'competitors' | 'pitch' | 'outreach' | 'incidents' | 'health' | 'playbook' | 'calls' | 'translate' | 'audit' | 'other';
 
 export interface LlmUsage { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
 export interface LlmCallRecord { feature: LlmFeature; account_id: number | null; ref: string | null; model: string; usage: LlmUsage; cost_usd: number; ms: number; ok: boolean; error: string | null }
@@ -23,7 +23,7 @@ export const MODEL_PRICES: Record<string, { label: string; input: number; output
   'claude-fable-5-1': { label: 'Fable 5.1', input: 10, output: 50, cache_read: 0.25, cache_write: 12.5, note: 'Most capable, 10x the price of Haiku.' },
 };
 
-export const FEATURE_LABELS: Record<LlmFeature, string> = { reply: 'Creator and buyer replies', tasks: 'Client task scan', ask: 'Ask and copilot', report: 'Client reports', targets: 'Targets (deal reads)', competitors: 'Competitor pages', pitch: 'Pitch decks', outreach: 'Outreach drafts (email, LinkedIn, Lark)', incidents: 'Incident notes', health: 'Account health review', playbook: 'Cruva playbook', calls: 'Call follow-ups', translate: 'Translations to English', other: 'Other' };
+export const FEATURE_LABELS: Record<LlmFeature, string> = { reply: 'Creator and buyer replies', tasks: 'Client task scan', ask: 'Ask and copilot', report: 'Client reports', targets: 'Targets (deal reads)', competitors: 'Competitor pages', pitch: 'Pitch decks', outreach: 'Outreach drafts (email, LinkedIn, Lark)', incidents: 'Incident notes', health: 'Account health review', playbook: 'Cruva playbook', calls: 'Call follow-ups', translate: 'Translations to English', audit: 'Reply audit', other: 'Other' };
 
 /** Features that run on their own, without a person pressing a button; the daily budget stops these first. */
 export const AUTO_FEATURES: LlmFeature[] = ['reply', 'tasks', 'ask', 'targets', 'competitors', 'incidents', 'health', 'playbook', 'calls'];
