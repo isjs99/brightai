@@ -5,6 +5,7 @@ import { api, currentActor, fmtDate, fmtRelative, useActor, useLiveUpdates } fro
 import { useIsAdmin } from '../session';
 import { useAccountScope, useAllowedAccounts, useInScope } from '../hubs';
 import ClientTasksView from './ClientTasks';
+import { marketsOf, sectionUrl } from '../../../checklist/links';
 
 function Frac({ done, total, complete }: { done: number; total: number; complete: boolean }) {
   if (total === 0) return <span className="frac sub">0/0</span>;
@@ -57,9 +58,13 @@ function SectionFlagList({ items }: { items: { flag: MonitorFlag; title: string 
   );
 }
 
-function TickList({ accountId, check, date, editable, onChange, flags }: { accountId: number; check: CheckWithItems; date: string; editable: boolean; onChange: (c: CheckWithItems) => void; flags: SectionFlags }) {
+function TickList({ accountId, check, date, editable, onChange, flags, markets, sectionUrls }: { accountId: number; check: CheckWithItems; date: string; editable: boolean; onChange: (c: CheckWithItems) => void; flags: SectionFlags; markets: string | null; sectionUrls: Record<string, string> }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const countries = marketsOf(markets);
+  const [market, setMarket] = useState<string>(() => countries[0] ?? 'DE');
+  // The clicker: one button per section opens its Seller Center page for the chosen country and focuses that section here.
+  const [focus, setFocus] = useState<string | null>(null);
   const toggle = async (itemId: string, done: boolean) => {
     setBusy(itemId);
     setError(null);
@@ -79,6 +84,14 @@ function TickList({ accountId, check, date, editable, onChange, flags }: { accou
   };
   const due = check.items.filter((i) => i.state !== 'not_due');
   const later = check.items.filter((i) => i.state === 'not_due');
+  const sections = [...new Set(due.map((i) => i.section_name ?? 'Other'))];
+  const sectionDone = (sec: string) => { const items = due.filter((i) => (i.section_name ?? 'Other') === sec); const boxes = items.reduce((n, i) => n + 1 + i.subtasks.length, 0); const ticked = items.reduce((n, i) => n + (i.completed_at ? 1 : 0) + i.subtasks.filter((x) => x.done).length, 0); return { boxes, ticked }; };
+  const open = (sec: string) => {
+    const url = sectionUrl(sec, market, sectionUrls);
+    if (url) window.open(url, '_blank', 'noopener');
+    setFocus(sec);
+    setTimeout(() => document.getElementById(`sec-${accountId}-${sections.indexOf(sec)}`)?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
+  };
   const label = (it: CheckItem) => (it.state === 'done' ? 'Done' : it.state === 'pending' && it.completed_at ? 'Waiting on AA' : it.state === 'pending' ? 'To do' : 'Not today');
   const total = check.am_total + check.aa_total;
   const ticked = check.am_done + check.aa_done;
@@ -95,6 +108,13 @@ function TickList({ accountId, check, date, editable, onChange, flags }: { accou
       {due.length > 0 && (check.combined_complete
         ? <div className="banner good" style={{ marginBottom: 8 }}><b>List done.</b> Every box is ticked, AM and AA.</div>
         : <p className="sub" style={{ margin: '0 0 8px' }}>{ticked} of {total} boxes ticked. The list is done when every box is ticked, the AM checks and the AA action items underneath.</p>)}
+      {due.length > 0 && (
+        <div className="clicker" title="Opens the section's page in Seller Center (or the affiliate centre, or Cruva) for the country in a new tab and shows that section's boxes here">
+          {countries.length > 1 ? <select value={market} onChange={(e) => setMarket(e.target.value)} style={{ width: 'auto' }}>{countries.map((m) => <option key={m} value={m}>{m}</option>)}</select> : <span className="badge muted">{market}</span>}
+          {sections.map((sec) => { const d = sectionDone(sec); return <button key={sec} className={`chip ${focus === sec ? 'on' : ''} ${d.ticked === d.boxes ? 'done' : ''}`} onClick={() => open(sec)}>{sec} <span className="sub">{d.ticked}/{d.boxes}</span> ↗</button>; })}
+          {focus && <button className="small" onClick={() => setFocus(null)}>Show all sections</button>}
+        </div>
+      )}
       {editable && due.length > 0 && (
         <div className="actions" style={{ marginBottom: 8 }}>
           <button className="small" disabled={busy !== null} onClick={() => all(true, 'am')}>Tick all AM lines</button>
@@ -103,36 +123,51 @@ function TickList({ accountId, check, date, editable, onChange, flags }: { accou
           <button className="small" disabled={busy !== null} onClick={() => { if (window.confirm('Untick every line for this day?')) void all(false); }}>Clear day</button>
         </div>
       )}
-      {due.length === 0 ? <p className="sub">Nothing is due on this day.</p> : (
-        <ul className="item-list">
-          {due.map((it: CheckItem, idx: number) => (
-            <li key={it.task_gid}>
-              <span className={`badge ${it.state === 'done' ? 'good' : it.completed_at ? 'warn' : 'crit'}`}>{label(it)}</span>
-              <div>
-                {box(it.task_gid, Boolean(it.completed_at), <b>{it.name}</b>, <span className="sub"> · {it.role.toUpperCase()}{it.section_name ? ` · ${it.section_name}` : ''}{it.frequency === 'weekly' ? ' · weekly' : ''}{it.completed_at ? ` · ${it.assignee_name ?? 'someone'} ${fmtRelative(it.completed_at)}` : ''}</span>)}
-                {it.guidance && <div className="guidance">{it.guidance}</div>}
-                {it.section_name && flags.has(it.section_name) && due.findIndex((x) => x.section_name === it.section_name) === idx && <SectionFlagList items={flags.get(it.section_name)!} />}
-                {it.subtasks.length > 0 && (
-                  <ul>
-                    {it.subtasks.map((s) => (
-                      <li key={s.task_gid}>{box(s.task_gid, s.done, s.name, <span className="sub"> · {s.role.toUpperCase()}{s.frequency === 'weekly' ? ' · weekly' : ''}{s.completed_at ? ` · ${s.assignee_name ?? 'someone'} ${fmtRelative(s.completed_at)}` : ''}</span>)}</li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </li>
-          ))}
-        </ul>
-      )}
+      {due.length === 0 ? <p className="sub">Nothing is due on this day.</p> : sections.map((sec, si) => {
+        const items = due.filter((i) => (i.section_name ?? 'Other') === sec);
+        const d = sectionDone(sec);
+        const url = sectionUrl(sec, market, sectionUrls);
+        const shown = focus === null || focus === sec;
+        return (
+          <div key={sec} id={`sec-${accountId}-${si}`} className={`section ${shown ? '' : 'collapsed'}`}>
+            <div className="sec-head" onClick={() => setFocus(shown && focus === sec ? null : sec)}>
+              <b>{sec}</b> <span className={`frac ${d.ticked === d.boxes ? 'ok' : 'bad'}`}>{d.ticked}/{d.boxes}</span>
+              {url && <a href={url} target="_blank" rel="noopener" className="small" onClick={(e) => { e.stopPropagation(); setFocus(sec); }}>Open {market} ↗</a>}
+              {!shown && <span className="sub">· click to show</span>}
+            </div>
+            {shown && flags.has(sec) && <SectionFlagList items={flags.get(sec)!} />}
+            {shown && (
+              <ul className="item-list">
+                {items.map((it: CheckItem) => (
+                  <li key={it.task_gid}>
+                    <span className={`badge ${it.state === 'done' ? 'good' : it.completed_at ? 'warn' : 'crit'}`}>{label(it)}</span>
+                    <div>
+                      {box(it.task_gid, Boolean(it.completed_at), <b>{it.name}</b>, <span className="sub"> · {it.role.toUpperCase()}{it.frequency === 'weekly' ? ' · weekly' : ''}{it.completed_at ? ` · ${it.assignee_name ?? 'someone'} ${fmtRelative(it.completed_at)}` : ''}</span>)}
+                      {it.guidance && <div className="guidance">{it.guidance}</div>}
+                      {it.subtasks.length > 0 && (
+                        <ul>
+                          {it.subtasks.map((s) => (
+                            <li key={s.task_gid}>{box(s.task_gid, s.done, s.name, <span className="sub"> · {s.role.toUpperCase()}{s.frequency === 'weekly' ? ' · weekly' : ''}{s.completed_at ? ` · ${s.assignee_name ?? 'someone'} ${fmtRelative(s.completed_at)}` : ''}</span>)}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        );
+      })}
       {later.length > 0 && <p className="sub" style={{ marginTop: 8 }}>Not due today: {later.map((i) => i.name).join(' · ')}</p>}
-      {[...flags.entries()].filter(([section]) => !due.some((i) => i.section_name === section)).map(([section, items]) => (
+      {[...flags.entries()].filter(([section]) => !sections.includes(section)).map(([section, items]) => (
         <div key={section} style={{ marginTop: 8 }}><div className="sub" style={{ fontWeight: 700 }}>Flags · {section}</div><SectionFlagList items={items} /></div>
       ))}
     </div>
   );
 }
 
-function CheckDetail({ accountId, checkId, date, isToday, version, editable, monitor }: { accountId: number; checkId: number; date: string; isToday: boolean; version: string; editable: boolean; monitor: MonitorData | null }) {
+function CheckDetail({ accountId, checkId, date, isToday, version, editable, monitor, markets, sectionUrls }: { accountId: number; checkId: number; date: string; isToday: boolean; version: string; editable: boolean; monitor: MonitorData | null; markets: string | null; sectionUrls: Record<string, string> }) {
   const [check, setCheck] = useState<CheckWithItems | null>(null);
   useEffect(() => {
     // Today: the live picture (negative ids are live rows). Past days: the recorded check.
@@ -140,7 +175,7 @@ function CheckDetail({ accountId, checkId, date, isToday, version, editable, mon
     p.then((r) => setCheck(r.check)).catch(() => setCheck(null));
   }, [checkId, accountId, version, isToday]);
   if (!check) return <p className="sub">Loading…</p>;
-  return <TickList accountId={accountId} check={check} date={date} editable={editable} onChange={setCheck} flags={isToday ? flagsBySection(monitor, accountId) : new Map()} />;
+  return <TickList accountId={accountId} check={check} date={date} editable={editable} onChange={setCheck} flags={isToday ? flagsBySection(monitor, accountId) : new Map()} markets={markets} sectionUrls={sectionUrls} />;
 }
 
 function SettingsPanel({ settings, onSaved }: { settings: CheckSettings; onSaved: (s: CheckSettings) => void }) {
@@ -154,7 +189,7 @@ function SettingsPanel({ settings, onSaved }: { settings: CheckSettings; onSaved
     setBusy(true);
     setError(null);
     try {
-      const r = await api.saveCheckSettings({ check_cron: form.check_cron, check_timezone: form.check_timezone, check_enabled: form.check_enabled, check_slack_webhook: form.check_slack_webhook });
+      const r = await api.saveCheckSettings({ check_cron: form.check_cron, check_timezone: form.check_timezone, check_enabled: form.check_enabled, check_slack_webhook: form.check_slack_webhook, section_urls: form.section_urls });
       onSaved(r.settings);
       setForm(r.settings);
     } catch (err) {
@@ -169,6 +204,15 @@ function SettingsPanel({ settings, onSaved }: { settings: CheckSettings; onSaved
       <label className="field"><span className="lbl">Timezone</span><select value={form.check_timezone} onChange={(e) => setForm({ ...form, check_timezone: e.target.value })}>{tzs.map((tz) => <option key={tz}>{tz}</option>)}</select></label>
       <label className="field" style={{ flex: 1, minWidth: 260 }}><span className="lbl">Slack webhook for the daily digest</span><input type="url" value={form.check_slack_webhook} onChange={(e) => setForm({ ...form, check_slack_webhook: e.target.value })} placeholder="https://hooks.slack.com/services/…" /></label>
       <label className="field check"><input type="checkbox" checked={form.check_enabled} onChange={(e) => setForm({ ...form, check_enabled: e.target.checked })} /><span>Lock the day's record on schedule</span></label>
+      <div style={{ flexBasis: '100%' }}>
+        <div className="lbl">Where each section opens (the clicker)</div>
+        <div className="sub" style={{ marginBottom: 6 }}>{'{sc}'} is Seller Center for the country (seller-uk or seller-eu), {'{affiliate}'} the affiliate centre, {'{region}'} the country code TikTok uses (GB for the UK), {'{cruva}'} the Cruva app. Leave a box empty to use the default shown.</div>
+        <div className="url-grid">
+          {Object.keys(form.section_url_defaults).map((sec) => (
+            <label key={sec} className="field"><span className="lbl">{sec}</span><input type="text" className="mono" value={form.section_urls[sec] ?? ''} placeholder={form.section_url_defaults[sec]} onChange={(e) => setForm({ ...form, section_urls: { ...form.section_urls, [sec]: e.target.value } })} /></label>
+          ))}
+        </div>
+      </div>
       <button className="primary" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
       {error && <span className="error">{error}</span>}
     </form>
@@ -283,7 +327,7 @@ export default function Checklists() {
               const toggleOpen = () => { const n = new Set(open); if (isOpen) n.delete(a.id); else n.add(a.id); setOpen(n); };
               return (
                 <RowGroup key={a.id} a={a} c={c} source={checklist_source} items={checklist_items} snapshot={isToday && snapshot?.final ? snapshot : null} open={isOpen} onToggle={toggleOpen} flags={isToday ? openFlags(a.id) : []}>
-                  {isOpen && c && <CheckDetail accountId={a.id} checkId={c.id} date={data.date} isToday={isToday} version={String(version)} editable={editable} monitor={monitor} />}
+                  {isOpen && c && <CheckDetail accountId={a.id} checkId={c.id} date={data.date} isToday={isToday} version={String(version)} editable={editable} monitor={monitor} markets={a.markets} sectionUrls={settings?.section_urls ?? {}} />}
                   {isOpen && !c && <p className="sub">No status recorded for this day.</p>}
                 </RowGroup>
               );

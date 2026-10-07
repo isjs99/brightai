@@ -610,3 +610,11 @@ ol.sources { padding-left: 20px; font-size: 12.5px; } ol.sources li { margin-bot
 .slack-preview { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; background: var(--panel, rgba(127,127,127,.08)); padding: 10px; border-radius: 8px; }
 .table tr.muted td { opacity: .6; }
 @media (max-width: 700px) { .signals .signal { grid-template-columns: 1fr; } }
+
+/* Checklist clicker: one chip per section, opens the page for the country and focuses the section. */
+.clicker { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 10px; }
+.clicker .chip.done { opacity: .6; }
+.ticklist .section { margin-bottom: 8px; }
+.ticklist .sec-head { display: flex; gap: 8px; align-items: baseline; padding: 6px 0 4px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.ticklist .section.collapsed .sec-head { opacity: .7; }
+.url-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 6px 12px; }

@@ -270,7 +270,7 @@ export const api = {
   tick: (input: { account_id: number; item_id: number; done: boolean; date?: string; note?: string }) => call<{ tick: ChecklistTick | null; check: CheckWithItems; due: boolean }>('POST', '/checklists/tick', input),
   tickAll: (input: { account_id: number; done: boolean; role?: 'am' | 'aa'; date?: string }) => call<{ changed: number; check: CheckWithItems }>('POST', '/checklists/tick-all', input),
   getCheckSettings: () => call<{ settings: CheckSettings }>('GET', '/check-settings'),
-  saveCheckSettings: (s: Pick<CheckSettings, 'check_cron' | 'check_timezone' | 'check_enabled' | 'check_slack_webhook'>) =>
+  saveCheckSettings: (s: Pick<CheckSettings, 'check_cron' | 'check_timezone' | 'check_enabled' | 'check_slack_webhook'> & { section_urls?: Record<string, string> }) =>
     call<{ settings: CheckSettings }>('PUT', '/check-settings', s),
   analytics: (days: number) => call<Analytics>('GET', `/analytics?days=${days}`),
   // People + reminders

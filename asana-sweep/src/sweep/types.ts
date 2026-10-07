@@ -122,6 +122,9 @@ export interface CheckSettings {
   check_timezone: string;
   check_enabled: boolean;
   check_slack_webhook: string;
+  /** Where each checklist section opens, per country: the saved templates and the defaults they override. */
+  section_urls: Record<string, string>;
+  section_url_defaults: Record<string, string>;
   schedule_text: string;
   next_run_at: string | null;
   is_running: boolean;

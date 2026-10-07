@@ -37,6 +37,7 @@ import { feedback as replyFeedback, overview as repliesOverview, repliesData, re
 import { buildContext, renderPrompt } from '../inbox/context.js';
 import { draftWithClaude } from '../inbox/llm.js';
 import { translateToEnglish } from '../inbox/translate.js';
+import { DEFAULT_SECTION_URLS } from '../checklist/links.js';
 import { LANGUAGE_NAMES } from '../inbox/language.js';
 import type { ConversationDetail, ContextEntry, InboxData } from '../sweep/types.js';
 import { normaliseDomain } from '../bd/score.js';
@@ -412,6 +413,8 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
       check_timezone: tz,
       check_enabled: q.getSetting('check_enabled', '1') === '1',
       check_slack_webhook: q.getSetting('check_slack_webhook', ''),
+      section_urls: ((): Record<string, string> => { try { return JSON.parse(q.getSetting('checklist_section_urls', '') || '{}') as Record<string, string>; } catch { return {}; } })(),
+      section_url_defaults: DEFAULT_SECTION_URLS,
       schedule_text: describeSchedule(cron, tz),
       next_run_at: scheduler.nextCheckAt()?.toISOString() ?? null,
       is_running: isCheckRunning(),
@@ -428,6 +431,11 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const cronError = validateCron(cron);
     if (cronError) throw new HttpError(400, cronError);
     if (!isValidTimezone(tz)) throw new HttpError(400, `Unknown timezone "${tz}".`);
+    if (body.section_urls !== undefined) {
+      const urls = Object.fromEntries(Object.entries((body.section_urls ?? {}) as Record<string, unknown>).map(([k, v]): [string, string] => [k.trim(), String(v ?? '').trim()]).filter(([k, v]) => k && v && v !== DEFAULT_SECTION_URLS[k]));
+      for (const v of Object.values(urls)) if (!/^(https?:\/\/|\{sc\}|\{affiliate\}|\{cruva\})/.test(v)) throw new HttpError(400, `Section links must start with https:// or {sc}, {affiliate} or {cruva}: "${v}"`);
+      q.setSetting('checklist_section_urls', JSON.stringify(urls));
+    }
     if (webhook && !/^https:\/\/hooks\.slack\.com\//.test(webhook)) throw new HttpError(400, 'Slack webhook must start with https://hooks.slack.com/');
     q.setSetting('check_cron', cron);
     q.setSetting('check_timezone', tz);

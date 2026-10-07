@@ -11,5 +11,5 @@
     "isolatedModules": true,
     "types": ["vite/client"]
   },
-  "include": ["src/web/client/**/*.ts", "src/web/client/**/*.tsx", "src/sweep/types.ts"]
+  "include": ["src/web/client/**/*.ts", "src/web/client/**/*.tsx", "src/sweep/types.ts", "src/checklist/links.ts"]
 }
