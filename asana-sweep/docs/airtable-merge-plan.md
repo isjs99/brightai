@@ -1,0 +1,63 @@
+# Merging Sofía's Airtable "Brightform Leads Pipeline" into the platform
+
+Written 2026-10-08 from the base schema (`appGXOv46TTb9fpwa`, 15 tables). Goal: keep her base as her working tool and make the platform richer with it. Nothing in the platform's SQLite is replaced. The platform mirrors the base, matches her records to ours, shows her fields where they belong, and later writes what the platform knows back into her base so both sides enrich each other.
+
+## 1. What her base holds, and what the platform already has
+
+| Her table | What it is | Platform counterpart | Relationship |
+|---|---|---|---|
+| **Deals** (90+ fields) | One row per commercial opportunity: Stage, Action state, Priority, Source, Markets, next action, last contact, close reason, onboarding steps, "why they would buy", "what they need", objections, competitive situation, entry offer, expansion path, account potential, recommended next message, plus ~40 formula fields (urgency, momentum, leadership rank, Spanish aliases). | **Growth › Leads** (the lead list mirrored from the Google Sheet, stage, signed date, onboarding AM, sourced by) and **Onboarding › Targets** (the deal board: progress, blockers, traffic light read from calls, email and Slack). | Same object. Her Stage is finer than the sheet's (13 values vs "signed"), her Action state ("who has the ball") does not exist on our side, and our Targets read (calls, email, Slack) does not exist on hers. **Merge by brand name.** |
+| **Accounts** | One row per company: domains, website, category, type, parent/child group, "who they are", "why they'd buy from us", empathy approach, TikTok Shop status, shop data (last known), account brief, research sources, confidence. | **Clients** (Settings › Accounts, the 29 live accounts) and **BD pipeline prospects** (FastMoss shops with Apollo company data). | Her Accounts span prospects and clients. The research fields (brief, who they are, why they'd buy) are the richest thing in the base and have no equivalent on our side. **Match by email domain first, then by brand name.** |
+| **Contacts** | External people: email, title, role in deal (decision maker, champion…), email status (valid, bounced, OOO), LinkedIn, personal notes, approach, public professional summary. | **BD decision makers** (Apollo contacts per prospect: email, LinkedIn, seniority, reveal state) and the **TikTok Shop directory**. | Overlap on email. Her "role in deal", "email status" and the rapport notes are new to us; our Apollo reveal state and verified email are new to her. **Match by email, then LinkedIn URL.** |
+| **Activities** | Emails, calls, meetings, LinkedIn/WhatsApp, notes per deal, with source (Gmail, Slack, tl;dv), external id, direction, summary. | **Prospect outreach history** (channel ticks, drafts, sends, notes, LinkedIn steps) and the platform's own Gmail / Slack / tl;dv reads. | Her Activities are a hand-curated timeline; ours is machine-logged. Both are useful. **Match by external id (Gmail thread, tl;dv meeting) to avoid double counting.** |
+| **Team** | Brightform people, who can approve, website-enquiry markets, sales calendar link. | **People** (Settings › People: AMs, AAs). | Same people. Read-only reference; the platform's People list stays the source. |
+| **Key dates** | Pitches, client decisions, deadlines, launch windows, back-from-leave, renewals per deal, confirmed or estimated. | Nothing. The Calendar page shows alerts, not deal dates. | **New.** Worth showing on Onboarding › Targets and in Today. |
+| **Playbook** | One row per Stage: objective, confirmed rules, recommended activities, next step, email template (Spanish). | Pitch designer templates, the cold-email writer's pitch block. | Reference. Useful as context for the email writer and the copilot; no sync needed beyond reading it. |
+| **Apollo Intake** | Staging of Apollo-sourced contacts awaiting promotion. | **BD decision makers** already come from Apollo with the same fields. | Duplicate pipeline. The platform should feed her intake rather than both searching Apollo separately (see write-back). |
+| **Client Health · Weekly Review** | Per client per month: target, actual, pacing, health signal, markets, services, growth potential, best next opportunity, growth blocker, thesis, GMV 30d/90d, orders, videos, selling creators, growth priority, recommended move. | **Account monitor** (live KPIs, targets, flags, daily AI review), **Reports**, the **gap finder**. | Our numbers are live and hers are typed in monthly. Her growth fields (potential, best next opportunity, blocker, thesis, priority) are judgement we do not hold anywhere. **Platform fills her numbers; her judgement shows on the account overview.** |
+| **Website Enquiries** | Inbound leads with routing to an AM, status, outreach draft, form answers (company size, revenue band, TikTok Shop status, target markets). | **Enquiries** (the site form posts to the platform; Slack + Gmail forward; drafts). | Same object, two stores. The platform receives the form first. **Platform creates her rows; her status and assignment flow back.** |
+| **Target Intelligence** | Prospecting layer: targets with market, category, source (FastMoss, Apollo, events), signal, why now, best route in, safe-to-contact state, BD/Ops status as last seen on our dashboard. | **BD pipeline** (FastMoss fast risers, scoring, outreach state). | She already copies our BD/Ops status by hand ("BD/Ops last checked"). **The platform should answer that automatically** and her signal/route-in fields should show on the prospect. |
+| **Partner Network** | TikTok Shop and ecosystem people with relationship strength, lead-source flag. | **TikTok Shop directory** (172 people with closeness scores) under Outreach emails. | Same people, different scores. Merge by name and organisation; show both scores. |
+| **Market Intelligence** | Competitor agencies and TikTok staff, reference only. | **Growth › Competitors** (the agency registry with weekly sweeps). | Reference. Match by company name; her notes show on the competitor block. |
+| Sofía · Weekly Review, Dashboard Cards, BD · Aprendizajes | Her reporting snapshots and learnings. | Nothing. | Leave alone; optionally surface the latest week in Today for her. |
+
+## 2. Design
+
+**One mirror, one match table, one page, write-back by rule.**
+
+1. **Mirror.** A new `airtable` module pulls every table above through the Airtable REST API (`AIRTABLE_TOKEN`, base id in settings) every 15 minutes and on demand, keeping each record as JSON in a `airtable_records` table (base, table, record id, fields, modified time, link ids resolved to names). Only changed records are refetched (filter by `LAST_MODIFIED_TIME()`), so the pull is cheap and the 5 requests/second limit is never an issue. Formula fields are stored but never written.
+2. **Match.** An `airtable_links` table ties her records to ours: Deal ↔ lead, Account ↔ client or prospect, Contact ↔ decision maker, Website Enquiry ↔ enquiry, Target ↔ prospect, Partner ↔ directory person, Market Intelligence ↔ competitor. Matching is automatic by the keys above (domain, email, LinkedIn, external id, brand name after normalising "Kijimea DE" → "Kijimea"), with a confidence; anything under the bar lands in a review list where a person links or dismisses it once. Links survive syncs.
+3. **Show.** Her fields appear where the matching object already lives, in a collapsible "From Sofía's CRM" panel, read-only, with "Open in Airtable" (record URL):
+   - **Growth › Leads** and **Onboarding › Targets**: Stage, Action state, Priority, who has the ball, next action and date, last contact summary, why they would buy, what they need, objections, competitive situation, entry offer, account potential, growth thesis, close reason, and the Key dates.
+   - **Growth › BD pipeline** prospect detail: Target Intelligence (signal, why now, best route in, safe to contact) and the Account research (brief, who they are, why they'd buy, empathy approach).
+   - **Decision makers**: role in deal, email status, personal notes, approach.
+   - **Accounts › Overview**: Client Health judgement (growth potential, best next opportunity, blocker, thesis, growth priority, recommended move, next review).
+   - **Enquiries**: her status, assigned AM, outreach draft.
+   - **Competitors** and the **TikTok Shop directory**: her notes and relationship strength.
+   - **Today**: her "Hoy · nos toca" deals and Key dates in the next 7 days, for whoever picks Sofía's name.
+   A separate **Growth › CRM (Airtable)** page lists everything mirrored with the match state, the review queue, and sync health.
+4. **Enrich the platform's reasoning.** The copilot (Ask), the Targets read, the gap finder and the cold-email writer get her fields in their context: "what they need", "objections", "competitive situation" and "recommended next message" are exactly what a follow-up email or a deal summary should lean on. The MCP endpoint gets a `crm_deal` tool so Claude in claude.ai can answer "where are we with Suntory" from both sides at once.
+5. **Write back, by rule, only to non-formula fields she owns.** Default off per field group, switched on in settings once she agrees:
+   - Website Enquiries: the platform creates the row when the form arrives (company, contact, email, market, message, received at, the form answers) and links it. Her status and AM stay hers.
+   - Client Health: GMV 30d/90d, trend, orders 30d, videos 30d, selling creators 30d, verified-on date, from the account monitor every Monday. Her judgement fields are never touched.
+   - Target Intelligence: "BD/Ops status" and "BD/Ops last checked" from the prospect's live status, so she stops copying it by hand; "Already in CRM / Not in CRM" from the match.
+   - Apollo Intake: decision makers the platform reveals (name, title, verified email, LinkedIn, Apollo ids, seniority, why relevant) land in her intake as "New from Claude" so she promotes them her way instead of searching again.
+   - Activities: tl;dv calls and sent outreach the platform logs, with the external id, so her timeline is complete without her typing; "Logged by: Automation".
+   - Deals: only "Last contact date" and "Last contact summary" when the platform saw a newer interaction (email, call) than her record, flagged "Needs review" so she confirms.
+   Every write is logged (table, record, field, old, new, when, by what rule) and reversible from the CRM page.
+
+**What never happens:** the platform never moves her Stage or Action state, never edits her research or judgement fields, never deletes a record, never sends anything from her base. Her base keeps working if the platform is down, and the platform keeps working if the token is revoked (the panels just go stale, with the time of the last sync shown).
+
+## 3. Build order
+
+1. **Mirror and page** (first session): token in secrets, migration (`airtable_records`, `airtable_links`, `airtable_writes`), the puller with incremental sync, the Growth › CRM page with sync health and a raw browser per table, MCP tool `crm_search`. Proves the token, the limits and the volume. Nothing changes on either side.
+2. **Matching and panels** (second session): the matchers and review queue; the "From Sofía's CRM" panels on Leads, Targets, BD prospects, decision makers, Accounts overview, Enquiries, Competitors, directory; Today lines; copilot context.
+3. **Write-back** (third session, after she has seen the panels): enquiries first (lowest risk, highest annoyance saved), then Client Health numbers, Target Intelligence status, Apollo Intake, Activities, Deals last-contact. Each group behind its own switch.
+4. **Later**: her Playbook templates as a selectable voice in the email writer; Key dates on the Calendar page; a weekly "both sides disagree" report (deals she has open that we show closed, and the reverse).
+
+## 4. Open questions for Sofía
+
+- Which fields she wants the platform to own outright (candidates: everything the platform can measure).
+- Whether "Last contact" write-back should set the date directly or only flag "Needs review".
+- Her preferred record URL form for "Open in Airtable" (the interface page or the grid).
+- A base-level share rather than the workspace share, so a work token cannot open her personal bases.
