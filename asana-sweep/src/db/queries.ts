@@ -92,7 +92,7 @@ import type {
   ReplyAuditAction,
   ReplyAuditItem,
   ReplyAuditSummary,
-  PlaybookCompetitor, PlaybookContentVideo, PlaybookMarketProfile, SampleRequest, SampleResearch,
+  AirtableRecordRow, AirtableTableRow, AirtableTableSchema, PlaybookCompetitor, PlaybookContentVideo, PlaybookMarketProfile, SampleRequest, SampleResearch,
   PlaybookProfile,
 } from '../sweep/types.js';
 import { isSignedStage, leadKey, matchPerson, type SheetLead } from '../leads/sheet.js';
@@ -2347,6 +2347,68 @@ export class Queries {
   addProfile(shopId: string, profile: PlaybookProfile): void {
     this.db.prepare('INSERT INTO cruva_profiles (shop_id, learned_at, profile_json) VALUES (?, ?, ?)').run(shopId, profile.learned_at, JSON.stringify(profile));
     this.db.prepare('DELETE FROM cruva_profiles WHERE shop_id = ? AND id NOT IN (SELECT id FROM cruva_profiles WHERE shop_id = ? ORDER BY id DESC LIMIT 8)').run(shopId, shopId);
+  }
+
+  // ---- Airtable mirror ----
+
+  upsertAirtableTable(t: { base_id: string; table_id: string; name: string; schema: unknown }): void {
+    this.db.prepare('INSERT INTO airtable_tables (base_id, table_id, name, schema_json) VALUES (?, ?, ?, ?) ON CONFLICT (base_id, table_id) DO UPDATE SET name = excluded.name, schema_json = excluded.schema_json').run(t.base_id, t.table_id, t.name, JSON.stringify(t.schema));
+  }
+
+  markAirtableTableSynced(baseId: string, tableId: string, patch: { synced_at?: string; full_synced_at?: string; error?: string | null }): void {
+    const records = (this.db.prepare('SELECT COUNT(*) AS n FROM airtable_records WHERE base_id = ? AND table_id = ?').get(baseId, tableId) as { n: number }).n;
+    this.db.prepare('UPDATE airtable_tables SET synced_at = COALESCE(?, synced_at), full_synced_at = COALESCE(?, full_synced_at), error = ?, records = ? WHERE base_id = ? AND table_id = ?').run(patch.synced_at ?? null, patch.full_synced_at ?? null, patch.error ?? null, records, baseId, tableId);
+  }
+
+  listAirtableTables(baseId: string): AirtableTableRow[] {
+    return (this.db.prepare('SELECT * FROM airtable_tables WHERE base_id = ? ORDER BY name').all(baseId) as Row[]).map((r) => ({ base_id: String(r.base_id), table_id: String(r.table_id), name: String(r.name), schema: parseJson<AirtableTableSchema>(r.schema_json, { id: String(r.table_id), name: String(r.name), primaryFieldId: '', fields: [] }), synced_at: (r.synced_at as string | null) ?? null, full_synced_at: (r.full_synced_at as string | null) ?? null, records: Number(r.records), error: (r.error as string | null) ?? null }));
+  }
+
+  upsertAirtableRecords(baseId: string, tableId: string, rows: { id: string; primary: string | null; fields: Record<string, unknown>; modified_at: string | null }[], syncedAt = new Date().toISOString()): void {
+    const ins = this.db.prepare('INSERT INTO airtable_records (base_id, table_id, record_id, primary_value, fields_json, modified_at, synced_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (base_id, table_id, record_id) DO UPDATE SET primary_value = excluded.primary_value, fields_json = excluded.fields_json, modified_at = excluded.modified_at, synced_at = excluded.synced_at');
+    this.db.transaction(() => { for (const r of rows) ins.run(baseId, tableId, r.id, r.primary, JSON.stringify(r.fields), r.modified_at, syncedAt); })();
+  }
+
+  /** After a full listing: drop the records Airtable no longer returns. */
+  pruneAirtableRecords(baseId: string, tableId: string, keepIds: string[]): number {
+    const have = (this.db.prepare('SELECT record_id FROM airtable_records WHERE base_id = ? AND table_id = ?').all(baseId, tableId) as { record_id: string }[]).map((r) => r.record_id);
+    const keep = new Set(keepIds); const gone = have.filter((id) => !keep.has(id));
+    const del = this.db.prepare('DELETE FROM airtable_records WHERE base_id = ? AND table_id = ? AND record_id = ?');
+    this.db.transaction(() => { for (const id of gone) del.run(baseId, tableId, id); })();
+    return gone.length;
+  }
+
+  airtableLatestModified(baseId: string, tableId: string): string | null {
+    return (this.db.prepare('SELECT MAX(modified_at) AS m FROM airtable_records WHERE base_id = ? AND table_id = ?').get(baseId, tableId) as { m: string | null }).m;
+  }
+
+  listAirtableRecords(baseId: string, tableId: string, opts: { q?: string; limit?: number; offset?: number } = {}): { rows: AirtableRecordRow[]; total: number } {
+    const like = opts.q ? `%${opts.q.toLowerCase()}%` : null;
+    const where = `base_id = ? AND table_id = ?${like ? ' AND (LOWER(primary_value) LIKE ? OR LOWER(fields_json) LIKE ?)' : ''}`;
+    const args: unknown[] = like ? [baseId, tableId, like, like] : [baseId, tableId];
+    const total = (this.db.prepare(`SELECT COUNT(*) AS n FROM airtable_records WHERE ${where}`).get(...args) as { n: number }).n;
+    const rows = (this.db.prepare(`SELECT * FROM airtable_records WHERE ${where} ORDER BY modified_at DESC, primary_value LIMIT ? OFFSET ?`).all(...args, opts.limit ?? 50, opts.offset ?? 0) as Row[]).map((r) => this.airtableRow(r));
+    return { rows, total };
+  }
+
+  getAirtableRecord(baseId: string, tableId: string, recordId: string): AirtableRecordRow | null {
+    const r = this.db.prepare('SELECT * FROM airtable_records WHERE base_id = ? AND table_id = ? AND record_id = ?').get(baseId, tableId, recordId) as Row | undefined;
+    return r ? this.airtableRow(r) : null;
+  }
+
+  /** Primary values for a set of record ids across tables (resolving link fields to names). */
+  airtablePrimaries(baseId: string, ids: string[]): Map<string, { table_id: string; primary: string | null }> {
+    const out = new Map<string, { table_id: string; primary: string | null }>();
+    if (!ids.length) return out;
+    for (let i = 0; i < ids.length; i += 400) {
+      const chunk = ids.slice(i, i + 400);
+      for (const r of this.db.prepare(`SELECT table_id, record_id, primary_value FROM airtable_records WHERE base_id = ? AND record_id IN (${chunk.map(() => '?').join(',')})`).all(baseId, ...chunk) as Row[]) out.set(String(r.record_id), { table_id: String(r.table_id), primary: (r.primary_value as string | null) ?? null });
+    }
+    return out;
+  }
+
+  private airtableRow(r: Row): AirtableRecordRow {
+    return { base_id: String(r.base_id), table_id: String(r.table_id), record_id: String(r.record_id), primary: (r.primary_value as string | null) ?? null, fields: parseJson<Record<string, unknown>>(r.fields_json, {}), modified_at: (r.modified_at as string | null) ?? null, synced_at: String(r.synced_at) };
   }
 
   // ---- MCP OAuth: registered clients, authorization codes, tokens (kind + id → json, with an expiry) ----

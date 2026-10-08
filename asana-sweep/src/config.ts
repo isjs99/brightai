@@ -55,4 +55,6 @@ export const config = {
   mcpToken: process.env.MCP_TOKEN?.trim() ?? '',
   mcpAmToken: process.env.MCP_AM_TOKEN?.trim() ?? '',
   mcpWrites: process.env.MCP_WRITES?.trim() === '1',
+  /** Airtable personal access token (scopes schema.bases:read, data.records:read; data.records:write for write-back) for the CRM mirror. */
+  airtableToken: process.env.AIRTABLE_TOKEN?.trim() ?? '',
 };

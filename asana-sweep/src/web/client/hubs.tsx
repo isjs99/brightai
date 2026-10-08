@@ -74,6 +74,7 @@ export const GROWTH_TABS: HubTab[] = [
   { to: '/outreach', label: 'Outreach' },
   { to: '/leads', label: 'Leads' },
   { to: '/competitors', label: 'Competitors' },
+  { to: '/crm', label: 'CRM' },
 ];
 export const PERFORMANCE_TABS: HubTab[] = [
   { to: '/gmv', label: 'GMV & bonus' },

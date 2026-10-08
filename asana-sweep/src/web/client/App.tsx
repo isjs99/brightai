@@ -27,6 +27,7 @@ import CompetitorsPage from './pages/Competitors';
 import ReportsPage from './pages/Reports';
 import CruvaPage from './pages/Cruva';
 import SamplesPage from './pages/Samples';
+import CrmPage from './pages/Crm';
 import CopilotPage from './pages/Copilot';
 import ChecklistTemplatePage from './pages/ChecklistTemplate';
 import ConnectionsPage from './pages/Connections';
@@ -117,7 +118,7 @@ const NAV: { to: string; label: string; paths: string[] }[] = [
   { to: '/targets', label: 'Onboarding', paths: ['/targets', '/onboarding'] },
   { to: '/pitch', label: 'Pitch designer', paths: ['/pitch'] },
   { to: '/inquiries', label: 'Enquiries', paths: ['/inquiries', '/inbox'] },
-  { to: '/bd', label: 'Growth', paths: ['/bd', '/outreach', '/leads'] },
+  { to: '/bd', label: 'Growth', paths: ['/bd', '/outreach', '/leads', '/competitors', '/crm'] },
   { to: '/gmv', label: 'Performance', paths: ['/gmv', '/analytics'] },
   { to: '/accounts', label: 'Settings', paths: ['/accounts', '/people', '/checklist-template', '/connections'] },
 ];
@@ -209,6 +210,7 @@ export default function App() {
               <Route path="/bd" element={<Hub title="Growth" tabs={GROWTH_TABS}><BdPage /></Hub>} />
               <Route path="/outreach" element={<Hub title="Growth" tabs={GROWTH_TABS}><OutreachPage /></Hub>} />
               <Route path="/leads" element={<Hub title="Growth" tabs={GROWTH_TABS}><LeadsPage /></Hub>} />
+              <Route path="/crm" element={<Hub title="Growth" tabs={GROWTH_TABS}><CrmPage /></Hub>} />
               <Route path="/competitors" element={<Hub title="Growth" tabs={GROWTH_TABS}><CompetitorsPage /></Hub>} />
               <Route path="/gmv" element={<Hub title="Performance" tabs={PERFORMANCE_TABS}><GmvPage /></Hub>} />
               <Route path="/analytics" element={<Hub title="Performance" tabs={PERFORMANCE_TABS}><AnalyticsPage /></Hub>} />

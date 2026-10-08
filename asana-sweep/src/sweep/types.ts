@@ -2387,6 +2387,14 @@ export interface SampleShop { shop_id: string; shop_name: string; market: string
 export interface SampleAccount { account_id: number; name: string; am_name: string | null; light: 'red' | 'amber' | 'green' | 'grey'; summary: string; rules: SampleRules; shops: SampleShop[] }
 export interface SamplesData { configured: boolean; accounts: SampleAccount[]; defaults: SampleRules; scanning: boolean }
 
+// ---- Airtable mirror (Sofía's leads pipeline) ----
+
+export interface AirtableFieldSchema { id: string; name: string; type: string; description?: string; options?: Record<string, unknown> }
+export interface AirtableTableSchema { id: string; name: string; description?: string; primaryFieldId: string; fields: AirtableFieldSchema[] }
+export interface AirtableTableRow { base_id: string; table_id: string; name: string; schema: AirtableTableSchema; synced_at: string | null; full_synced_at: string | null; records: number; error: string | null }
+export interface AirtableRecordRow { base_id: string; table_id: string; record_id: string; primary: string | null; fields: Record<string, unknown>; modified_at: string | null; synced_at: string }
+export interface AirtableData { configured: boolean; base_id: string; base_name: string | null; tables: AirtableTableRow[]; last_sync_at: string | null; last_error: string | null; syncing: boolean; interval_minutes: number }
+
 // ---- Client question copilot ----
 
 export interface CopilotSource {

@@ -1844,6 +1844,19 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 54,
+    name: 'airtable mirror: tables, records, links, writes',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE airtable_tables (base_id TEXT NOT NULL, table_id TEXT NOT NULL, name TEXT NOT NULL, schema_json TEXT NOT NULL, synced_at TEXT, full_synced_at TEXT, records INTEGER NOT NULL DEFAULT 0, error TEXT, PRIMARY KEY (base_id, table_id));
+        CREATE TABLE airtable_records (base_id TEXT NOT NULL, table_id TEXT NOT NULL, record_id TEXT NOT NULL, primary_value TEXT, fields_json TEXT NOT NULL, modified_at TEXT, synced_at TEXT NOT NULL, PRIMARY KEY (base_id, table_id, record_id));
+        CREATE INDEX airtable_records_table ON airtable_records(base_id, table_id, modified_at DESC);
+        CREATE TABLE airtable_links (id INTEGER PRIMARY KEY AUTOINCREMENT, base_id TEXT NOT NULL, table_id TEXT NOT NULL, record_id TEXT NOT NULL, kind TEXT NOT NULL, local_id TEXT NOT NULL, confidence REAL NOT NULL DEFAULT 1, how TEXT, status TEXT NOT NULL DEFAULT 'auto', created_at TEXT NOT NULL, UNIQUE (base_id, table_id, record_id, kind, local_id));
+        CREATE TABLE airtable_writes (id INTEGER PRIMARY KEY AUTOINCREMENT, base_id TEXT NOT NULL, table_id TEXT NOT NULL, record_id TEXT NOT NULL, field TEXT NOT NULL, old_json TEXT, new_json TEXT, rule TEXT NOT NULL, written_at TEXT NOT NULL, reverted_at TEXT);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

@@ -3357,6 +3357,15 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (!slackBot.configured) return res.json({ configured: false, channels: [] });
     try { res.json({ configured: true, channels: await slackBot.listChannels() }); } catch (err) { throw new HttpError(502, (err as Error).message); }
   });
+  // ---- Airtable mirror (Growth > CRM): Sofía's leads pipeline, read every quarter hour ----
+  const airtable = scheduler.airtable;
+  r.get('/airtable', (_req, res) => res.json(airtable.data()));
+  r.get('/airtable/tables/:id/records', (req, res) => { const q2 = optText(req.query.q) ?? undefined; const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50)); const offset = Math.max(0, Number(req.query.offset) || 0); res.json(airtable.records(String(req.params.id), { q: q2, limit, offset })); });
+  r.get('/airtable/search', (req, res) => { const q2 = optText(req.query.q); if (!q2) throw new HttpError(400, 'q is required'); res.json({ results: airtable.search(q2, { table: optText(req.query.table) ?? undefined, limit: Math.min(100, Number(req.query.limit) || 30) }) }); });
+  r.get('/airtable/deal', (req, res) => { const ref = optText(req.query.ref); if (!ref) throw new HttpError(400, 'ref is required'); const d = airtable.deal(ref); if (!d) throw new HttpError(404, 'No deal matches'); res.json(d); });
+  r.post('/airtable/sync', async (req, res) => { try { const r2 = await airtable.sync({ full: bool((req.body ?? {}).full, false) }); res.json({ ...r2, ...airtable.data() }); } catch (err) { bad(err); } });
+  r.put('/airtable/settings', (req, res) => { const b = (req.body ?? {}) as Record<string, unknown>; const base = optText(b.base_id); if (base !== null) { if (!/^app[A-Za-z0-9]{14}$/.test(base)) throw new HttpError(400, 'A base id looks like appXXXXXXXXXXXXXX.'); q.setSetting('airtable_base_id', base); q.setSetting('airtable_base_name', ''); } res.json(airtable.data()); });
+
   // ---- Samples: the traffic light, the rules, the shortlist, bulk and auto accept ----
   const samples = scheduler.samples;
   r.get('/samples', (_req, res) => res.json(samples.data()));

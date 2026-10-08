@@ -58,6 +58,6 @@ Written 2026-10-08 from the base schema (`appGXOv46TTb9fpwa`, 15 tables). Goal: 
 ## 4. Open questions for Sofía
 
 - Which fields she wants the platform to own outright (candidates: everything the platform can measure).
-- Whether "Last contact" write-back should set the date directly or only flag "Needs review".
+- ~~Whether "Last contact" write-back should set the date directly or only flag "Needs review".~~ Decided (Isaac, 2026-10-08): for any field both sides hold, the more recent, better-sourced value wins, whichever side it comes from; the platform writes it with the source and date and flags nothing unless the sources disagree on the same day.
 - Her preferred record URL form for "Open in Airtable" (the interface page or the grid).
 - A base-level share rather than the workspace share, so a work token cannot open her personal bases.
