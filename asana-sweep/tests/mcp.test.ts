@@ -62,8 +62,8 @@ describe('the dashboard as an MCP server', () => {
     expect(names).toEqual(['account_overview', 'ask', 'checklist', 'cruva_profile', 'cruva_rollouts', 'cruva_shops', 'gmv', 'incidents', 'list_accounts', 'open_flags', 'replies_summary', 'samples', 'stock']);
     const accounts = JSON.parse(textOf(await am.callTool({ name: 'list_accounts', arguments: {} }))) as { name: string; cruva_shops: { shop_id: string }[] }[];
     expect(accounts.find((x) => x.name === 'MCP Test Brand')?.cruva_shops).toEqual([{ shop_id: 'shop-mcp', shop_name: 'MCP Test Brand DE', market: 'DE' }]);
-    const flags = JSON.parse(textOf(await am.callTool({ name: 'open_flags', arguments: { account: 'mcp test' } }))) as { rule: string; severity: string }[];
-    expect(flags).toHaveLength(1); expect(flags[0]).toMatchObject({ rule: 'No DMs going out', severity: 'crit' });
+    const flags = JSON.parse(textOf(await am.callTool({ name: 'open_flags', arguments: { account: 'mcp test' } }))) as { open: number; by_rule: Record<string, number>; flags: { rule: string; severity: string }[] };
+    expect(flags.open).toBe(1); expect(flags.by_rule).toEqual({ 'No DMs going out': 1 }); expect(flags.flags[0]).toMatchObject({ rule: 'No DMs going out', severity: 'crit' });
     const missing = await am.callTool({ name: 'open_flags', arguments: { account: 'Nobody' } });
     expect(missing.isError).toBe(true); expect(textOf(missing)).toMatch(/No account matches/);
     const shops = JSON.parse(textOf(await am.callTool({ name: 'cruva_shops', arguments: { account: String(a.id) } }))) as { shop_name: string; outreach: { live: number } }[];

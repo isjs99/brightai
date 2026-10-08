@@ -65,12 +65,16 @@ export function buildMcpServer(q: Queries, scheduler: Scheduler, role: McpRole):
     return text(rest);
   });
 
-  server.registerTool('open_flags', { title: 'Open alerts', description: 'The open monitor flags (alerts), worst first, optionally for one account.', inputSchema: { account: accountRef } }, async ({ account }) => {
+  server.registerTool('open_flags', { title: 'Open alerts', description: 'The open monitor flags (alerts), worst first: counts per severity, rule and account, then the flags themselves (critical and warning by default; pass severity "info" or "all" for the rest, limit up to 200). Name an account to see only its flags.', inputSchema: { account: accountRef, severity: z.enum(['crit', 'warn', 'info', 'all']).optional().describe('Lowest severity to list; default warn (critical and warning)'), limit: z.number().int().min(1).max(200).optional() } }, async ({ account, severity, limit }) => {
     const a = findAccount(q, account);
     if (account && !a) return fail(`No account matches "${account}".`);
     const rules = new Map(monitor.rules().map((r) => [r.code, r.title]));
     const order = { crit: 0, warn: 1, info: 2 };
-    return text(q.listFlags(false).filter((f) => !a || f.account_id === a.id).sort((x, y) => order[x.severity] - order[y.severity]).map((f) => ({ id: f.id, account: f.account_name, severity: f.severity, rule: rules.get(f.code) ?? f.code, message: f.message, detail: f.detail, since: f.first_seen_at, acknowledged: Boolean(f.acknowledged_at) })));
+    const floor = severity === 'all' ? 2 : order[severity ?? 'warn'];
+    const all = q.listFlags(false).filter((f) => !a || f.account_id === a.id).sort((x, y) => order[x.severity] - order[y.severity] || (y.first_seen_at < x.first_seen_at ? -1 : 1));
+    const count = <K extends string>(keyOf: (f: (typeof all)[number]) => K) => { const m: Record<string, number> = {}; for (const f of all) { const k = keyOf(f); m[k] = (m[k] ?? 0) + 1; } return Object.fromEntries(Object.entries(m).sort((x, y) => y[1] - x[1])); };
+    const shown = all.filter((f) => order[f.severity] <= floor).slice(0, limit ?? (a ? 100 : 60));
+    return text({ open: all.length, by_severity: count((f) => f.severity), by_rule: count((f) => rules.get(f.code) ?? f.code), ...(a ? {} : { by_account: count((f) => f.account_name ?? 'no account') }), showing: `${shown.length} of ${all.filter((f) => order[f.severity] <= floor).length} at ${severity ?? 'warn'} or worse`, flags: shown.map((f) => ({ id: f.id, account: f.account_name, severity: f.severity, rule: rules.get(f.code) ?? f.code, message: f.message, detail: f.detail, since: f.first_seen_at.slice(0, 10), acknowledged: Boolean(f.acknowledged_at) })) });
   });
 
   server.registerTool('cruva_shops', { title: 'Cruva shops', description: 'Every linked Cruva shop with its setup state: what was learnt (top videos, voice, competitors), outreach health (DMs out, days silent, live bots, Always-on), switches and errors.', inputSchema: { account: accountRef } }, async ({ account }) => {
