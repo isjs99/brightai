@@ -394,6 +394,16 @@ The portal is an MCP client of Cruva (mcp.cruva.com) with the account's API key 
 
 **Hooks**: the Overview's Affiliate area carries a "Cruva setup n/m" number and a link; Today lists accounts with core bots missing or paused; the monitor rule `cruva_setup_gap` warns on them; Settings › Connections shows the MCP state. Without an API key the matrix still works from a pasted MCP listing per shop (click a cell).
 
+## The dashboard as an MCP server (`/mcp`)
+
+Set `MCP_TOKEN` (a long random string) in the server secrets and the dashboard answers as an MCP server at `https://ops.brightform.agency/mcp`: Streamable HTTP, stateless, bearer token. From Claude Code or Cowork on a laptop:
+
+```bash
+claude mcp add --transport http brightform https://ops.brightform.agency/mcp --header "Authorization: Bearer <MCP_TOKEN>"
+```
+
+Read tools, for every page: `list_accounts`, `account_overview` (lights, KPIs, flags, targets, campaigns, assessment), `open_flags`, `cruva_shops` (what was learnt, outreach health, switches), `cruva_profile` (the content profile, voice, competitors and market read of one shop), `cruva_rollouts` (and a rollout's drafts with the copy), `samples` (rules, cap, shortlist with reasons), `replies_summary`, `checklist`, `gmv`, `stock`, `incidents`, and `ask` (the client copilot: a question about an account answered from calls, Slack, email, Drive and the numbers, with sources). Accounts and shops can be named by id or by part of their name. `MCP_AM_TOKEN` is a second token that only reads. With `MCP_WRITES=1` the admin token also gets the acting tools: `cruva_learn`, `cruva_prepare_rollout`, `cruva_optimise_copy`, `samples_scan` and `samples_accept` (which ships product and insists on `confirm: true`); without it nothing changes through MCP. The claude.ai web and mobile custom connectors need OAuth rather than a bearer token; that is not built yet.
+
 ## Client copilot
 
 Account management > Client copilot answers client questions from evidence instead of memory. Sources are indexed into one store per account: tl;dv call notes and transcripts (last 180 days, matched by client domain), emails with the client domain (Gmail read scope), the client Slack channel (last 30 days), the SOP / context library, reports, incidents, the CS and affiliate inbox, and the account numbers (GMV by week, stock countdown, promotions). Type a question or let it arrive: the client Slack channels are polled every 5 minutes and any message that reads as a question becomes an item, as do emails from client domains; the AM gets a Slack DM with the draft. The draft cites its sources with [n] marks and lists the passages underneath; edit it, then "Reply in Slack thread" or "Create Gmail draft" sends it (marks stripped). Accounts need a client Slack channel and client domain (Accounts page).
@@ -472,6 +482,7 @@ Auth is a single shared password behind a signed cookie, in `src/web/auth.ts` be
 | `APOLLO_API_KEY` | Optional Apollo.io key for decision-maker search and reveal |
 | `FASTMOSS_API_KEY`, `FASTMOSS_TRANSPORT` | Optional FastMoss API key so the server pulls the fast risers itself over MCP; `FASTMOSS_TRANSPORT=cli` routes through the official CLI |
 | `INGEST_TOKEN` | Optional bearer token for `POST /api/bd/import` |
+| `MCP_TOKEN`, `MCP_AM_TOKEN`, `MCP_WRITES` | The dashboard as an MCP server at `/mcp` (see below): the admin token, an optional read-only token, and `1` to allow the acting tools |
 | `BD_PULLS_DIR` | Optional folder watched for daily FastMoss pull files (default `data/bd-pulls`) |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Optional Google OAuth client so BD email drafts land in Gmail's Drafts folder and sent outreach can be pulled as voice samples |
 | `TLDV_API_KEY` | Optional tl;dv key so every recorded call gets a follow-up email drafted |

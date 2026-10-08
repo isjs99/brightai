@@ -51,4 +51,8 @@ export const config = {
   googleClientSecret: process.env.GOOGLE_CLIENT_SECRET?.trim() ?? '',
   /** Bearer token that lets an external job (e.g. a scheduled Claude routine) POST fresh FastMoss pulls to /api/bd/import. */
   ingestToken: process.env.INGEST_TOKEN?.trim() ?? '',
+  /** Bearer tokens for the MCP endpoint (/mcp): MCP_TOKEN reads and, with MCP_WRITES=1, acts; MCP_AM_TOKEN reads only. Unset: the endpoint is off. */
+  mcpToken: process.env.MCP_TOKEN?.trim() ?? '',
+  mcpAmToken: process.env.MCP_AM_TOKEN?.trim() ?? '',
+  mcpWrites: process.env.MCP_WRITES?.trim() === '1',
 };

@@ -8,6 +8,7 @@ import { Queries } from '../db/queries.js';
 import { Scheduler } from '../scheduler/index.js';
 import { SharedPasswordAuth } from './auth.js';
 import { buildRouter } from './routes.js';
+import { handleMcp } from './mcp.js';
 
 export function createApp(q: Queries, scheduler: Scheduler) {
   const app = express();
@@ -33,6 +34,8 @@ export function createApp(q: Queries, scheduler: Scheduler) {
 
   const auth = new SharedPasswordAuth();
   app.use('/api', buildRouter(q, scheduler, auth));
+  // The dashboard as an MCP server for Claude Code, Cowork and the Claude apps (bearer tokens from the environment).
+  app.all('/mcp', (req, res) => void handleMcp(q, scheduler, req, res));
 
   // Built front end (dist/client). In dev, Vite serves the client on :5173 and proxies /api here.
   const here = dirname(fileURLToPath(import.meta.url));
