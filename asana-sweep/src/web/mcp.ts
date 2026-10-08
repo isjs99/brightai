@@ -9,6 +9,7 @@ import { config } from '../config.js';
 import { overview as repliesOverview } from '../inbox/replies.js';
 import { buildGmv } from '../reports/index.js';
 import { log } from '../logger.js';
+import { resourceMetadataUrl, type DashboardOAuthProvider } from './mcp-oauth.js';
 
 /**
  * The dashboard as an MCP server, so Claude Code, Cowork and the Claude apps can ask the platform directly:
@@ -133,10 +134,10 @@ export function buildMcpServer(q: Queries, scheduler: Scheduler, role: McpRole):
 }
 
 /** One request, one server: stateless Streamable HTTP, so nothing is kept between calls and any instance can answer. */
-export async function handleMcp(q: Queries, scheduler: Scheduler, req: Request, res: Response): Promise<void> {
-  if (!config.mcpToken && !config.mcpAmToken) { res.status(404).json({ error: 'MCP is not enabled: set MCP_TOKEN.' }); return; }
-  const role = mcpRoleOf(req.headers.authorization);
-  if (!role) { res.status(401).set('WWW-Authenticate', 'Bearer').json({ error: 'A valid bearer token is required.' }); return; }
+export async function handleMcp(q: Queries, scheduler: Scheduler, req: Request, res: Response, oauth?: DashboardOAuthProvider): Promise<void> {
+  const bearer = (req.headers.authorization ?? '').replace(/^Bearer\s+/i, '').trim();
+  const role = mcpRoleOf(req.headers.authorization) ?? (oauth && bearer ? await oauth.roleOfToken(bearer) : null);
+  if (!role) { res.status(401).set('WWW-Authenticate', `Bearer resource_metadata="${resourceMetadataUrl()}"`).json({ error: 'Sign in: a bearer token or an OAuth token is required.' }); return; }
   if (req.method !== 'POST') { res.status(405).set('Allow', 'POST').json({ error: 'This MCP server is stateless: POST only.' }); return; }
   const server = buildMcpServer(q, scheduler, role);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });

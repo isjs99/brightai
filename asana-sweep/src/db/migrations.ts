@@ -1834,6 +1834,16 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 53,
+    name: 'mcp oauth clients, codes and tokens',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE mcp_oauth (kind TEXT NOT NULL, id TEXT NOT NULL, json TEXT NOT NULL, expires_at INTEGER, PRIMARY KEY (kind, id));
+        CREATE INDEX mcp_oauth_expiry ON mcp_oauth(expires_at);
+      `);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

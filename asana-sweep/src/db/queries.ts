@@ -2349,6 +2349,23 @@ export class Queries {
     this.db.prepare('DELETE FROM cruva_profiles WHERE shop_id = ? AND id NOT IN (SELECT id FROM cruva_profiles WHERE shop_id = ? ORDER BY id DESC LIMIT 8)').run(shopId, shopId);
   }
 
+  // ---- MCP OAuth: registered clients, authorization codes, tokens (kind + id → json, with an expiry) ----
+
+  oauthGet<T>(kind: string, id: string): T | null {
+    const r = this.db.prepare('SELECT json, expires_at FROM mcp_oauth WHERE kind = ? AND id = ?').get(kind, id) as { json: string; expires_at: number | null } | undefined;
+    if (!r) return null;
+    if (r.expires_at !== null && r.expires_at < Date.now()) { this.oauthDelete(kind, id); return null; }
+    return parseJson<T>(r.json, null as unknown as T);
+  }
+
+  oauthPut(kind: string, id: string, value: unknown, expiresAt: number | null): void {
+    this.db.prepare('INSERT INTO mcp_oauth (kind, id, json, expires_at) VALUES (?, ?, ?, ?) ON CONFLICT (kind, id) DO UPDATE SET json = excluded.json, expires_at = excluded.expires_at').run(kind, id, JSON.stringify(value), expiresAt);
+  }
+
+  oauthDelete(kind: string, id: string): void { this.db.prepare('DELETE FROM mcp_oauth WHERE kind = ? AND id = ?').run(kind, id); }
+
+  oauthPrune(now = Date.now()): number { return this.db.prepare('DELETE FROM mcp_oauth WHERE expires_at IS NOT NULL AND expires_at < ?').run(now).changes; }
+
   // ---- Sample requests ----
 
   private sampleRow(r: Row): SampleRequest { return parseJson<SampleRequest>(r.row_json, {} as SampleRequest); }
