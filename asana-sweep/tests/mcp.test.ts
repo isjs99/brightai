@@ -5,6 +5,7 @@ import { openTestDb } from '../src/db/index';
 import { Queries } from '../src/db/queries';
 import { PlaybookEngine } from '../src/playbook/index';
 import { SampleEngine } from '../src/samples/index';
+import { AirtableMirror, AirtableClient } from '../src/airtable/index';
 import { buildMcpServer, mcpRoleOf } from '../src/web/mcp';
 import { config } from '../src/config';
 import type { Scheduler } from '../src/scheduler/index';
@@ -21,7 +22,7 @@ function setup() {
   const samples = new SampleEngine(q, playbook, mcp, null, { minGapMs: 0 });
   q.applyScan([{ account_id: a.id, shop_id: 'shop-mcp', code: 'c_dms_silent', severity: 'crit', message: 'MCP Test Brand DE: no DMs sent for 9 days', detail: '0 DMs in the last 28 days' }], { account_ids: [a.id] });
   const scheduler = {
-    playbook, samples,
+    playbook, samples, airtable: new AirtableMirror(q, new AirtableClient('', async () => ({ status: 404, json: async () => ({}), text: async () => '' }), 0)),
     stock: { data: () => ({ shops: [], alerts: [] }) },
     incidents: { data: () => ({ incidents: [] }) },
     health: { accountOverview: () => null, scopeLive: () => true },
@@ -59,7 +60,8 @@ describe('the dashboard as an MCP server', () => {
     const { q, a, scheduler } = setup();
     const am = await connect(scheduler, q, 'am');
     const names = (await am.listTools()).tools.map((t) => t.name).sort();
-    expect(names).toEqual(['account_overview', 'ask', 'checklist', 'cruva_profile', 'cruva_rollouts', 'cruva_shops', 'gmv', 'incidents', 'list_accounts', 'open_flags', 'replies_summary', 'samples', 'stock']);
+    expect(names).toEqual(['account_overview', 'ask', 'checklist', 'crm_deal', 'crm_search', 'cruva_profile', 'cruva_rollouts', 'cruva_shops', 'gmv', 'incidents', 'list_accounts', 'open_flags', 'replies_summary', 'samples', 'stock']);
+    expect(textOf(await am.callTool({ name: 'crm_search', arguments: { query: 'anything' } }))).toBe('[]'); // nothing mirrored yet
     const accounts = JSON.parse(textOf(await am.callTool({ name: 'list_accounts', arguments: {} }))) as { name: string; cruva_shops: { shop_id: string }[] }[];
     expect(accounts.find((x) => x.name === 'MCP Test Brand')?.cruva_shops).toEqual([{ shop_id: 'shop-mcp', shop_name: 'MCP Test Brand DE', market: 'DE' }]);
     const flags = JSON.parse(textOf(await am.callTool({ name: 'open_flags', arguments: { account: 'mcp test' } }))) as { open: number; by_rule: Record<string, number>; flags: { rule: string; severity: string }[] };
