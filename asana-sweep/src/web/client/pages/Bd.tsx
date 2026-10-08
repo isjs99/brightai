@@ -40,7 +40,7 @@ export default function BdPage() {
   const [ttsPoc, setTtsPoc] = useState<Record<number, { contact: TtsContact | null; fallback: TtsContact | null; reason: string; tier: 'category' | 'tsp_manager' | 'none' }>>({});
   useEffect(() => { if (open !== null && !ttsPoc[open]) api.ttsContactFor(open).then((r) => setTtsPoc((m) => ({ ...m, [open]: r }))).catch(() => undefined); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   const [params] = useSearchParams();
-  const [f, setF] = useState({ market: '', status: '', category: '', owner: '', rise: '', type: '', launch: '', contact: '', q: params.get('q') ?? '', sort: 'rise' as 'rise' | 'gmv' | 'name' | 'updated' | 'launched' | 'found', found: '', hideDone: false, hideClients: true });
+  const [f, setF] = useState({ market: '', status: '', category: '', owner: '', rise: '', type: '', launch: '', contact: '', q: params.get('q') ?? '', sort: 'found' as 'rise' | 'gmv' | 'name' | 'updated' | 'launched' | 'found', found: '', hideDone: false, hideClients: true });
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
@@ -163,7 +163,7 @@ export default function BdPage() {
         : f.sort === 'name' ? a.shop_name.localeCompare(b.shop_name)
           : f.sort === 'updated' ? b.updated_at.localeCompare(a.updated_at)
           : f.sort === 'launched' ? (b.launched_at ?? '').localeCompare(a.launched_at ?? '')
-          : f.sort === 'found' ? b.created_at.localeCompare(a.created_at)
+          : f.sort === 'found' ? b.created_at.slice(0, 10).localeCompare(a.created_at.slice(0, 10)) || (b.rise_score ?? -1) - (a.rise_score ?? -1) || (b.gmv_7d ?? 0) - (a.gmv_7d ?? 0)
             : (b.rise_score ?? -1) - (a.rise_score ?? -1) || (b.gmv_7d ?? 0) - (a.gmv_7d ?? 0));
 
   const statusBadge = (s: BdStatus) => { const st = STATUSES.find((x) => x.v === s)!; return <span className={`badge ${st.cls}`}>{st.label}</span>; };
@@ -535,7 +535,7 @@ export default function BdPage() {
         <button className={`small ${showFilters ? 'primary' : ''}`} onClick={() => setShowFilters(!showFilters)}>Filters{active.length ? ` · ${active.length}` : ''} ▾</button>
         {active.map((a) => <span key={a.k} className="chip">{a.label}<button aria-label={`Clear ${a.label}`} onClick={() => clear(a.k)}>×</button></span>)}
         {active.length > 0 && <a href="#" className="sub" onClick={(e) => { e.preventDefault(); setF({ ...f, market: '', status: '', category: '', owner: '', rise: '', type: '', launch: '', contact: '', found: '' }); }}>clear</a>}
-        <span className="sub">sorted {f.sort === 'rise' ? 'fastest rising' : f.sort}</span>
+        <span className="sub">sorted {f.sort === 'rise' ? 'fastest rising' : f.sort === 'found' ? 'newest found first, then fastest rising' : f.sort}</span>
         {isAdmin && <button className="small" onClick={() => setSelected(selected.size === rows.length && rows.length ? new Set() : new Set(rows.map((p) => p.id)))}>{selected.size === rows.length && rows.length ? 'Untick all' : `Tick all ${rows.length} shown`}</button>}
         {isAdmin && <button className="small" onClick={() => setSelected(new Set(rows.filter((p) => p.contacts.some((c) => c.email) && !data.draft_state[p.id]).map((p) => p.id)))} title="Select the shown prospects that have an email contact and no draft or email yet">Tick ready to email</button>}
         <span className="sub">{rows.length} of {data.prospects.length}</span>
@@ -549,7 +549,7 @@ export default function BdPage() {
             <select value={f.type} onChange={(e) => setF({ ...f, type: e.target.value })}><option value="">Local + cross-border</option><option value="local">Local shops</option><option value="cross_border">Cross-border</option></select>
             <select value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}><option value="">All categories</option>{data.categories.map((c) => <option key={c}>{c}</option>)}</select>
             <select value={f.owner} onChange={(e) => setF({ ...f, owner: e.target.value })}><option value="">Any owner</option>{data.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-            <select value={f.sort} onChange={(e) => setF({ ...f, sort: e.target.value as typeof f.sort })}><option value="rise">Fastest rising</option><option value="gmv">Biggest 7d GMV</option><option value="updated">Recently updated</option><option value="launched">Newest shops</option><option value="found">Newest found</option><option value="name">Name</option></select>
+            <select value={f.sort} onChange={(e) => setF({ ...f, sort: e.target.value as typeof f.sort })}><option value="found">Newest found</option><option value="rise">Fastest rising</option><option value="gmv">Biggest 7d GMV</option><option value="updated">Recently updated</option><option value="launched">Newest shops</option><option value="name">Name</option></select>
             <select value={f.found} onChange={(e) => setF({ ...f, found: e.target.value })} title="When the lead was first found by a pull or added by hand"><option value="">Found any time</option><option value="today">Found in last 24h</option><option value="week">Found in last 7 days</option><option value="month">Found in last 30 days</option></select>
             <label className="field check"><input type="checkbox" checked={f.hideDone} onChange={(e) => setF({ ...f, hideDone: e.target.checked })} /> Hide complete / closed</label>
             <label className="field check"><input type="checkbox" checked={f.hideClients} onChange={(e) => setF({ ...f, hideClients: e.target.checked })} /> Hide existing clients</label>
