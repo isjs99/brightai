@@ -213,6 +213,7 @@ export class Scheduler {
     this.q.markExistingClients();
     this.autoEnrich();
     scanEnterpriseAlerts(this.q);
+    this.airtable.matchSoon();
     this.q.setSetting('bd_last_sweep_at', new Date().toISOString());
     return { pulled, fastmoss: fm, fastmoss_error: fmError, imported };
   }

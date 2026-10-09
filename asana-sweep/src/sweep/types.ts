@@ -573,6 +573,8 @@ export interface LeadsData {
   stages: string[];
   countries: string[];
   totals: { leads: number; signed: number; open: number; pipeline_value: number; signed_value: number; close_rate: number | null };
+  /** Sofía's CRM records tied to each lead (by id). */
+  crm: Record<number, CrmLink[]>;
 }
 
 // ---- BD pipeline (fast-rising TikTok shops, decision makers, outreach) ----
@@ -1235,6 +1237,8 @@ export interface BdData {
   lark_job: LarkDraftStatus;
   /** The TikTok Shop directory, so a prospect can record which AM is on the account. */
   tts_contacts: TtsContact[];
+  /** Sofía's CRM records tied to each prospect (by id): the label, never a source of rows. */
+  crm: Record<number, CrmLink[]>;
 }
 
 /** Progress of a bulk "draft an email to the best contact of every prospect" run. */
@@ -2392,8 +2396,33 @@ export interface SamplesData { configured: boolean; accounts: SampleAccount[]; d
 export interface AirtableFieldSchema { id: string; name: string; type: string; description?: string; options?: Record<string, unknown> }
 export interface AirtableTableSchema { id: string; name: string; description?: string; primaryFieldId: string; fields: AirtableFieldSchema[] }
 export interface AirtableTableRow { base_id: string; table_id: string; name: string; schema: AirtableTableSchema; synced_at: string | null; full_synced_at: string | null; records: number; error: string | null }
+export interface AirtableLinkRow { id: number; base_id: string; table_id: string; record_id: string; kind: 'prospect' | 'lead'; local_id: string; confidence: number; how: string; status: 'auto' | 'review' | 'confirmed' | 'rejected'; created_at: string }
 export interface AirtableRecordRow { base_id: string; table_id: string; record_id: string; primary: string | null; fields: Record<string, unknown>; modified_at: string | null; synced_at: string }
-export interface AirtableData { configured: boolean; base_id: string; base_name: string | null; tables: AirtableTableRow[]; last_sync_at: string | null; last_error: string | null; syncing: boolean; interval_minutes: number }
+export interface AirtableData { configured: boolean; base_id: string; base_name: string | null; tables: AirtableTableRow[]; last_sync_at: string | null; last_error: string | null; syncing: boolean; interval_minutes: number; matches: CrmMatchStats; review: CrmLink[] }
+/** How Sofía's base overlaps our BD prospects and Leads: counts of rows carrying a label, and the loose matches waiting on a person. */
+export interface CrmMatchStats { prospects: number; leads: number; review: number; matched_at: string | null }
+/** One of Sofía's records tied to one of our rows. Status: auto (matched by domain or exact name), review (a loose name match, to confirm), confirmed, rejected. */
+export interface CrmLink {
+  id: number;
+  kind: 'prospect' | 'lead';
+  local_id: number;
+  local_name: string | null;
+  table: string;
+  table_id: string;
+  record_id: string;
+  primary: string | null;
+  url: string;
+  status: 'auto' | 'review' | 'confirmed' | 'rejected';
+  confidence: number;
+  how: string;
+  stage: string | null;
+  detail: string | null;
+  owner: string | null;
+  next_action: string | null;
+  next_action_date: string | null;
+  last_contact: string | null;
+  modified_at: string | null;
+}
 
 // ---- Client question copilot ----
 

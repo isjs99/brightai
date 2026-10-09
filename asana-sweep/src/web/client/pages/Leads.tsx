@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { Lead, LeadsData } from '../../../sweep/types';
 import { api, fmtMoney, fmtPct, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
+import { CrmBadge } from '../crm';
 
 type Result = { rows: number; added: number; updated: number; removed: number };
 
@@ -212,7 +213,7 @@ export default function LeadsPage() {
           <tbody>
             {visible.map((l) => (
               <tr key={l.id}>
-                <td><b>{l.name}</b>{l.poc && <div className="sub">{l.poc}</div>}</td>
+                <td><b>{l.name}</b>{data.crm[l.id]?.length ? <> <CrmBadge links={data.crm[l.id]} /></> : null}{l.poc && <div className="sub">{l.poc}</div>}</td>
                 <td><span className={`badge ${stageClass(l)}`}>{l.stage ?? 'No stage'}</span></td>
                 <td className="hide-sm">{l.country ?? <span className="sub">–</span>}</td>
                 <td className="num">{l.est_value === null ? <span className="sub">–</span> : fmtMoney(l.est_value, cur)}</td>

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { AirtableData, AirtableRecordRow, AirtableTableSchema } from '../../../sweep/types';
+import type { AirtableData, AirtableRecordRow, AirtableTableSchema, CrmLink } from '../../../sweep/types';
 import { api, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
 
@@ -35,6 +35,7 @@ export default function CrmPage() {
   const load = useCallback(() => api.airtable().then((d) => { setData(d); setTable((t) => t || d.tables.find((x) => x.name === 'Deals')?.table_id || d.tables[0]?.table_id || ''); }).catch((e) => setError((e as Error).message)), []);
   useEffect(() => { load(); }, [load]);
   useLiveUpdates((e) => { if (e.kind === 'airtable') load(); });
+  const setLink = async (l: CrmLink, status: 'confirmed' | 'rejected') => { setError(null); try { setData(await api.airtableLink(l.id, status)); } catch (e) { setError((e as Error).message); } };
   useEffect(() => { if (!table) return; const id = setTimeout(() => api.airtableRecords(table, { q, limit: 50, offset: page * 50 }).then(setRows).catch((e) => setError((e as Error).message)), 200); return () => clearTimeout(id); }, [table, q, page, data?.last_sync_at]);
   if (!data) return <p>{error ?? 'Loading…'}</p>;
   const t = data.tables.find((x) => x.table_id === table) ?? null;
@@ -54,6 +55,33 @@ export default function CrmPage() {
       {error && <div className="banner crit">{error}</div>}
       {notice && <div className="banner">{notice}</div>}
       {data.last_error && <div className="banner warn">Last sync: {data.last_error}</div>}
+      <div className="card" style={{ marginBottom: 12, padding: '8px 12px' }}>
+        <div className="actions" style={{ flexWrap: 'wrap' }}>
+          <b>Overlap with our pipeline</b>
+          <span className="badge accent" title="BD prospects (Growth › BD pipeline) that are also an account, deal, target, enquiry or Apollo intake in her base, matched by web domain or exact brand name">{data.matches.prospects} BD prospect{data.matches.prospects === 1 ? '' : 's'} labelled</span>
+          <span className="badge accent" title="Leads (Growth › Leads) that are also in her base">{data.matches.leads} lead{data.matches.leads === 1 ? '' : 's'} labelled</span>
+          {data.matches.review > 0 && <span className="badge warn">{data.matches.review} to check</span>}
+          <span className="sub">{data.matches.matched_at ? `Matched ${fmtRelative(data.matches.matched_at)}` : 'Not matched yet'} · her base never adds rows to the pipeline, it only labels the ones that already exist, so a lead is never counted twice.</span>
+          <span style={{ flex: 1 }} />
+          {isAdmin && <button className="small" disabled={busy !== null} onClick={async () => { setBusy('match'); setError(null); try { const r = await api.airtableMatch(); setNotice(`Matched: ${r.prospects} prospects and ${r.leads} leads carry a label, ${r.review} to check, ${r.changed} link(s) changed.`); setData(r); } catch (e) { setError((e as Error).message); } finally { setBusy(null); } }}>{busy === 'match' ? 'Matching…' : 'Re-match now'}</button>}
+        </div>
+        {data.review.length > 0 && (
+          <table className="compact" style={{ marginTop: 8 }}>
+            <thead><tr><th>Ours</th><th>Hers</th><th>Why</th><th /></tr></thead>
+            <tbody>
+              {data.review.slice(0, 40).map((l) => (
+                <tr key={l.id}>
+                  <td><b>{l.local_name ?? `#${l.local_id}`}</b> <span className="sub">{l.kind === 'prospect' ? 'BD prospect' : 'lead'}</span></td>
+                  <td><a href={l.url} target="_blank" rel="noopener">{l.primary ?? l.record_id} ↗</a> <span className="sub">{l.table}{l.stage ? ` · ${l.stage}` : ''}</span></td>
+                  <td className="sub">{l.how}</td>
+                  <td style={{ whiteSpace: 'nowrap' }}>{isAdmin && <><button className="small" onClick={() => setLink(l, 'confirmed')}>Same company</button> <button className="small" onClick={() => setLink(l, 'rejected')}>Not the same</button></>}</td>
+                </tr>
+              ))}
+              {data.review.length > 40 && <tr><td colSpan={4} className="sub">and {data.review.length - 40} more</td></tr>}
+            </tbody>
+          </table>
+        )}
+      </div>
       <div className="presets" style={{ marginBottom: 10, flexWrap: 'wrap' }}>
         {data.tables.map((x) => <button key={x.table_id} className={x.table_id === table ? 'active' : ''} onClick={() => { setTable(x.table_id); setPage(0); setQ(''); }} title={x.error ?? (x.synced_at ? `Synced ${fmtRelative(x.synced_at)}` : 'Not synced')}>{x.name} <span className="sub">{x.records}</span>{x.error ? ' ⚠' : ''}</button>)}
         {data.tables.length === 0 && <span className="sub">No tables yet. {data.configured ? 'Press Sync now.' : 'Set AIRTABLE_TOKEN on the server first.'}</span>}

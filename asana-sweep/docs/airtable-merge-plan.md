@@ -51,7 +51,7 @@ Written 2026-10-08 from the base schema (`appGXOv46TTb9fpwa`, 15 tables). Goal: 
 ## 3. Build order
 
 1. **Mirror and page** (first session): token in secrets, migration (`airtable_records`, `airtable_links`, `airtable_writes`), the puller with incremental sync, the Growth › CRM page with sync health and a raw browser per table, MCP tool `crm_search`. Proves the token, the limits and the volume. Nothing changes on either side.
-2. **Matching and panels** (second session): the matchers and review queue; the "From Sofía's CRM" panels on Leads, Targets, BD prospects, decision makers, Accounts overview, Enquiries, Competitors, directory; Today lines; copilot context.
+2. **Matching and panels** (second session): the matchers and review queue; the "From Sofía's CRM" panels on Leads, Targets, BD prospects, decision makers, Accounts overview, Enquiries, Competitors, directory; Today lines; copilot context. *Done so far:* BD prospects and Leads matched to Accounts, Deals, Target Intelligence, Website Enquiries and Apollo Intake by domain and brand name, the review queue on Growth › CRM, the label on both lists and the panel on a prospect's details. Her base never creates a prospect or a lead: it only labels what FastMoss or the sheet already brought in.
 3. **Write-back** (third session, after she has seen the panels): enquiries first (lowest risk, highest annoyance saved), then Client Health numbers, Target Intelligence status, Apollo Intake, Activities, Deals last-contact. Each group behind its own switch.
 4. **Later**: her Playbook templates as a selectable voice in the email writer; Key dates on the Calendar page; a weekly "both sides disagree" report (deals she has open that we show closed, and the reverse).
 

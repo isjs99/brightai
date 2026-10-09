@@ -90,3 +90,100 @@ describe('the Airtable mirror', () => {
     expect(mirror.data().last_error).toMatch(/Deals: Airtable 403/);
   });
 });
+
+describe('matching her base to our pipeline', () => {
+  const SCHEMA2 = { tables: [
+    { id: 'tblAcc', name: 'Accounts', primaryFieldId: 'fA', fields: [{ id: 'fA', name: 'Account name', type: 'singleLineText' }, { id: 'fD', name: 'Email domains', type: 'multilineText' }, { id: 'fW', name: 'Website', type: 'url' }, { id: 'fDeals', name: 'Deals', type: 'multipleRecordLinks' }, { id: 'fT', name: 'TikTok Shop status', type: 'singleSelect' }] },
+    { id: 'tblDeals', name: 'Deals', primaryFieldId: 'fN', fields: [{ id: 'fN', name: 'Deal name', type: 'singleLineText' }, { id: 'fS', name: 'Stage', type: 'singleSelect' }, { id: 'fAS', name: 'Action state', type: 'singleSelect' }, { id: 'fAcc', name: 'Account', type: 'multipleRecordLinks' }, { id: 'fO', name: 'Owner', type: 'multipleRecordLinks' }, { id: 'fNA', name: 'Next action', type: 'singleLineText' }] },
+    { id: 'tblTI', name: 'Target Intelligence', primaryFieldId: 'fTg', fields: [{ id: 'fTg', name: 'Target', type: 'singleLineText' }, { id: 'fCS', name: 'CRM status', type: 'singleSelect' }] },
+    { id: 'tblCon', name: 'Contacts', primaryFieldId: 'fC', fields: [{ id: 'fC', name: 'Full name', type: 'singleLineText' }, { id: 'fE', name: 'Email', type: 'email' }, { id: 'fCA', name: 'Account', type: 'multipleRecordLinks' }] },
+    { id: 'tblTeam', name: 'Team', primaryFieldId: 'fTN', fields: [{ id: 'fTN', name: 'Name', type: 'singleLineText' }] },
+  ] };
+  const RECORDS: Record<string, { id: string; createdTime: string; fields: Record<string, unknown> }[]> = {
+    tblAcc: [
+      { id: 'recAcc1', createdTime: '2026-09-01T00:00:00.000Z', fields: { 'Account name': 'Kijimea GmbH', 'Email domains': 'kijimea.de\nsynformulas.com', Website: 'https://www.kijimea.de/', Deals: ['recDeal1'], 'TikTok Shop status': 'Live' } },
+      { id: 'recAcc2', createdTime: '2026-09-01T00:00:00.000Z', fields: { 'Account name': 'Bears with Benefits', Deals: [] } },
+      { id: 'recAcc3', createdTime: '2026-09-01T00:00:00.000Z', fields: { 'Account name': 'Nova Labs', Deals: [] } },
+    ],
+    tblDeals: [
+      { id: 'recDeal1', createdTime: '2026-09-01T00:00:00.000Z', fields: { 'Deal name': 'Kijimea · DE', Stage: 'Proposal sent', 'Action state': 'Waiting on client', Account: ['recAcc1'], Owner: ['recTeam1'], 'Next action': 'Chase on Friday' } },
+      { id: 'recDeal2', createdTime: '2026-09-01T00:00:00.000Z', fields: { 'Deal name': 'Sunday Natural · DE', Stage: 'First contact' } },
+    ],
+    tblTI: [{ id: 'recTI1', createdTime: '2026-09-01T00:00:00.000Z', fields: { Target: 'Beauty Pie', 'CRM status': 'Not contacted' } }],
+    tblCon: [{ id: 'recCon1', createdTime: '2026-09-01T00:00:00.000Z', fields: { 'Full name': 'Ben Bär', Email: 'ben@bearswithbenefits.com', Account: ['recAcc2'] }, }],
+    tblTeam: [{ id: 'recTeam1', createdTime: '2026-09-01T00:00:00.000Z', fields: { Name: 'Sofía' } }],
+  };
+  const fetcher: Fetcher = async (url) => {
+    const ok = (body: unknown) => ({ status: 200, json: async () => body, text: async () => JSON.stringify(body) });
+    const u = new URL(url);
+    if (u.pathname.endsWith('/meta/bases')) return ok({ bases: [] });
+    if (u.pathname.endsWith('/tables')) return ok(SCHEMA2);
+    const table = u.pathname.split('/').pop() ?? '';
+    if (RECORDS[table]) return ok({ records: RECORDS[table] });
+    return { status: 404, json: async () => ({}), text: async () => 'nope' };
+  };
+
+  it('labels prospects and leads that are in her base, by domain or brand name, keeps loose matches for review, and never adds rows', async () => {
+    const q = new Queries(openTestDb());
+    q.setSetting('airtable_base_id', 'appTEST');
+    const before = q.listProspects(false).length;
+    const kiji = q.createProspect({ shop_name: 'KIJIMEA Official Shop', market: 'DE', website: 'https://kijimea.de' }); // domain + name
+    const bears = q.createProspect({ shop_name: 'BWB TikTok', market: 'DE' }); // only the decision maker's email ties it
+    q.addContact(bears.id, { name: 'Ben Bär', email: 'ben@bearswithbenefits.com' });
+    const sunday = q.createProspect({ shop_name: 'Sunday Natural Products GmbH', market: 'DE' }); // "sunday natural" inside "sunday natural products" → review
+    const nova = q.createProspect({ shop_name: 'Supernova', market: 'FR' }); // "nova" is too short to match "nova labs"
+    const other = q.createProspect({ shop_name: 'Unrelated Brand', market: 'ES' });
+    q.upsertLeads([{ name: 'Beauty Pie', poc: null, stage: 'Intro call', country: 'UK', last_contact: null, notes: null, est_value: null, priority: null, sourced_by: null, onboarding: null, added_on: null, row_no: 1 }, { name: 'Nobody Ltd', poc: null, stage: null, country: null, last_contact: null, notes: null, est_value: null, priority: null, sourced_by: null, onboarding: null, added_on: null, row_no: 2 }]);
+    const mirror = new AirtableMirror(q, new AirtableClient('pat', fetcher, 0));
+    await mirror.sync({ full: true });
+    // The sync matched on its own.
+    const d = mirror.data();
+    const mine = new Set([kiji.id, bears.id, sunday.id, nova.id, other.id]);
+    const seeded = Object.entries(mirror.linksFor('prospect')).filter(([id, ls]) => !mine.has(Number(id)) && ls.some((l) => l.status === 'auto')).length; // the seeded Kijimea shop matches too
+    expect(d.matches).toMatchObject({ prospects: 2 + seeded, leads: 1, review: 1 });
+    expect(q.listProspects(false).length).toBe(before + 5); // nothing created from Airtable
+    expect(q.listLeads(false).length).toBe(2);
+    const crm = mirror.linksFor('prospect');
+    const k = crm[kiji.id];
+    expect(k.map((l) => [l.table, l.primary, l.status])).toEqual([['Deals', 'Kijimea · DE', 'auto'], ['Accounts', 'Kijimea GmbH', 'auto']]);
+    expect(k[0]).toMatchObject({ stage: 'Proposal sent', detail: 'Waiting on client', owner: 'Sofía', next_action: 'Chase on Friday', url: 'https://airtable.com/appTEST/tblDeals/recDeal1' });
+    expect(k[1].how).toMatch(/same domain kijimea\.de/);
+    expect(crm[bears.id].map((l) => [l.table, l.how])).toEqual([['Accounts', 'same domain bearswithbenefits.com']]);
+    expect(crm[sunday.id]).toHaveLength(1);
+    expect(crm[sunday.id][0]).toMatchObject({ table: 'Deals', status: 'review', confidence: 0.6, local_name: 'Sunday Natural Products GmbH' });
+    expect(crm[nova.id]).toBeUndefined();
+    expect(crm[other.id]).toBeUndefined();
+    const leads = mirror.linksFor('lead');
+    expect(Object.values(leads).flat().map((l) => [l.local_name, l.table, l.stage])).toEqual([['Beauty Pie', 'Target Intelligence', 'Not contacted']]);
+    expect(d.review.map((l) => l.local_name)).toEqual(['Sunday Natural Products GmbH']);
+    // A person settles the loose one; the next pass leaves their answer alone. A rejected label stays gone.
+    const sundayLink = crm[sunday.id][0];
+    expect(mirror.setLinkStatus(sundayLink.id, 'confirmed')?.status).toBe('confirmed');
+    expect(mirror.match()).toMatchObject({ prospects: 3 + seeded, review: 0, changed: 0 });
+    expect(mirror.linksFor('prospect')[sunday.id][0].status).toBe('confirmed');
+    mirror.setLinkStatus(k[1].id, 'rejected');
+    mirror.match();
+    expect(mirror.linksFor('prospect')[kiji.id].map((l) => l.table)).toEqual(['Deals']);
+    expect(mirror.data().matches.prospects).toBe(3 + seeded);
+    // A prospect added later is picked up by the next pass; one removed loses its links.
+    const late = q.createProspect({ shop_name: 'Beauty Pie', market: 'UK' });
+    expect(mirror.match().changed).toBe(1);
+    expect(mirror.linksFor('prospect')[late.id][0]).toMatchObject({ table: 'Target Intelligence', how: 'same name "beauty pie"' });
+  });
+
+  it('normalises brand names and domains the way the pipeline writes them', async () => {
+    const { nameKey, domainKey } = await import('../src/airtable/match');
+    expect(nameKey('Kijimea · DE')).toBe('kijimea');
+    expect(nameKey('KIJIMEA GmbH')).toBe('kijimea');
+    expect(nameKey('kijimea_official')).toBe('kijimea');
+    expect(nameKey('Bears with Benefits Official Store')).toBe('bears with benefits');
+    expect(nameKey('Beauty Pie')).toBe('beauty pie');
+    expect(nameKey('Berlin Brands Group')).toBe('berlin brands');
+    expect(nameKey('Sunday Natural (Germany)')).toBe('sunday natural');
+    expect(nameKey('DE')).toBe('');
+    expect(domainKey('https://www.Kijimea.de/shop?x=1')).toBe('kijimea.de');
+    expect(domainKey('Ben@BearsWithBenefits.com')).toBe('bearswithbenefits.com');
+    expect(domainKey('someone@gmail.com')).toBe('');
+    expect(domainKey('not a domain')).toBe('');
+  });
+});

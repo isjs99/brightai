@@ -92,7 +92,7 @@ import type {
   ReplyAuditAction,
   ReplyAuditItem,
   ReplyAuditSummary,
-  AirtableRecordRow, AirtableTableRow, AirtableTableSchema, PlaybookCompetitor, PlaybookContentVideo, PlaybookMarketProfile, SampleRequest, SampleResearch,
+  AirtableLinkRow, AirtableRecordRow, AirtableTableRow, AirtableTableSchema, PlaybookCompetitor, PlaybookContentVideo, PlaybookMarketProfile, SampleRequest, SampleResearch,
   PlaybookProfile,
 } from '../sweep/types.js';
 import { isSignedStage, leadKey, matchPerson, type SheetLead } from '../leads/sheet.js';
@@ -2411,6 +2411,53 @@ export class Queries {
 
   private airtableRow(r: Row): AirtableRecordRow {
     return { base_id: String(r.base_id), table_id: String(r.table_id), record_id: String(r.record_id), primary: (r.primary_value as string | null) ?? null, fields: parseJson<Record<string, unknown>>(r.fields_json, {}), modified_at: (r.modified_at as string | null) ?? null, synced_at: String(r.synced_at) };
+  }
+
+  // ---- Airtable links: her records tied to our prospects and leads ----
+
+  listAirtableLinks(baseId: string, kind?: 'prospect' | 'lead'): AirtableLinkRow[] {
+    return (this.db.prepare(`SELECT * FROM airtable_links WHERE base_id = ?${kind ? ' AND kind = ?' : ''} ORDER BY kind, local_id, confidence DESC, id`).all(...(kind ? [baseId, kind] : [baseId])) as Row[]).map((r) => this.airtableLinkRow(r));
+  }
+
+  getAirtableLink(id: number): AirtableLinkRow | null {
+    const r = this.db.prepare('SELECT * FROM airtable_links WHERE id = ?').get(id) as Row | undefined;
+    return r ? this.airtableLinkRow(r) : null;
+  }
+
+  /**
+   * Replace the machine-made links of one kind with a fresh set. A link a person confirmed or rejected is
+   * kept as they left it; an auto/review link that the matcher no longer produces is dropped. Returns how
+   * many rows changed, so callers can tell a no-op pass from a real one.
+   */
+  replaceAirtableLinks(baseId: string, kind: 'prospect' | 'lead', links: { table_id: string; record_id: string; local_id: string; confidence: number; how: string }[], now = new Date().toISOString()): number {
+    const existing = this.listAirtableLinks(baseId, kind);
+    const keyOf = (l: { table_id: string; record_id: string; local_id: string }) => `${l.table_id}|${l.record_id}|${l.local_id}`;
+    const have = new Map(existing.map((l) => [keyOf(l), l]));
+    const want = new Map(links.map((l) => [keyOf(l), l]));
+    let changed = 0;
+    const ins = this.db.prepare('INSERT INTO airtable_links (base_id, table_id, record_id, kind, local_id, confidence, how, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+    const upd = this.db.prepare('UPDATE airtable_links SET confidence = ?, how = ?, status = ? WHERE id = ?');
+    const del = this.db.prepare('DELETE FROM airtable_links WHERE id = ?');
+    this.db.transaction(() => {
+      for (const [k, l] of want) {
+        const status = l.confidence >= 0.9 ? 'auto' : 'review';
+        const cur = have.get(k);
+        if (!cur) { ins.run(baseId, l.table_id, l.record_id, kind, l.local_id, l.confidence, l.how, status, now); changed += 1; continue; }
+        if (cur.status === 'confirmed' || cur.status === 'rejected') continue;
+        if (cur.confidence !== l.confidence || cur.how !== l.how || cur.status !== status) { upd.run(l.confidence, l.how, status, cur.id); changed += 1; }
+      }
+      for (const [k, cur] of have) if (!want.has(k) && cur.status !== 'confirmed' && cur.status !== 'rejected') { del.run(cur.id); changed += 1; }
+    })();
+    return changed;
+  }
+
+  setAirtableLinkStatus(id: number, status: 'auto' | 'review' | 'confirmed' | 'rejected'): AirtableLinkRow | null {
+    this.db.prepare('UPDATE airtable_links SET status = ? WHERE id = ?').run(status, id);
+    return this.getAirtableLink(id);
+  }
+
+  private airtableLinkRow(r: Row): AirtableLinkRow {
+    return { id: Number(r.id), base_id: String(r.base_id), table_id: String(r.table_id), record_id: String(r.record_id), kind: r.kind as 'prospect' | 'lead', local_id: String(r.local_id), confidence: Number(r.confidence), how: (r.how as string | null) ?? '', status: r.status as AirtableLinkRow['status'], created_at: String(r.created_at) };
   }
 
   // ---- MCP OAuth: registered clients, authorization codes, tokens (kind + id → json, with an expiry) ----

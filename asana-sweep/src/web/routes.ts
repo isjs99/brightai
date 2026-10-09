@@ -1220,6 +1220,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
         signed_value: signed.reduce((s, l) => s + (l.est_value ?? 0), 0),
         close_rate: staged.length ? signed.length / staged.length : null,
       },
+      crm: scheduler.airtable.linksFor('lead'),
     };
   };
 
@@ -1244,6 +1245,7 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
 
   r.post('/leads/sync', async (_req, res) => {
     const result = await syncLeads(q);
+    if (result.added || result.updated) scheduler.airtable.matchSoon();
     if (!result.ok) return res.status(502).json({ error: result.error, ...leadsData() });
     res.json({ result, ...leadsData() });
   });
@@ -1356,16 +1358,18 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
         return out;
       })(),
       auto_enrich: q.getSetting('apollo_auto_enrich', '1') === '1',
+      crm: scheduler.airtable.linksFor('prospect'),
     };
   };
 
   r.get('/bd', (_req, res) => res.json(bdData()));
 
-  r.post('/bd/pulls/import', (_req, res) => { const r = importPullFiles(q); if (r.added) { scheduler.autoEnrich(); scanEnterpriseAlerts(q); } res.json(r); });
+  r.post('/bd/pulls/import', (_req, res) => { const r = importPullFiles(q); if (r.added) { scheduler.autoEnrich(); scanEnterpriseAlerts(q); scheduler.airtable.matchSoon(); } res.json(r); });
 
   r.post('/bd/prospects', (req, res) => {
     const input = parseProspectInput({ source: 'manual', ...((req.body ?? {}) as Record<string, unknown>) });
     const prospect = q.createProspect(input);
+    scheduler.airtable.matchSoon();
     liveEvents.emitUpdate({ kind: 'bd' });
     res.status(201).json({ prospect, ...bdData() });
   });
@@ -3360,6 +3364,8 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   // ---- Airtable mirror (Growth > CRM): Sofía's leads pipeline, read every quarter hour ----
   const airtable = scheduler.airtable;
   r.get('/airtable', (_req, res) => res.json(airtable.data()));
+  r.post('/airtable/match', (_req, res) => { try { res.json({ ...airtable.match(), ...airtable.data() }); } catch (err) { bad(err); } });
+  r.patch('/airtable/links/:id', (req, res) => { const status = optText((req.body ?? {}).status); if (status !== 'confirmed' && status !== 'rejected' && status !== 'review') throw new HttpError(400, 'status must be confirmed, rejected or review'); const link = airtable.setLinkStatus(idParam(req), status); if (!link && status !== 'rejected') throw new HttpError(404, 'Link not found'); res.json({ link, ...airtable.data() }); });
   r.get('/airtable/tables/:id/records', (req, res) => { const q2 = optText(req.query.q) ?? undefined; const limit = Math.max(1, Math.min(200, Number(req.query.limit) || 50)); const offset = Math.max(0, Number(req.query.offset) || 0); res.json(airtable.records(String(req.params.id), { q: q2, limit, offset })); });
   r.get('/airtable/search', (req, res) => { const q2 = optText(req.query.q); if (!q2) throw new HttpError(400, 'q is required'); res.json({ results: airtable.search(q2, { table: optText(req.query.table) ?? undefined, limit: Math.min(100, Number(req.query.limit) || 30) }) }); });
   r.get('/airtable/deal', (req, res) => { const ref = optText(req.query.ref); if (!ref) throw new HttpError(400, 'ref is required'); const d = airtable.deal(ref); if (!d) throw new HttpError(404, 'No deal matches'); res.json(d); });

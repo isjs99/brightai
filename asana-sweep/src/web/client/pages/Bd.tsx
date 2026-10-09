@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState, type ReactElement } from 'react';
 import type { BdContact, BdData, BdOutreachEvent, BdProspect, BdProspectPatch, BdStatus, TtsContact } from '../../../sweep/types';
 import { api, fmtMoney, fmtPct, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
+import { CrmBadge, CrmPanel } from '../crm';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
 const LANGS: Record<string, string> = { en: 'English', de: 'German', fr: 'French', it: 'Italian', es: 'Spanish' };
@@ -40,7 +41,7 @@ export default function BdPage() {
   const [ttsPoc, setTtsPoc] = useState<Record<number, { contact: TtsContact | null; fallback: TtsContact | null; reason: string; tier: 'category' | 'tsp_manager' | 'none' }>>({});
   useEffect(() => { if (open !== null && !ttsPoc[open]) api.ttsContactFor(open).then((r) => setTtsPoc((m) => ({ ...m, [open]: r }))).catch(() => undefined); }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
   const [params] = useSearchParams();
-  const [f, setF] = useState({ market: '', status: '', category: '', owner: '', rise: '', type: '', launch: '', contact: '', q: params.get('q') ?? '', sort: 'found' as 'rise' | 'gmv' | 'name' | 'updated' | 'launched' | 'found', found: '', hideDone: false, hideClients: true });
+  const [f, setF] = useState({ market: '', status: '', category: '', owner: '', rise: '', type: '', launch: '', contact: '', q: params.get('q') ?? '', sort: 'found' as 'rise' | 'gmv' | 'name' | 'updated' | 'launched' | 'found', found: '', crm: '', hideDone: false, hideClients: true });
   const [showAdd, setShowAdd] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [showBulk, setShowBulk] = useState(false);
@@ -156,6 +157,7 @@ export default function BdPage() {
       (!f.found || p.created_at >= new Date(Date.now() - (f.found === 'today' ? 1 : f.found === 'week' ? 7 : 30) * 86400000).toISOString()) &&
       (!f.contact || (f.contact === 'email' ? p.contacts.some((c) => c.email) : f.contact === 'linkedin' ? p.contacts.some((c) => c.linkedin_url) : f.contact === 'any' ? p.contacts.length > 0 : p.contacts.length === 0)) &&
       (!f.hideClients || !p.is_client) &&
+      (!f.crm || (f.crm === 'in' ? (data.crm[p.id] ?? []).some((l) => l.status === 'auto' || l.status === 'confirmed') : f.crm === 'review' ? (data.crm[p.id] ?? []).some((l) => l.status === 'review') && !(data.crm[p.id] ?? []).some((l) => l.status === 'auto' || l.status === 'confirmed') : !(data.crm[p.id] ?? []).some((l) => l.status !== 'rejected'))) &&
       (!f.hideDone || (!p.outreach_complete && p.status !== 'won' && p.status !== 'lost')) &&
       (!q || [p.shop_name, p.brand, p.category, p.notes, p.tiktok_handle, ...p.contacts.map((c) => c.name)].some((v) => (v ?? '').toLowerCase().includes(q))))
     .sort((a, b) =>
@@ -204,6 +206,7 @@ export default function BdPage() {
             <div className="stat"><span className="v">{p.launched_at ?? '–'}</span><span className="k">shop created</span></div>
             <div className="stat"><span className="v">{p.gmv_started_at ?? (p.age_estimate_days !== null ? `~${p.age_estimate_days}d` : '–')}</span><span className="k">{p.gmv_started_at ? 'first sales' : 'selling age (est.)'}</span></div>
           </div>
+          <CrmPanel links={data.crm[p.id]} isAdmin={isAdmin} onChange={load} />
           {isAdmin && (
             <div className="inline-form" style={{ marginBottom: 12 }}>
               <label className="field"><span className="lbl">Shop created</span><input type="date" defaultValue={p.launched_at ?? ''} onChange={(e) => patch(p, { launched_at: e.target.value || null })} /></label>
@@ -526,7 +529,7 @@ export default function BdPage() {
       <h2>Prospects</h2>
       {(() => {
         const active: { k: keyof typeof f; label: string }[] = [
-          f.market ? { k: 'market', label: MARKET_NAMES[f.market] ?? f.market } : null, f.status ? { k: 'status', label: STATUSES.find((s) => s.v === f.status)?.label ?? f.status } : null, f.rise ? { k: 'rise', label: f.rise } : null, f.launch ? { k: 'launch', label: f.launch.replace(/_/g, ' ') } : null, f.contact ? { k: 'contact', label: `${f.contact} contact` } : null, f.type ? { k: 'type', label: f.type.replace('_', ' ') } : null, f.category ? { k: 'category', label: f.category } : null, f.owner ? { k: 'owner', label: data.people.find((p) => String(p.id) === f.owner)?.name ?? 'owner' } : null, f.found ? { k: 'found', label: `found ${f.found}` } : null,
+          f.market ? { k: 'market', label: MARKET_NAMES[f.market] ?? f.market } : null, f.status ? { k: 'status', label: STATUSES.find((s) => s.v === f.status)?.label ?? f.status } : null, f.rise ? { k: 'rise', label: f.rise } : null, f.launch ? { k: 'launch', label: f.launch.replace(/_/g, ' ') } : null, f.contact ? { k: 'contact', label: `${f.contact} contact` } : null, f.type ? { k: 'type', label: f.type.replace('_', ' ') } : null, f.category ? { k: 'category', label: f.category } : null, f.owner ? { k: 'owner', label: data.people.find((p) => String(p.id) === f.owner)?.name ?? 'owner' } : null, f.found ? { k: 'found', label: `found ${f.found}` } : null, f.crm ? { k: 'crm', label: f.crm === 'in' ? "in Sofía's CRM" : f.crm === 'review' ? 'CRM match to check' : "not in Sofía's CRM" } : null,
         ].filter((x): x is { k: keyof typeof f; label: string } => x !== null);
         const clear = (k: keyof typeof f) => setF({ ...f, [k]: '' });
         return (
@@ -534,7 +537,7 @@ export default function BdPage() {
         <input type="text" placeholder="Search" value={f.q} onChange={(e) => setF({ ...f, q: e.target.value })} />
         <button className={`small ${showFilters ? 'primary' : ''}`} onClick={() => setShowFilters(!showFilters)}>Filters{active.length ? ` · ${active.length}` : ''} ▾</button>
         {active.map((a) => <span key={a.k} className="chip">{a.label}<button aria-label={`Clear ${a.label}`} onClick={() => clear(a.k)}>×</button></span>)}
-        {active.length > 0 && <a href="#" className="sub" onClick={(e) => { e.preventDefault(); setF({ ...f, market: '', status: '', category: '', owner: '', rise: '', type: '', launch: '', contact: '', found: '' }); }}>clear</a>}
+        {active.length > 0 && <a href="#" className="sub" onClick={(e) => { e.preventDefault(); setF({ ...f, market: '', status: '', category: '', owner: '', rise: '', type: '', launch: '', contact: '', found: '', crm: '' }); }}>clear</a>}
         <span className="sub">sorted {f.sort === 'rise' ? 'fastest rising' : f.sort === 'found' ? 'newest found first, then fastest rising' : f.sort}</span>
         {isAdmin && <button className="small" onClick={() => setSelected(selected.size === rows.length && rows.length ? new Set() : new Set(rows.map((p) => p.id)))}>{selected.size === rows.length && rows.length ? 'Untick all' : `Tick all ${rows.length} shown`}</button>}
         {isAdmin && <button className="small" onClick={() => setSelected(new Set(rows.filter((p) => p.contacts.some((c) => c.email) && !data.draft_state[p.id]).map((p) => p.id)))} title="Select the shown prospects that have an email contact and no draft or email yet">Tick ready to email</button>}
@@ -551,6 +554,7 @@ export default function BdPage() {
             <select value={f.owner} onChange={(e) => setF({ ...f, owner: e.target.value })}><option value="">Any owner</option>{data.people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
             <select value={f.sort} onChange={(e) => setF({ ...f, sort: e.target.value as typeof f.sort })}><option value="found">Newest found</option><option value="rise">Fastest rising</option><option value="gmv">Biggest 7d GMV</option><option value="updated">Recently updated</option><option value="launched">Newest shops</option><option value="name">Name</option></select>
             <select value={f.found} onChange={(e) => setF({ ...f, found: e.target.value })} title="When the lead was first found by a pull or added by hand"><option value="">Found any time</option><option value="today">Found in last 24h</option><option value="week">Found in last 7 days</option><option value="month">Found in last 30 days</option></select>
+            <select value={f.crm} onChange={(e) => setF({ ...f, crm: e.target.value })} title="Whether the same company is in Sofía's Airtable base (Growth › CRM). Her base never adds rows here; this is a label."><option value="">CRM: any</option><option value="in">In Sofía's CRM</option><option value="review">CRM match to check</option><option value="out">Not in Sofía's CRM</option></select>
             <label className="field check"><input type="checkbox" checked={f.hideDone} onChange={(e) => setF({ ...f, hideDone: e.target.checked })} /> Hide complete / closed</label>
             <label className="field check"><input type="checkbox" checked={f.hideClients} onChange={(e) => setF({ ...f, hideClients: e.target.checked })} /> Hide existing clients</label>
           </div>
@@ -573,6 +577,7 @@ export default function BdPage() {
                     <b>{p.shop_name}</b>{p.brand && p.brand !== p.shop_name && <span className="sub"> · {p.brand}</span>}
                     {p.fastmoss_url && <> <a href={p.fastmoss_url} target="_blank" rel="noreferrer" className="sub" title="Open on FastMoss">FastMoss ↗</a></>}
                     {p.is_client && <> <span className="badge muted">client</span></>}
+                    {data.crm[p.id]?.length ? <> <CrmBadge links={data.crm[p.id]} /></> : null}
                     <div className="sub">{p.contacts.length ? `${p.contacts.length} contact${p.contacts.length === 1 ? '' : 's'}` : 'no contacts'}{p.contacts.some((c) => c.email) ? ' · email' : ''}{p.outreach_count ? ` · ${p.outreach_count} in history` : ''}{data.draft_state[p.id] && <> · <Link to={`/outreach`} className={`badge ${data.draft_state[p.id] === 'sent' ? 'good' : data.draft_state[p.id] === 'gmail' ? 'accent' : 'muted'}`} title="Open in Outreach emails">{data.draft_state[p.id] === 'sent' ? 'Email sent' : data.draft_state[p.id] === 'gmail' ? 'In Gmail drafts' : 'Drafted'}</Link></>}{data.lark_state[p.id] && <> · <Link to="/outreach?tab=lark" className={`badge ${data.lark_state[p.id] === 'sent' ? 'good' : data.lark_state[p.id] === 'scheduled' ? 'accent' : 'muted'}`} title="Open under Outreach emails › Lark messages">{data.lark_state[p.id] === 'sent' ? 'Lark sent' : data.lark_state[p.id] === 'scheduled' ? 'Lark scheduled' : 'Lark drafted'}</Link></>}</div>
                   </td>
                   <td>{p.market}</td>

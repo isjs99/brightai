@@ -1,5 +1,6 @@
 import type { Queries } from '../db/queries.js';
-import type { AirtableData, AirtableRecordRow, AirtableTableSchema } from '../sweep/types.js';
+import type { AirtableData, AirtableLinkRow, AirtableRecordRow, AirtableTableRow, AirtableTableSchema, CrmLink, CrmMatchStats } from '../sweep/types.js';
+import { CrmIndex, TABLE_RANK, leadKeys, prospectKeys, summarise } from './match.js';
 import { config } from '../config.js';
 import { log } from '../logger.js';
 import { liveEvents } from '../live/events.js';
@@ -96,7 +97,79 @@ export class AirtableMirror {
   get configured(): boolean { return this.client.configured; }
 
   data(): AirtableData {
-    return { configured: this.configured, base_id: this.baseId, base_name: this.q.getSetting('airtable_base_name', '') || null, tables: this.q.listAirtableTables(this.baseId), last_sync_at: this.q.getSetting('airtable_last_sync_at', '') || null, last_error: this.lastError ?? (this.q.getSetting('airtable_last_error', '') || null), syncing: this.syncing, interval_minutes: 15 };
+    const links = this.links();
+    const review = [...links.prospect.values(), ...links.lead.values()].flat().filter((l) => l.status === 'review').sort((a, b) => (a.local_name ?? '').localeCompare(b.local_name ?? ''));
+    const matches: CrmMatchStats = { prospects: [...links.prospect.values()].filter((ls) => ls.some((l) => l.status === 'auto' || l.status === 'confirmed')).length, leads: [...links.lead.values()].filter((ls) => ls.some((l) => l.status === 'auto' || l.status === 'confirmed')).length, review: review.length, matched_at: this.q.getSetting('airtable_matched_at', '') || null };
+    return { configured: this.configured, base_id: this.baseId, base_name: this.q.getSetting('airtable_base_name', '') || null, tables: this.q.listAirtableTables(this.baseId), last_sync_at: this.q.getSetting('airtable_last_sync_at', '') || null, last_error: this.lastError ?? (this.q.getSetting('airtable_last_error', '') || null), syncing: this.syncing, interval_minutes: 15, matches, review };
+  }
+
+  private index(): CrmIndex {
+    const tables = this.q.listAirtableTables(this.baseId);
+    return new CrmIndex(tables, (t: AirtableTableRow) => this.q.listAirtableRecords(this.baseId, t.table_id, { limit: 100000 }).rows);
+  }
+
+  /**
+   * Tie her records to our BD prospects and Leads. Domain or exact-name matches become labels straight
+   * away; a loose name match waits for a person on the CRM page. Nothing is ever created on our side from
+   * Airtable, so a shop FastMoss found and a deal Sofía opened stay one row each, with the label between them.
+   */
+  match(): { prospects: number; leads: number; review: number; changed: number } {
+    const index = this.index();
+    if (!index.size) return { prospects: 0, leads: 0, review: 0, changed: 0 };
+    const out = { changed: 0 };
+    const prospectLinks: { table_id: string; record_id: string; local_id: string; confidence: number; how: string }[] = [];
+    for (const p of this.q.listProspects(false)) {
+      for (const m of index.find(prospectKeys(p))) prospectLinks.push({ table_id: m.ref.table_id, record_id: m.ref.record_id, local_id: String(p.id), confidence: m.confidence, how: m.how });
+    }
+    out.changed += this.q.replaceAirtableLinks(this.baseId, 'prospect', prospectLinks);
+    const leadLinks: typeof prospectLinks = [];
+    for (const l of this.q.listLeads(false)) {
+      for (const m of index.find(leadKeys(l))) leadLinks.push({ table_id: m.ref.table_id, record_id: m.ref.record_id, local_id: String(l.id), confidence: m.confidence, how: m.how });
+    }
+    out.changed += this.q.replaceAirtableLinks(this.baseId, 'lead', leadLinks);
+    this.q.setSetting('airtable_matched_at', new Date().toISOString());
+    if (out.changed) { liveEvents.emitUpdate({ kind: 'bd' }); liveEvents.emitUpdate({ kind: 'leads' }); liveEvents.emitUpdate({ kind: 'airtable' }); }
+    const m = this.data().matches; // as stored: a confirmed or rejected answer from a person overrides what the pass found
+    return { prospects: m.prospects, leads: m.leads, review: m.review, changed: out.changed };
+  }
+
+  private matchTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Re-match shortly (after a pull, an import, a new prospect or a lead sync), folding bursts into one pass. */
+  matchSoon(delayMs = 1500): void {
+    if (this.matchTimer) clearTimeout(this.matchTimer);
+    this.matchTimer = setTimeout(() => { this.matchTimer = null; try { this.match(); } catch (err) { log.warn(`Airtable match: ${(err as Error).message}`); } }, delayMs);
+    if (typeof this.matchTimer === 'object' && this.matchTimer && 'unref' in this.matchTimer) this.matchTimer.unref();
+  }
+
+  /** The links as the pages show them: per kind, per local id, her records with a one-line summary each, best first. Rejected links are left out. */
+  links(): { prospect: Map<number, CrmLink[]>; lead: Map<number, CrmLink[]> } {
+    const out = { prospect: new Map<number, CrmLink[]>(), lead: new Map<number, CrmLink[]>() };
+    const rows = this.q.listAirtableLinks(this.baseId);
+    if (!rows.length) return out;
+    const tables = new Map(this.q.listAirtableTables(this.baseId).map((t) => [t.table_id, t]));
+    const team = tables.size ? this.q.airtablePrimaries(this.baseId, [...new Set(rows.map((r) => r.record_id))]) : new Map<string, { table_id: string; primary: string | null }>();
+    const teamName = (id: string) => this.q.airtablePrimaries(this.baseId, [id]).get(id)?.primary ?? null;
+    const names = { prospect: new Map(this.q.listProspects(true).map((p) => [String(p.id), p.brand && p.brand !== p.shop_name ? `${p.shop_name} · ${p.brand}` : p.shop_name])), lead: new Map(this.q.listLeads(true).map((l) => [String(l.id), l.name])) };
+    for (const r of rows) {
+      if (r.status === 'rejected') continue;
+      const t = tables.get(r.table_id); const rec = this.q.getAirtableRecord(this.baseId, r.table_id, r.record_id);
+      if (!t || !rec) continue;
+      const sum = summarise({ table: t.name, table_id: t.table_id, record_id: rec.record_id, primary: rec.primary, fields: rec.fields, modified_at: rec.modified_at }, teamName);
+      const link: CrmLink = { id: r.id, kind: r.kind, local_id: Number(r.local_id), local_name: names[r.kind].get(r.local_id) ?? null, table: t.name, table_id: t.table_id, record_id: r.record_id, primary: rec.primary ?? team.get(r.record_id)?.primary ?? null, url: this.url(r.table_id, r.record_id), status: r.status, confidence: r.confidence, how: r.how, ...sum, modified_at: rec.modified_at };
+      const list = out[r.kind].get(link.local_id) ?? []; list.push(link); out[r.kind].set(link.local_id, list);
+    }
+    for (const m of [out.prospect, out.lead]) for (const list of m.values()) list.sort((a, b) => b.confidence - a.confidence || TABLE_RANK(a.table) - TABLE_RANK(b.table) || (b.modified_at ?? '').localeCompare(a.modified_at ?? ''));
+    return out;
+  }
+
+  /** The links of one kind as a plain object keyed by local id, for the BD and Leads payloads. */
+  linksFor(kind: 'prospect' | 'lead'): Record<number, CrmLink[]> { return Object.fromEntries(this.links()[kind]); }
+
+  setLinkStatus(id: number, status: AirtableLinkRow['status']): CrmLink | null {
+    const row = this.q.setAirtableLinkStatus(id, status);
+    if (!row) return null;
+    liveEvents.emitUpdate({ kind: row.kind === 'prospect' ? 'bd' : 'leads' }); liveEvents.emitUpdate({ kind: 'airtable' });
+    return this.links()[row.kind].get(Number(row.local_id))?.find((l) => l.id === id) ?? null;
   }
 
   /** Pull the schema and every table: changed records since the last pull, or everything (with deletions) on a full sync. */
@@ -127,6 +200,7 @@ export class AirtableMirror {
       this.q.setSetting('airtable_last_sync_at', new Date().toISOString());
       this.lastError = out.errors.length ? out.errors.join(' | ') : null;
       this.q.setSetting('airtable_last_error', this.lastError ?? '');
+      try { this.match(); } catch (err) { log.warn(`Airtable match: ${(err as Error).message}`); }
     } catch (err) {
       this.lastError = (err as Error).message; this.q.setSetting('airtable_last_error', this.lastError); out.errors.push(this.lastError);
     } finally { this.syncing = false; liveEvents.emitUpdate({ kind: 'airtable' }); }
