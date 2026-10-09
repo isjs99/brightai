@@ -6,6 +6,7 @@ import { gatherTargetContext } from '../onboarding/targets.js';
 import { searchEvidence } from '../copilot/index.js';
 import { riseBand } from '../bd/score.js';
 import { log } from '../logger.js';
+import { downloadImages, scanSite, shopifyImageAt } from './scan.js';
 
 /**
  * Pitch research: everything the deck can lean on, gathered in one pass from the client's site and PDPs
@@ -15,7 +16,7 @@ import { log } from '../logger.js';
  * GMV), the market numbers from the BD pipeline, and Amazon as a price and reseller check (best effort).
  */
 
-export interface ResearchDeps { fastmoss?: FastmossClient; cruva?: CruvaMcp; fetchFn?: typeof fetch; cruvaShopId?: string | null }
+export interface ResearchDeps { fastmoss?: FastmossClient; cruva?: CruvaMcp; fetchFn?: typeof fetch; cruvaShopId?: string | null; /** The brand's TikTok Shop seller id (from the BD prospect) for its own product ranking. */ sellerId?: string | null; /** Where to download product images; none means hotlink. */ assetDir?: string | null }
 
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 BrightformPitch/1.0';
 
@@ -112,16 +113,40 @@ export async function researchPitch(q: Queries, brief: PitchBrief, lead: Lead | 
   const fm = deps.fastmoss ?? fastmoss;
   const cr = deps.cruva ?? cruvaMcp;
   const errors: string[] = [];
-  const out: PitchResearch = { fetched_at: new Date().toISOString(), errors, site: null, products: [], context: [], tiktok: { brand: null, shops: [], top_products: [], market: [] }, creators: [], amazon: { reachable: false, items: [] }, resellers: [] };
+  const out: PitchResearch = { fetched_at: new Date().toISOString(), errors, site: null, products: [], context: [], tiktok: { brand: null, shops: [], top_products: [], brand_products: [], market: [] }, creators: [], amazon: { reachable: false, items: [] }, resellers: [] };
   const markets = (brief.markets.length ? brief.markets : ['DE']).slice(0, 3);
   const client = brief.client.trim();
 
-  // The client's site and PDPs.
+  // The client's site: the scan finds the products itself (Shopify JSON in best-selling order, else JSON-LD on the product pages), the brand colours and the logo.
   if (brief.website) {
-    try { const html = await fetchHtml(/^https?:/i.test(brief.website) ? brief.website : `https://${brief.website}`, fetchFn); const p = parsePage(html, brief.website.startsWith('http') ? brief.website : `https://${brief.website}`); out.site = { title: p.title, description: p.description, theme_colour: p.theme_colour, images: p.images.slice(0, 16) }; } catch (err) { errors.push(`Site: ${(err as Error).message}`); }
+    try {
+      const scan = await scanSite(brief.website, fetchFn);
+      errors.push(...scan.errors);
+      let images: string[] = [];
+      try { const html = await fetchHtml(scan.url, fetchFn); images = parsePage(html, scan.url).images.slice(0, 16); } catch { /* the scan already said what it could */ }
+      out.site = { title: scan.title, description: scan.description, theme_colour: scan.theme_colour ?? scan.colours[0] ?? null, images, platform: scan.platform, colours: scan.colours, logo: scan.logo, currency: scan.currency, product_count: scan.products.length };
+      if (!brief.products.some((x) => x.url)) {
+        for (const p of scan.products.slice(0, 8)) out.products.push({ name: p.name, price: p.price, image: p.images[0] ? shopifyImageAt(p.images[0]) : null, url: p.url, rank: p.rank, images: p.images.map((i) => shopifyImageAt(i)), currency: p.currency ?? scan.currency });
+      }
+    } catch (err) { errors.push(`Site: ${(err as Error).message}`); }
   }
   for (const pr of brief.products.filter((x) => x.url).slice(0, 8)) {
     try { const html = await fetchHtml(pr.url!, fetchFn); const p = parsePage(html, pr.url!); out.products.push({ name: pr.name || p.title || pr.url!, price: pr.price ?? p.price, image: pr.image || p.og_image || p.images[0] || null, url: pr.url! }); } catch (err) { errors.push(`PDP ${pr.name || pr.url}: ${(err as Error).message}`); out.products.push({ name: pr.name, price: pr.price, image: pr.image, url: pr.url! }); }
+  }
+
+  // The brand's own TikTok Shop products by 28-day GMV (its seller id from the BD pipeline), else a product search on the brand name.
+  if (fm.configured && brief.options.market) {
+    const region = (markets[0] ?? 'DE').toUpperCase() === 'UK' ? 'GB' : (markets[0] ?? 'DE').toUpperCase();
+    try {
+      const payload = deps.sellerId
+        ? await fm.callTool('shop_product_analysis', { filter: { seller_id: deps.sellerId, time_range_days: 28 }, orderby: [{ field: 'day28_gmv', order: 'desc' }], page: 1, pagesize: 10 })
+        : await fm.callTool('product_search', { keywords: client, filter: { region }, orderby: [{ field: 'day28_gmv', order: 'desc' }], page: 1, pagesize: 10 });
+      for (const p of rows(payload)) {
+        const prod = (p.product as Record<string, unknown> | undefined) ?? p; const sales = (p.sales_summary as Record<string, unknown> | undefined) ?? p;
+        const name = String(prod.title ?? prod.name ?? prod.product_name ?? ''); if (!name) continue;
+        out.tiktok.brand_products.push({ name, region: markets[0]?.toUpperCase() ?? 'DE', gmv_28d: num(sales.day28_gmv ?? sales.day28_sale_amount ?? prod.day28_gmv), units_28d: num(sales.day28_units_sold ?? sales.day28_sold_count ?? prod.day28_sold_count), price: num(prod.price ?? prod.floor_price ?? prod.min_price), image: typeof (prod.cover ?? prod.image ?? prod.img) === 'string' ? String(prod.cover ?? prod.image ?? prod.img) : null });
+      }
+    } catch (err) { errors.push(`FastMoss products: ${(err as Error).message.slice(0, 160)}`); }
   }
 
   // Pitch context on record (same privacy rule as Targets).
@@ -181,6 +206,11 @@ export async function researchPitch(q: Queries, brief: PitchBrief, lead: Lead | 
   if (brief.options.amazon) {
     const host = amazonHost(markets[0]);
     try { const html = await fetchHtml(`https://${host}/s?k=${encodeURIComponent(client)}`, fetchFn); const items = parseAmazon(html, `https://${host}`); out.amazon = { reachable: items.length > 0 || /s-result-item/.test(html), items }; } catch (err) { out.amazon = { reachable: false, items: [] }; errors.push(`Amazon: ${(err as Error).message.slice(0, 120)}`); }
+  }
+  // Product images and the logo into the pitch's folder, so the deck and its PDF never depend on the brand's CDN.
+  if (deps.assetDir) {
+    const urls = [...out.products.map((p) => p.image), ...out.products.flatMap((p) => (p.images ?? []).slice(0, 2)), out.site?.logo ?? null, ...out.tiktok.brand_products.map((p) => p.image), ...brief.pdp_images].filter((u): u is string => Boolean(u));
+    try { out.assets = await downloadImages(deps.assetDir, urls, { fetchFn, max: 16 }); } catch (err) { errors.push(`Images: ${(err as Error).message}`); }
   }
   if (errors.length) log.info(`Pitch research for ${client}: ${errors.length} note(s)`);
   return out;

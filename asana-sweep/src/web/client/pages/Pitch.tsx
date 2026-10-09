@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Pitch, PitchBrief, PitchSlide, PitchesData } from '../../../sweep/types';
-import { api, fmtMoney, fmtRelative } from '../api';
+import { api, fmtMoney, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
+import { Link, useSearchParams } from 'react-router-dom';
 
 /**
  * Pitch designer: pick the lead, fill the brief (markets, products and PDP images, colours, options,
@@ -17,7 +18,8 @@ const OPTIONS: { key: keyof PitchBrief['options']; label: string }[] = [
 
 export default function PitchPage() {
   const [data, setData] = useState<PitchesData | null>(null);
-  const [selected, setSelected] = useState<number | null>(null);
+  const [params] = useSearchParams();
+  const [selected, setSelected] = useState<number | null>(params.get('id') ? Number(params.get('id')) : null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -25,6 +27,7 @@ export default function PitchPage() {
   const isAdmin = useIsAdmin();
   const load = useCallback(() => api.pitches().then(setData).catch((e) => setError((e as Error).message)), []);
   useEffect(() => { load(); }, [load]);
+  useLiveUpdates((e) => { if (e.kind === 'pitch') load(); });
   const run = async <T extends PitchesData,>(key: string, fn: () => Promise<T>, after?: (r: T) => void) => {
     setBusy(key); setError(null);
     try { const r = await fn(); setData(r); after?.(r); } catch (e) { setError((e as Error).message); } finally { setBusy(null); }
@@ -42,6 +45,7 @@ export default function PitchPage() {
           <span className={`badge ${data.llm_configured ? 'good' : 'muted'}`}>{data.llm_configured ? 'Claude writing' : 'Template copy'}</span>
           <span className={`badge ${data.fastmoss_configured ? 'good' : 'muted'}`}>{data.fastmoss_configured ? 'FastMoss' : 'FastMoss not set'}</span>
           <span className={`badge ${data.cruva_configured ? 'good' : 'muted'}`}>{data.cruva_configured ? 'Cruva' : 'Cruva not set'}</span>
+          <span className={`badge ${data.pdf_configured ? 'good' : 'muted'}`} title={data.pdf_configured ? 'Chromium on the server renders the PDF' : 'Set PITCH_CHROMIUM on the server to render PDFs; the deck still opens and prints from the browser'}>{data.pdf_configured ? 'PDF' : 'PDF: no Chromium'}</span>
         </div>
       </div>
       {error && <div className="banner crit">{error}</div>}
@@ -92,7 +96,10 @@ function PitchEditor({ pitch, data, busy, run, isAdmin, setNotice, onDeleted }: 
   return (
     <>
       <div className="page-head" style={{ marginBottom: 8 }}>
-        <div><b>{pitch.client}</b> <span className="sub">{pitch.name}{pitch.lead_name ? ` · from lead ${pitch.lead_name}` : ''}</span></div>
+        <div><b>{pitch.client}</b> <span className="sub">{pitch.name}{pitch.lead_name ? ` · from lead ${pitch.lead_name}` : ''}{pitch.prospect_name ? <> · from BD prospect <Link to={`/bd?q=${encodeURIComponent(pitch.prospect_name)}`}>{pitch.prospect_name}</Link></> : ''}</span>
+          {pitch.job?.running && <div className="badge accent" style={{ marginTop: 4 }}>{pitch.job.step === 'research' ? 'Researching the brand…' : pitch.job.step === 'build' ? 'Writing the deck…' : 'Rendering the PDF…'}</div>}
+          {pitch.job && !pitch.job.running && pitch.job.error && <div className="badge crit" style={{ marginTop: 4 }} title={pitch.job.error}>Last run: {pitch.job.error.slice(0, 120)}</div>}
+        </div>
         <div className="actions">
           <div className="presets">
             <button className={tab === 'brief' ? 'active' : ''} onClick={() => setTab('brief')}>1 Brief</button>
@@ -100,6 +107,7 @@ function PitchEditor({ pitch, data, busy, run, isAdmin, setNotice, onDeleted }: 
             <button className={tab === 'deck' ? 'active' : ''} onClick={() => setTab('deck')}>3 Deck{pitch.deck ? ' ✓' : ''}</button>
             <button className={tab === 'export' ? 'active' : ''} onClick={() => setTab('export')}>4 Present / export</button>
           </div>
+          {isAdmin && <button className="primary small" disabled={Boolean(pitch.job?.running)} onClick={() => run('all', async () => { if (briefDirty) await api.pitchUpdate(pitch.id, { brief }); return api.pitchRun(pitch.id); }, () => setNotice('Building: research, the deck, then the PDF. The page follows along.'))} title="Research the brand (site, best sellers, images, TikTok Shop, Cruva, what they said), write the deck in the Brightform Design System, render the PDF">{pitch.job?.running ? 'Building…' : 'Build everything ▸'}</button>}
           {isAdmin && <button className="small danger" onClick={() => window.confirm('Delete this pitch?') && run('del', () => api.pitchDelete(pitch.id), onDeleted)}>Delete</button>}
         </div>
       </div>
@@ -191,7 +199,7 @@ function PitchEditor({ pitch, data, busy, run, isAdmin, setNotice, onDeleted }: 
             <button className="primary" disabled={busy === 'build'} onClick={() => run('build', () => api.pitchBuild(pitch.id), () => setNotice('Deck built from the brief and the research.'))}>{busy === 'build' ? 'Building…' : pitch.deck ? 'Rebuild deck' : 'Build deck'}</button>
             {pitch.deck && <button disabled={!deckDirty || busy === 'deck'} onClick={saveDeck}>{busy === 'deck' ? 'Saving…' : deckDirty ? 'Save slides' : 'Saved'}</button>}
             {pitch.deck && <span className="sub">Built {fmtRelative(pitch.deck.built_at)} · {pitch.deck.generator === 'claude' ? 'Claude copy' : 'template copy'}</span>}
-            {palette && <span className="inline-form" style={{ marginLeft: 'auto', alignItems: 'center' }}><span className="sub">Palette</span>{(['primary', 'secondary', 'accent', 'ink', 'paper'] as const).map((k) => <input key={k} type="color" value={palette[k]} title={k} onChange={(e) => setPalette({ ...palette, [k]: e.target.value })} />)}</span>}
+            {pitch.deck?.theme && <span className="inline-form" style={{ marginLeft: 'auto', alignItems: 'center' }} title={`Brand layer derived from the brief's colours${pitch.deck.theme.neutral ? ' (grey primary: Brightform set kept)' : ''}. Accent ink ${pitch.deck.theme.contrast_accent}:1 on accent, data ink ${pitch.deck.theme.contrast_data}:1 on data.`}><span className="sub">Brand layer</span>{([['panel1', pitch.deck.theme.panel1], ['panel2', pitch.deck.theme.panel2], ['accent', pitch.deck.theme.accent], ['accent ink', pitch.deck.theme.accent_ink], ['data', pitch.deck.theme.data], ['data ink', pitch.deck.theme.data_ink]] as [string, string][]).map(([k, v]) => <span key={k} title={`${k} ${v}`} style={{ width: 18, height: 18, borderRadius: 3, background: v, border: '1px solid var(--border)', display: 'inline-block' }} />)}<span className="sub">change the brief's colours and rebuild</span></span>}
           </div>
           {!pitch.deck ? <div className="empty">No deck yet. Build it from the brief and the research.</div> : (
             <div style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: 12 }}>
@@ -212,6 +220,7 @@ function PitchEditor({ pitch, data, busy, run, isAdmin, setNotice, onDeleted }: 
                   <label className="field"><span className="lbl">Bullets (one per line)</span><textarea rows={6} value={s.bullets.join('\n')} onChange={(e) => setSlide({ bullets: e.target.value.split('\n').map((x) => x.trim()).filter(Boolean) })} /></label>
                   <label className="field"><span className="lbl">Stats (label | value | note, one per line)</span><textarea rows={3} value={s.stats.map((st) => `${st.label} | ${st.value}${st.note ? ` | ${st.note}` : ''}`).join('\n')} onChange={(e) => setSlide({ stats: e.target.value.split('\n').map((l) => l.split('|').map((x) => x.trim())).filter((p) => p[0] && p[1]).map((p) => ({ label: p[0], value: p[1], note: p[2] || null })) })} /></label>
                   <label className="field"><span className="lbl">Images (URLs, one per line)</span><textarea rows={2} value={s.images.join('\n')} onChange={(e) => setSlide({ images: e.target.value.split('\n').map((x) => x.trim()).filter(Boolean) })} /></label>
+                  {s.panels && s.panels.map((pn, pi) => <label key={pi} className="field"><span className="lbl">Panel {pi + 1} · <input type="text" value={pn.heading} onChange={(e) => setSlide({ panels: s.panels!.map((x, i) => (i === pi ? { ...x, heading: e.target.value } : x)) })} style={{ width: 240, display: 'inline-block' }} /></span><textarea rows={3} value={pn.items.join('\n')} onChange={(e) => setSlide({ panels: s.panels!.map((x, i) => (i === pi ? { ...x, items: e.target.value.split('\n').map((t) => t.trim()).filter(Boolean) } : x)) })} /></label>)}
                   <label className="field"><span className="lbl">Body</span><textarea rows={2} value={s.body ?? ''} onChange={(e) => setSlide({ body: e.target.value || null })} /></label>
                   <label className="field"><span className="lbl">Speaker notes</span><textarea rows={2} value={s.notes ?? ''} onChange={(e) => setSlide({ notes: e.target.value || null })} /></label>
                 </div>
@@ -229,10 +238,16 @@ function PitchEditor({ pitch, data, busy, run, isAdmin, setNotice, onDeleted }: 
               <h4 style={{ marginTop: 0 }}>Present and export</h4>
               <div className="actions" style={{ flexWrap: 'wrap' }}>
                 <a className="button primary" href={api.pitchDeckUrl(pitch.id)} target="_blank" rel="noreferrer">Open the deck (present, arrow keys)</a>
+                {data.pdf_configured && <a className="button" href={api.pitchPdfUrl(pitch.id)} target="_blank" rel="noreferrer">Open PDF</a>}
+                {data.pdf_configured && <a className="button" href={api.pitchPdfUrl(pitch.id, true)}>Download PDF</a>}
                 <a className="button" href={api.pitchDeckUrl(pitch.id, true)} download>Download HTML</a>
                 <a className="button" href={api.pitchExportUrl(pitch.id)} download>Download JSON (brief, research, slides)</a>
               </div>
-              <p className="sub">PDF: open the deck and print it (each slide is a landscape page). Claude Design: download the HTML and the JSON, open <a href="https://claude.ai/design" target="_blank" rel="noreferrer">claude.ai/design</a>, start from the Brightform design system and drop the HTML in; every slide, colour and image comes across, and the JSON carries the research and the numbers. Edits made there can be pasted back into the slide editor here.</p>
+              <div className="actions" style={{ flexWrap: 'wrap', marginTop: 10 }}>
+                <button disabled={!data.gmail_connected || busy === 'email'} title={data.gmail_connected ? `A Gmail draft to the prospect's best decision maker with the ${data.pdf_configured ? 'PDF attached' : 'deck link'}` : 'Connect Gmail first (Outreach emails › Settings)'} onClick={() => run('email', () => api.pitchEmail(pitch.id).then((r) => { setNotice(`Gmail draft to ${r.to}${r.attached ? ' with the PDF attached' : ' with the deck link'}.`); window.open(r.draft.url, '_blank'); return api.pitches(); }))}>{busy === 'email' ? 'Drafting…' : 'Email the deck (Gmail draft)'}</button>
+                <button disabled={!data.slack_configured || busy === 'slack'} title={data.slack_configured ? 'A line in Slack with the deck link' : 'Slack is not connected'} onClick={() => run('slack', () => api.pitchSlack(pitch.id).then((r) => { setNotice(`Posted to ${r.channel}.`); return api.pitches(); }))}>{busy === 'slack' ? 'Posting…' : 'Post to Slack'}</button>
+              </div>
+              <p className="sub">The deck is rendered in the Brightform Design System: black ground, the brand layer derived from the client's colours, the general deck's fixed slides and the client's own. {data.pdf_configured ? 'The PDF is rendered on the server (one slide a page).' : 'PDF: open the deck and print it (each slide is a landscape page).'} Claude Design: download the HTML and the JSON, open <a href="https://claude.ai/design" target="_blank" rel="noreferrer">claude.ai/design</a>, start from the Brightform design system and drop the HTML in; every slide, colour and image comes across, and the JSON carries the research and the numbers. Edits made there can be pasted back into the slide editor here.</p>
               <p className="sub">Deck status: <span className={`badge ${pitch.status === 'ready' ? 'good' : 'muted'}`}>{pitch.status}</span> {isAdmin && <button className="small" onClick={() => run('st', () => api.pitchUpdate(pitch.id, { status: pitch.status === 'ready' ? 'draft' : 'ready' }))}>{pitch.status === 'ready' ? 'Back to draft' : 'Mark ready'}</button>}</p>
             </div>
           )}

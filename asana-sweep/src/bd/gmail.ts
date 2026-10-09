@@ -32,7 +32,9 @@ export const b64url = (s: string | Buffer): string => Buffer.from(s).toString('b
 export const fromB64url = (s: string): string => Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf8');
 
 /** RFC 2822 message for the Gmail API: plain text, or multipart/alternative with an HTML part when `html` is given. */
-export function buildRawMessage(m: { to: string; toName?: string | null; from?: string | null; fromName?: string | null; replyTo?: string | null; replyToName?: string | null; subject: string; body: string; html?: string | null }): string {
+export interface MailAttachment { filename: string; contentType: string; content: Buffer }
+
+export function buildRawMessage(m: { to: string; toName?: string | null; from?: string | null; fromName?: string | null; replyTo?: string | null; replyToName?: string | null; subject: string; body: string; html?: string | null; attachments?: MailAttachment[] }): string {
   const enc = (s: string) => (/^[\x20-\x7e]*$/.test(s) ? s : `=?UTF-8?B?${Buffer.from(s).toString('base64')}?=`);
   const addr = (email: string, name?: string | null) => (name ? `${enc(name.replace(/[<>"]/g, ''))} <${email}>` : email);
   const b64 = (s: string) => Buffer.from(s.replace(/\r?\n/g, '\r\n')).toString('base64').replace(/(.{76})/g, '$1\r\n');
@@ -58,6 +60,19 @@ export function buildRawMessage(m: { to: string; toName?: string | null; from?: 
         ];
       })()
     : [...head, 'Content-Type: text/plain; charset="UTF-8"', 'Content-Transfer-Encoding: base64', '', b64(m.body)];
+  if (m.attachments?.length) {
+    // Attachments wrap the message in multipart/mixed: the text (or the alternative pair) first, then one part per file.
+    const outer = `bfm_${Date.now().toString(36)}`;
+    const bodyStart = head.length; // the lines after the headers are the inner message
+    const inner = lines.slice(bodyStart);
+    const mixed = [
+      ...head, `Content-Type: multipart/mixed; boundary="${outer}"`, '', `--${outer}`,
+      ...inner,
+      ...m.attachments.flatMap((a) => [`--${outer}`, `Content-Type: ${a.contentType}; name="${a.filename.replace(/"/g, '')}"`, 'Content-Transfer-Encoding: base64', `Content-Disposition: attachment; filename="${a.filename.replace(/"/g, '')}"`, '', a.content.toString('base64').replace(/(.{76})/g, '$1\r\n')]),
+      `--${outer}--`,
+    ];
+    return b64url(mixed.join('\r\n'));
+  }
   return b64url(lines.join('\r\n'));
 }
 
@@ -234,7 +249,7 @@ export class GmailClient {
 
   // ---- Drafts ----
 
-  async createDraft(m: { to: string; toName?: string | null; subject: string; body: string; html?: string | null }): Promise<{ draft_id: string; message_id: string; url: string }> {
+  async createDraft(m: { to: string; toName?: string | null; subject: string; body: string; html?: string | null; attachments?: MailAttachment[] }): Promise<{ draft_id: string; message_id: string; url: string }> {
     const raw = buildRawMessage({ ...m, from: this.email, fromName: this.q.getSetting('outreach_sender_name', '') || null });
     const d = (await this.api('POST', '/drafts', { message: { raw } })) as { id: string; message: { id: string } };
     return { draft_id: d.id, message_id: d.message.id, url: gmailDraftUrl(d.message.id, this.email) };

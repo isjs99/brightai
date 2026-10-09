@@ -100,7 +100,7 @@ export class AirtableMirror {
     const links = this.links();
     const review = [...links.prospect.values(), ...links.lead.values()].flat().filter((l) => l.status === 'review').sort((a, b) => (a.local_name ?? '').localeCompare(b.local_name ?? ''));
     const matches: CrmMatchStats = { prospects: [...links.prospect.values()].filter((ls) => ls.some((l) => l.status === 'auto' || l.status === 'confirmed')).length, leads: [...links.lead.values()].filter((ls) => ls.some((l) => l.status === 'auto' || l.status === 'confirmed')).length, review: review.length, matched_at: this.q.getSetting('airtable_matched_at', '') || null };
-    return { configured: this.configured, base_id: this.baseId, base_name: this.q.getSetting('airtable_base_name', '') || null, tables: this.q.listAirtableTables(this.baseId), last_sync_at: this.q.getSetting('airtable_last_sync_at', '') || null, last_error: this.lastError ?? (this.q.getSetting('airtable_last_error', '') || null), syncing: this.syncing, interval_minutes: 15, matches, review };
+    return { configured: this.configured, base_id: this.baseId, base_name: this.q.getSetting('airtable_base_name', '') || null, tables: this.q.listAirtableTables(this.baseId), last_sync_at: this.q.getSetting('airtable_last_sync_at', '') || null, last_error: this.lastError ?? (this.q.getSetting('airtable_last_error', '') || null), syncing: this.syncing, interval_minutes: 15, matches, review, write_enquiries: this.q.getSetting('airtable_write_enquiries', '1') === '1', writes: this.q.listAirtableWrites(this.baseId, 1000).length };
   }
 
   private index(): CrmIndex {
@@ -151,11 +151,11 @@ export class AirtableMirror {
     const teamName = (id: string) => this.q.airtablePrimaries(this.baseId, [id]).get(id)?.primary ?? null;
     const names = { prospect: new Map(this.q.listProspects(true).map((p) => [String(p.id), p.brand && p.brand !== p.shop_name ? `${p.shop_name} · ${p.brand}` : p.shop_name])), lead: new Map(this.q.listLeads(true).map((l) => [String(l.id), l.name])) };
     for (const r of rows) {
-      if (r.status === 'rejected') continue;
+      if (r.status === 'rejected' || (r.kind !== 'prospect' && r.kind !== 'lead')) continue;
       const t = tables.get(r.table_id); const rec = this.q.getAirtableRecord(this.baseId, r.table_id, r.record_id);
       if (!t || !rec) continue;
       const sum = summarise({ table: t.name, table_id: t.table_id, record_id: rec.record_id, primary: rec.primary, fields: rec.fields, modified_at: rec.modified_at }, teamName);
-      const link: CrmLink = { id: r.id, kind: r.kind, local_id: Number(r.local_id), local_name: names[r.kind].get(r.local_id) ?? null, table: t.name, table_id: t.table_id, record_id: r.record_id, primary: rec.primary ?? team.get(r.record_id)?.primary ?? null, url: this.url(r.table_id, r.record_id), status: r.status, confidence: r.confidence, how: r.how, ...sum, modified_at: rec.modified_at };
+      const link: CrmLink = { id: r.id, kind: r.kind as 'prospect' | 'lead', local_id: Number(r.local_id), local_name: names[r.kind].get(r.local_id) ?? null, table: t.name, table_id: t.table_id, record_id: r.record_id, primary: rec.primary ?? team.get(r.record_id)?.primary ?? null, url: this.url(r.table_id, r.record_id), status: r.status, confidence: r.confidence, how: r.how, ...sum, modified_at: rec.modified_at };
       const list = out[r.kind].get(link.local_id) ?? []; list.push(link); out[r.kind].set(link.local_id, list);
     }
     for (const m of [out.prospect, out.lead]) for (const list of m.values()) list.sort((a, b) => b.confidence - a.confidence || TABLE_RANK(a.table) - TABLE_RANK(b.table) || (b.modified_at ?? '').localeCompare(a.modified_at ?? ''));
@@ -167,7 +167,7 @@ export class AirtableMirror {
 
   setLinkStatus(id: number, status: AirtableLinkRow['status']): CrmLink | null {
     const row = this.q.setAirtableLinkStatus(id, status);
-    if (!row) return null;
+    if (!row || (row.kind !== 'prospect' && row.kind !== 'lead')) return null;
     liveEvents.emitUpdate({ kind: row.kind === 'prospect' ? 'bd' : 'leads' }); liveEvents.emitUpdate({ kind: 'airtable' });
     return this.links()[row.kind].get(Number(row.local_id))?.find((l) => l.id === id) ?? null;
   }
@@ -237,6 +237,32 @@ export class AirtableMirror {
   }
 
   url(tableId: string, recordId?: string): string { return `https://airtable.com/${this.baseId}/${tableId}${recordId ? `/${recordId}` : ''}`; }
+
+  /** A mirrored table by name (or id). */
+  table(nameOrId: string): AirtableTableRow | null { return this.q.listAirtableTables(this.baseId).find((t) => t.name === nameOrId || t.table_id === nameOrId) ?? null; }
+
+  /** Write fields into one of her records, mirror the result at once, and log every field with what it replaced. */
+  async update(tableId: string, recordId: string, fields: Record<string, unknown>, rule: string, before: Record<string, unknown> = {}): Promise<AirtableRecord> {
+    const rec = await this.client.updateRecord(this.baseId, tableId, recordId, fields);
+    this.absorb(tableId, rec);
+    this.q.logAirtableWrites(Object.entries(fields).map(([field, value]) => ({ base_id: this.baseId, table_id: tableId, record_id: recordId, field, old: before[field] ?? null, new: value, rule })));
+    return rec;
+  }
+
+  /** Create one of her records from the platform, mirror it at once, and log it. */
+  async create(tableId: string, fields: Record<string, unknown>, rule: string): Promise<AirtableRecord> {
+    const rec = await this.client.createRecord(this.baseId, tableId, fields);
+    this.absorb(tableId, rec);
+    this.q.logAirtableWrites(Object.entries(fields).map(([field, value]) => ({ base_id: this.baseId, table_id: tableId, record_id: rec.id, field, old: null, new: value, rule })));
+    return rec;
+  }
+
+  private absorb(tableId: string, rec: AirtableRecord): void {
+    const t = this.table(tableId);
+    const now = new Date().toISOString();
+    this.q.upsertAirtableRecords(this.baseId, tableId, [{ id: rec.id, primary: t ? primaryOf(t.schema, rec.fields) : null, fields: rec.fields, modified_at: (t ? lastModified(t.schema, rec.fields) : null) ?? now }], now);
+    liveEvents.emitUpdate({ kind: 'airtable' });
+  }
 
   /** One deal with everything linked to it, for the MCP tool and the panels. */
   deal(ref: string): Record<string, unknown> | null {

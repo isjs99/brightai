@@ -2415,7 +2415,7 @@ export class Queries {
 
   // ---- Airtable links: her records tied to our prospects and leads ----
 
-  listAirtableLinks(baseId: string, kind?: 'prospect' | 'lead'): AirtableLinkRow[] {
+  listAirtableLinks(baseId: string, kind?: string): AirtableLinkRow[] {
     return (this.db.prepare(`SELECT * FROM airtable_links WHERE base_id = ?${kind ? ' AND kind = ?' : ''} ORDER BY kind, local_id, confidence DESC, id`).all(...(kind ? [baseId, kind] : [baseId])) as Row[]).map((r) => this.airtableLinkRow(r));
   }
 
@@ -2451,13 +2451,28 @@ export class Queries {
     return changed;
   }
 
+  /** One link, written directly (the enquiry write-back and other rules that know the record). */
+  linkAirtable(l: { base_id: string; table_id: string; record_id: string; kind: string; local_id: string; confidence: number; how: string; status: 'auto' | 'review' | 'confirmed' | 'rejected' }): void {
+    this.db.prepare('INSERT INTO airtable_links (base_id, table_id, record_id, kind, local_id, confidence, how, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (base_id, table_id, record_id, kind, local_id) DO UPDATE SET confidence = excluded.confidence, how = excluded.how, status = excluded.status').run(l.base_id, l.table_id, l.record_id, l.kind, l.local_id, l.confidence, l.how, l.status, new Date().toISOString());
+  }
+
+  logAirtableWrites(rows: { base_id: string; table_id: string; record_id: string; field: string; old: unknown; new: unknown; rule: string }[]): void {
+    const ins = this.db.prepare('INSERT INTO airtable_writes (base_id, table_id, record_id, field, old_json, new_json, rule, written_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    const now = new Date().toISOString();
+    this.db.transaction(() => { for (const r of rows) ins.run(r.base_id, r.table_id, r.record_id, r.field, JSON.stringify(r.old ?? null), JSON.stringify(r.new ?? null), r.rule, now); })();
+  }
+
+  listAirtableWrites(baseId: string, limit = 100): { id: number; table_id: string; record_id: string; field: string; old: unknown; new: unknown; rule: string; written_at: string }[] {
+    return (this.db.prepare('SELECT * FROM airtable_writes WHERE base_id = ? ORDER BY id DESC LIMIT ?').all(baseId, limit) as Row[]).map((r) => ({ id: Number(r.id), table_id: String(r.table_id), record_id: String(r.record_id), field: String(r.field), old: parseJson<unknown>(r.old_json, null), new: parseJson<unknown>(r.new_json, null), rule: String(r.rule), written_at: String(r.written_at) }));
+  }
+
   setAirtableLinkStatus(id: number, status: 'auto' | 'review' | 'confirmed' | 'rejected'): AirtableLinkRow | null {
     this.db.prepare('UPDATE airtable_links SET status = ? WHERE id = ?').run(status, id);
     return this.getAirtableLink(id);
   }
 
   private airtableLinkRow(r: Row): AirtableLinkRow {
-    return { id: Number(r.id), base_id: String(r.base_id), table_id: String(r.table_id), record_id: String(r.record_id), kind: r.kind as 'prospect' | 'lead', local_id: String(r.local_id), confidence: Number(r.confidence), how: (r.how as string | null) ?? '', status: r.status as AirtableLinkRow['status'], created_at: String(r.created_at) };
+    return { id: Number(r.id), base_id: String(r.base_id), table_id: String(r.table_id), record_id: String(r.record_id), kind: r.kind as AirtableLinkRow['kind'], local_id: String(r.local_id), confidence: Number(r.confidence), how: (r.how as string | null) ?? '', status: r.status as AirtableLinkRow['status'], created_at: String(r.created_at) };
   }
 
   // ---- MCP OAuth: registered clients, authorization codes, tokens (kind + id → json, with an expiry) ----
@@ -2966,27 +2981,35 @@ export class Queries {
 
   private rowToPitch(r: Row): Pitch {
     return {
-      id: r.id as number, lead_id: (r.lead_id as number | null) ?? null, lead_name: (r.lead_name as string | null) ?? null, name: r.name as string, client: r.client as string,
+      id: r.id as number, lead_id: (r.lead_id as number | null) ?? null, lead_name: (r.lead_name as string | null) ?? null, prospect_id: (r.prospect_id as number | null) ?? null, prospect_name: (r.prospect_name as string | null) ?? null, name: r.name as string, client: r.client as string,
       brief: parseJson<PitchBrief>(r.brief_json, {} as PitchBrief), research: r.research_json ? parseJson<PitchResearch | null>(r.research_json, null) : null, deck: r.deck_json ? parseJson<PitchDeck | null>(r.deck_json, null) : null,
       status: r.status === 'ready' ? 'ready' : 'draft', created_by: (r.created_by as string | null) ?? null, created_at: r.created_at as string, updated_at: r.updated_at as string,
     };
   }
 
   listPitches(): Pitch[] {
-    return (this.db.prepare('SELECT p.*, l.name AS lead_name FROM pitches p LEFT JOIN leads l ON l.id = p.lead_id ORDER BY p.updated_at DESC').all() as Row[]).map((r) => this.rowToPitch(r));
+    return (this.db.prepare(`${Queries.PITCH_SELECT} ORDER BY p.updated_at DESC`).all() as Row[]).map((r) => this.rowToPitch(r));
   }
 
   getPitch(id: number): Pitch | null {
-    const r = this.db.prepare('SELECT p.*, l.name AS lead_name FROM pitches p LEFT JOIN leads l ON l.id = p.lead_id WHERE p.id = ?').get(id) as Row | undefined;
+    const r = this.db.prepare(`${Queries.PITCH_SELECT} WHERE p.id = ?`).get(id) as Row | undefined;
     return r ? this.rowToPitch(r) : null;
   }
 
-  createPitch(i: { lead_id?: number | null; name: string; client: string; brief: PitchBrief; created_by?: string | null }): Pitch {
-    const res = this.db.prepare('INSERT INTO pitches (lead_id, name, client, brief_json, created_by) VALUES (?, ?, ?, ?, ?)').run(i.lead_id ?? null, i.name, i.client, JSON.stringify(i.brief), i.created_by ?? null);
+  private static PITCH_SELECT = `SELECT p.*, l.name AS lead_name, COALESCE(bp.brand, bp.shop_name) AS prospect_name FROM pitches p LEFT JOIN leads l ON l.id = p.lead_id LEFT JOIN bd_prospects bp ON bp.id = p.prospect_id`;
+
+  /** The latest pitch started from a prospect, if any. */
+  pitchForProspect(prospectId: number): Pitch | null {
+    const r = this.db.prepare(`${Queries.PITCH_SELECT} WHERE p.prospect_id = ? ORDER BY p.updated_at DESC LIMIT 1`).get(prospectId) as Row | undefined;
+    return r ? this.rowToPitch(r) : null;
+  }
+
+  createPitch(i: { lead_id?: number | null; prospect_id?: number | null; name: string; client: string; brief: PitchBrief; created_by?: string | null }): Pitch {
+    const res = this.db.prepare('INSERT INTO pitches (lead_id, prospect_id, name, client, brief_json, created_by) VALUES (?, ?, ?, ?, ?, ?)').run(i.lead_id ?? null, i.prospect_id ?? null, i.name, i.client, JSON.stringify(i.brief), i.created_by ?? null);
     return this.getPitch(Number(res.lastInsertRowid))!;
   }
 
-  updatePitch(id: number, patch: Partial<{ name: string; client: string; lead_id: number | null; brief: PitchBrief; research: PitchResearch | null; deck: PitchDeck | null; status: 'draft' | 'ready' }>): Pitch | null {
+  updatePitch(id: number, patch: Partial<{ name: string; client: string; lead_id: number | null; prospect_id: number | null; brief: PitchBrief; research: PitchResearch | null; deck: PitchDeck | null; status: 'draft' | 'ready' }>): Pitch | null {
     const sets: string[] = [];
     const params: Record<string, unknown> = { id };
     for (const [k, v] of Object.entries(patch)) {

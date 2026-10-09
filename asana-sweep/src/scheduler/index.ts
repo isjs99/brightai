@@ -30,6 +30,8 @@ import { ClientReports } from '../reports/client.js';
 import { PlaybookEngine } from '../playbook/index.js';
 import { SampleEngine } from '../samples/index.js';
 import { AirtableMirror } from '../airtable/index.js';
+import { PitchJob } from '../pitch/job.js';
+import { EnquiryWriteback } from '../airtable/writeback.js';
 import { cruvaMcp } from '../cruva/mcp.js';
 import { CruvaPuller } from '../cruva/pull.js';
 import { Copilot } from '../copilot/index.js';
@@ -73,6 +75,8 @@ export class Scheduler {
   readonly playbook: PlaybookEngine;
   readonly samples: SampleEngine;
   readonly airtable: AirtableMirror;
+  readonly pitchJob: PitchJob;
+  readonly enquiryWriteback: EnquiryWriteback;
   readonly cruvaPull: CruvaPuller;
   private cruvaTask: ScheduledTask | null = null;
   private repliesDigestTask: ScheduledTask | null = null;
@@ -109,6 +113,8 @@ export class Scheduler {
     this.playbook = new PlaybookEngine(q);
     this.samples = new SampleEngine(q, this.playbook);
     this.airtable = new AirtableMirror(q);
+    this.pitchJob = new PitchJob(q);
+    this.enquiryWriteback = new EnquiryWriteback(q, this.airtable);
     this.cruvaPull = new CruvaPuller(q);
     this.stock.cruvaRefresh = (shopId) => this.cruvaPull.run(shopId);
     this.copilot = new Copilot(q, { gmail: this.gmail });

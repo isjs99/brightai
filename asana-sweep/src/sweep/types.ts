@@ -1907,10 +1907,15 @@ export interface PitchCreator { handle: string; name: string | null; followers: 
 export interface PitchResearch {
   fetched_at: string;
   errors: string[];
-  site: { title: string | null; description: string | null; theme_colour: string | null; images: string[] } | null;
-  products: { name: string; price: number | null; image: string | null; url: string }[];
+  site: { title: string | null; description: string | null; theme_colour: string | null; images: string[]; platform?: 'shopify' | 'other'; colours?: string[]; logo?: string | null; currency?: string | null; product_count?: number } | null;
+  /** The brand's products: from the brief's PDP list, else found by the scan (Shopify JSON or JSON-LD), best sellers first. */
+  products: { name: string; price: number | null; image: string | null; url: string; rank?: number | null; images?: string[]; currency?: string | null }[];
+  /** Product images (and the logo) downloaded into the pitch's folder: source url → file name. */
+  assets?: Record<string, string>;
   context: TargetSource[];
-  tiktok: { brand: { name: string; gmv: number | null; creators: number | null; videos: number | null; region: string } | null; shops: { shop_name: string; region: string; gmv_7d: number | null; total_gmv: number | null; seller_id: string | null }[]; top_products: { name: string; region: string; gmv: number | null; units: number | null; price: number | null; shop: string | null }[]; market: { market: string; prospects: number; surging: number; leaders: string[] }[] };
+  tiktok: { brand: { name: string; gmv: number | null; creators: number | null; videos: number | null; region: string } | null; shops: { shop_name: string; region: string; gmv_7d: number | null; total_gmv: number | null; seller_id: string | null }[]; top_products: { name: string; region: string; gmv: number | null; units: number | null; price: number | null; shop: string | null }[]; /** The brand's own products on TikTok Shop by 28-day GMV (FastMoss shop products by seller id, else a product search on the name). */
+  brand_products: { name: string; region: string; gmv_28d: number | null; units_28d: number | null; price: number | null; image: string | null }[];
+  market: { market: string; prospects: number; surging: number; leaders: string[] }[] };
   creators: PitchCreator[];
   amazon: { reachable: boolean; items: { title: string; price: string | null; url: string }[] };
   resellers: { name: string; region: string; gmv_7d: number | null; note: string | null }[];
@@ -1918,7 +1923,7 @@ export interface PitchResearch {
 export interface PitchStat { label: string; value: string; note: string | null }
 export interface PitchSlide {
   key: string;
-  kind: 'cover' | 'agenda' | 'about' | 'market' | 'presence' | 'products' | 'opportunity' | 'forecast' | 'creators' | 'content' | 'livestream' | 'case_studies' | 'pricing' | 'roadmap' | 'next' | 'custom';
+  kind: 'cover' | 'agenda' | 'about' | 'why_us' | 'portfolio' | 'clients' | 'awards' | 'divider' | 'market' | 'presence' | 'products' | 'opportunity' | 'forecast' | 'creators' | 'cruva' | 'outreach' | 'framework' | 'profitability' | 'content' | 'shoppable' | 'livestream' | 'studio' | 'case_studies' | 'case_study' | 'deliverables' | 'mor' | 'team' | 'pricing' | 'roadmap' | 'next' | 'closing' | 'custom';
   enabled: boolean;
   title: string;
   subtitle: string | null;
@@ -1928,12 +1933,27 @@ export interface PitchSlide {
   /** Free text under the bullets (one paragraph). */
   body: string | null;
   notes: string | null;
+  /** Three-panel layouts (framework, outreach, deliverables): a heading and its lines per panel. */
+  panels?: { heading: string; items: string[] }[];
+  /** A bar chart (case studies, the forecast): one value per label, drawn in accent ink. */
+  chart?: { label: string; labels: string[]; values: number[] };
 }
-export interface PitchDeck { palette: { primary: string; secondary: string; accent: string; ink: string; paper: string }; slides: PitchSlide[]; generator: 'claude' | 'template'; built_at: string }
+/** The six brand-layer tokens of the Brightform Design System for this client, derived from their colours. */
+export interface PitchTheme { panel1: string; panel2: string; accent: string; accent_ink: string; data: string; data_ink: string; contrast_accent: number; contrast_data: number; neutral: boolean }
+export interface PitchDeck { palette: { primary: string; secondary: string; accent: string; ink: string; paper: string }; theme?: PitchTheme; slides: PitchSlide[]; generator: 'claude' | 'template'; built_at: string }
+/** Progress of a "build the pitch" run: research, the deck copy, the PDF. */
+export interface PitchJobStatus { running: boolean; step: 'research' | 'build' | 'pdf' | null; started_at: string | null; finished_at: string | null; error: string | null }
 export interface Pitch {
   id: number;
   lead_id: number | null;
   lead_name: string | null;
+  /** The BD prospect this pitch was started from, when it was. */
+  prospect_id: number | null;
+  prospect_name: string | null;
+  job?: PitchJobStatus | null;
+  /** A PDF rendered for the current deck exists on the server. */
+  pdf_available?: boolean;
+  pdf_possible?: boolean;
   name: string;
   client: string;
   brief: PitchBrief;
@@ -1951,6 +1971,10 @@ export interface PitchesData {
   fastmoss_configured: boolean;
   cruva_configured: boolean;
   llm_configured: boolean;
+  /** Chromium is available on the server, so decks render to PDF. */
+  pdf_configured: boolean;
+  gmail_connected: boolean;
+  slack_configured: boolean;
 }
 
 // ---- Stock ----
@@ -2040,7 +2064,7 @@ export interface SiteInquiry {
 }
 
 /** A line in an enquiry's history. */
-export type InquiryEventKind = 'created' | 'forwarded' | 'assigned' | 'status' | 'note' | 'draft' | 'slack';
+export type InquiryEventKind = 'created' | 'forwarded' | 'assigned' | 'status' | 'note' | 'draft' | 'slack' | 'airtable';
 
 export interface InquiryEvent {
   id: number;
@@ -2396,9 +2420,9 @@ export interface SamplesData { configured: boolean; accounts: SampleAccount[]; d
 export interface AirtableFieldSchema { id: string; name: string; type: string; description?: string; options?: Record<string, unknown> }
 export interface AirtableTableSchema { id: string; name: string; description?: string; primaryFieldId: string; fields: AirtableFieldSchema[] }
 export interface AirtableTableRow { base_id: string; table_id: string; name: string; schema: AirtableTableSchema; synced_at: string | null; full_synced_at: string | null; records: number; error: string | null }
-export interface AirtableLinkRow { id: number; base_id: string; table_id: string; record_id: string; kind: 'prospect' | 'lead'; local_id: string; confidence: number; how: string; status: 'auto' | 'review' | 'confirmed' | 'rejected'; created_at: string }
+export interface AirtableLinkRow { id: number; base_id: string; table_id: string; record_id: string; kind: 'prospect' | 'lead' | 'enquiry'; local_id: string; confidence: number; how: string; status: 'auto' | 'review' | 'confirmed' | 'rejected'; created_at: string }
 export interface AirtableRecordRow { base_id: string; table_id: string; record_id: string; primary: string | null; fields: Record<string, unknown>; modified_at: string | null; synced_at: string }
-export interface AirtableData { configured: boolean; base_id: string; base_name: string | null; tables: AirtableTableRow[]; last_sync_at: string | null; last_error: string | null; syncing: boolean; interval_minutes: number; matches: CrmMatchStats; review: CrmLink[] }
+export interface AirtableData { configured: boolean; base_id: string; base_name: string | null; tables: AirtableTableRow[]; last_sync_at: string | null; last_error: string | null; syncing: boolean; interval_minutes: number; matches: CrmMatchStats; review: CrmLink[]; /** Website enquiries are written into her Website Enquiries table. */ write_enquiries: boolean; writes: number }
 /** How Sofía's base overlaps our BD prospects and Leads: counts of rows carrying a label, and the loose matches waiting on a person. */
 export interface CrmMatchStats { prospects: number; leads: number; review: number; matched_at: string | null }
 /** One of Sofía's records tied to one of our rows. Status: auto (matched by domain or exact name), review (a loose name match, to confirm), confirmed, rejected. */

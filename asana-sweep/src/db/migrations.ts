@@ -1857,6 +1857,13 @@ const migrations: Migration[] = [
       `);
     },
   },
+  {
+    version: 55,
+    name: 'pitches start from a BD prospect',
+    up: (db) => {
+      db.exec(`ALTER TABLE pitches ADD COLUMN prospect_id INTEGER REFERENCES bd_prospects(id) ON DELETE SET NULL;`);
+    },
+  },
 ];
 
 export function runMigrations(db: Database.Database): void {

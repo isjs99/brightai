@@ -1,4 +1,6 @@
 import { Router, type Request, type Response } from 'express';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Queries } from '../db/queries.js';
 import { Scheduler } from '../scheduler/index.js';
 import { CRON_PRESETS, describeSchedule, isValidTimezone, nextRun, validateCron } from '../scheduler/describe.js';
@@ -58,11 +60,13 @@ import { currentMonth as pnlCurrentMonth, pnlCsv, pnlData, pnlSummary } from '..
 import { syncStatus } from '../scheduler/sync-status.js';
 import type { SyncStatus } from '../sweep/types.js';
 import { inboxSettings as inboxSettingsOf } from '../inbox/sync.js';
-import type { FbtField, FbtProfile, OnboardingTerms, PitchBrief, PitchDeck, PitchesData, PitchSlide, PitchStat, PnlForecastInputs, PnlInputs, ReportSchedule } from '../sweep/types.js';
+import type { FbtField, FbtProfile, OnboardingTerms, Pitch, PitchBrief, PitchDeck, PitchesData, PitchSlide, PitchStat, PnlForecastInputs, PnlInputs, ReportSchedule } from '../sweep/types.js';
 import { researchPitch } from '../pitch/research.js';
 import { llmUsageData, saveLlmSettings } from '../llm/usage.js';
 import { perfSnapshot, slowRequests } from '../perf.js';
 import { buildDeck, deckHtml, DEFAULT_BRIEF, normaliseBrief } from '../pitch/deck.js';
+import { pitchDir } from '../pitch/brightform.js';
+import { pdfConfigured } from '../pitch/pdf.js';
 import type { AtsKind, CompetitorAts, SampleRules } from '../sweep/types.js';
 import { periodBounds } from '../reports/client.js';
 import type { IngestPayload } from '../health/index.js';
@@ -288,6 +292,10 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (forwardTo() && gmail.connected) {
       try { await forwardInquiry(inquiry); liveEvents.emitUpdate({ kind: 'inquiries' }); } catch (err) { log.warn(`Website enquiry email forward failed: ${(err as Error).message}`); }
     } else if (forwardTo()) log.warn(`Website enquiry from ${email} not forwarded by email: Gmail is not connected`);
+    // Sofía's CRM: the enquiry becomes a record in her Website Enquiries table.
+    const wb = await scheduler.enquiryWriteback.push(q.getInquiry(inquiry.id) ?? inquiry, 'new');
+    if (wb.action !== 'skipped') { q.addInquiryEvent(inquiry.id, { kind: 'airtable', actor: 'dashboard', detail: `${wb.action === 'created' ? 'Added to' : 'Updated in'} Sofía's Airtable (Website Enquiries)` }); liveEvents.emitUpdate({ kind: 'inquiries' }); }
+    else if (wb.detail && wb.detail !== 'write-back off' && !/not configured|no "Website Enquiries"/.test(wb.detail)) log.warn(`Website enquiry from ${email} not written to Airtable: ${wb.detail}`);
   });
 
   // ---- Everything below needs a session ----
@@ -2185,6 +2193,9 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (b.note !== undefined && (patch.note ?? null) !== inq.note) q.addInquiryEvent(inq.id, { kind: 'note', actor, detail: patch.note ? `Note: ${patch.note}` : 'Note removed' });
     liveEvents.emitUpdate({ kind: 'inquiries' });
     res.json(inquiriesData());
+    // Status, owner and note follow into her record after the answer is out.
+    const latest = q.getInquiry(inq.id);
+    if (latest) void scheduler.enquiryWriteback.push(latest, 'update').then((wb) => { if (wb.action !== 'skipped') { q.addInquiryEvent(inq.id, { kind: 'airtable', actor: 'dashboard', detail: `Updated in Sofía's Airtable (${wb.detail ?? 'fields'})` }); liveEvents.emitUpdate({ kind: 'inquiries' }); } });
   });
   /** Everything that happened with one enquiry, plus any email to or from them in the connected Gmail. */
   r.get('/inquiries/:id/history', async (req, res) => {
@@ -3060,10 +3071,27 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   });
 
   // ---- Pitch designer ----
+  const pitchJob = scheduler.pitchJob;
+  const withJob = (p: Pitch): Pitch => ({ ...p, job: pitchJob.state(p.id), pdf_available: Boolean(pitchJob.pdfPath(p)), pdf_possible: pdfConfigured() });
   const pitchesData = (): PitchesData => ({
-    pitches: q.listPitches(), leads: q.listLeads(false).filter((l) => !l.signed).map((l) => ({ id: l.id, name: l.name, country: l.country, poc: l.poc })), accounts: q.listAccounts().filter((a) => a.enabled).map((a) => ({ id: a.id, name: a.name, markets: a.markets })),
-    fastmoss_configured: fastmoss.configured, cruva_configured: cruvaMcp.configured, llm_configured: Boolean(config.anthropicApiKey),
+    pitches: q.listPitches().map(withJob), leads: q.listLeads(false).filter((l) => !l.signed).map((l) => ({ id: l.id, name: l.name, country: l.country, poc: l.poc })), accounts: q.listAccounts().filter((a) => a.enabled).map((a) => ({ id: a.id, name: a.name, markets: a.markets })),
+    fastmoss_configured: fastmoss.configured, cruva_configured: cruvaMcp.configured, llm_configured: Boolean(config.anthropicApiKey), pdf_configured: pdfConfigured(), gmail_connected: gmail.connected, slack_configured: slackBot.configured,
   });
+  /** A pitch started from a BD prospect: the brief prefilled from the pipeline (brand, site, market, category, creator profile), then the whole run in the background. */
+  const pitchFromProspect = (prospectId: number, actor: string | null, opts: { run?: boolean } = {}): Pitch => {
+    const pr = q.getProspect(prospectId);
+    if (!pr) throw new HttpError(404, 'Prospect not found');
+    const client = (pr.brand && pr.brand.trim()) || pr.shop_name;
+    const existing = q.pitchForProspect(pr.id);
+    if (existing) { if (opts.run !== false) pitchJob.start(existing.id); return withJob(q.getPitch(existing.id)!); }
+    const brief = normaliseBrief({ client, website: pr.website ?? pr.domain ?? '', markets: [pr.market.toUpperCase()], category: pr.category ?? '', creator_query: pr.category ? `${pr.category} product review at home` : '', notes: [pr.gmv_7d !== null ? `TikTok Shop GMV last 7 days: ${pr.gmv_7d} ${pr.currency}` : null, pr.gmv_total !== null ? `lifetime ${pr.gmv_total} ${pr.currency}` : null, pr.tiktok_handle ? `TikTok handle @${pr.tiktok_handle}` : null, pr.company_description ? pr.company_description.slice(0, 400) : null].filter(Boolean).join('. ') });
+    const pitch = q.createPitch({ prospect_id: pr.id, name: `${client} x Brightform`, client, brief, created_by: actor });
+    q.logOutreach(pr.id, { channel: null, action: 'note', note: `Pitch deck started (${pitch.name})`, actor });
+    if (opts.run !== false) pitchJob.start(pitch.id);
+    return withJob(q.getPitch(pitch.id)!);
+  };
+  r.post('/bd/prospects/:id/pitch', (req, res) => { const b = (req.body ?? {}) as Record<string, unknown>; res.status(201).json({ pitch: pitchFromProspect(idParam(req), actorOf(req), { run: b.run !== false }) }); });
+  r.get('/bd/prospects/:id/pitch', (req, res) => { const p = q.pitchForProspect(idParam(req)); res.json({ pitch: p ? withJob(p) : null }); });
   const pitchParam = (req: Request) => { const p = q.getPitch(idParam(req)); if (!p) throw new HttpError(404, 'Pitch not found'); return p; };
   // ---- Competitor intelligence (Growth > Competitors) ----
   const competitors = scheduler.competitors;
@@ -3114,15 +3142,80 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   r.put('/llm/settings', (req, res) => { const b = (req.body ?? {}) as Record<string, unknown>; saveLlmSettings(q, { feature_models: b.feature_models && typeof b.feature_models === 'object' ? (b.feature_models as Record<string, string>) : undefined, daily_budget_usd: b.daily_budget_usd !== undefined && b.daily_budget_usd !== '' ? Number(b.daily_budget_usd) : undefined }); res.json(llmUsageData(q)); });
 
   r.get('/pitch', (_req, res) => res.json(pitchesData()));
-  r.get('/pitch/:id', (req, res) => res.json({ pitch: pitchParam(req), ...pitchesData() }));
+  r.get('/pitch/:id', (req, res) => res.json({ pitch: withJob(pitchParam(req)), ...pitchesData() }));
+  /** The whole run in the background: research, deck, PDF (any step can be left out). */
+  r.post('/pitch/:id/run', (req, res) => { const p = pitchParam(req); const b = (req.body ?? {}) as Record<string, unknown>; const job = pitchJob.start(p.id, { research: b.research !== false, build: b.build !== false, pdf: b.pdf !== false, use_llm: b.use_llm !== false }); res.json({ job, pitch: withJob(q.getPitch(p.id)!), ...pitchesData() }); });
+  r.get('/pitch/:id/deck.pdf', async (req, res) => {
+    const p = pitchParam(req);
+    if (!p.deck) throw new HttpError(400, 'Build the deck first.');
+    if (!pdfConfigured()) throw new HttpError(400, 'No Chromium on this server for PDFs; open the deck and print it to PDF from the browser.');
+    let file = pitchJob.pdfPath(p);
+    if (!file || req.query.fresh === '1') { try { file = await pitchJob.renderPdf(p); } catch (err) { throw new HttpError(500, (err as Error).message); } }
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `${req.query.download === '1' ? 'attachment' : 'inline'}; filename="${p.name.replace(/[^A-Za-z0-9_-]+/g, '_')}.pdf"`);
+    res.sendFile(file);
+  });
+  r.get('/pitch/:id/img/:file', (req, res) => {
+    const p = pitchParam(req);
+    const name = String(req.params.file);
+    if (!/^[a-f0-9]{16}\.(?:jpg|png|webp|gif)$/.test(name)) throw new HttpError(404, 'No such image');
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.sendFile(join(pitchDir(p.id), name), (err) => { if (err && !res.headersSent) res.status(404).json({ error: 'No such image' }); });
+  });
+  /** A Gmail draft to the best decision maker with the PDF attached (or the deck link when there is no PDF). */
+  r.post('/pitch/:id/email', async (req, res) => {
+    const p = pitchParam(req);
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const mine = gmail.forActor(actorOf(req));
+    if (!mine.connected) throw new HttpError(400, 'Connect Gmail first (Outreach emails › Settings).');
+    const prospect = p.prospect_id ? q.getProspect(p.prospect_id) : null;
+    const contact = (() => {
+      const id = b.contact_id ? Number(b.contact_id) : null;
+      const list = prospect?.contacts ?? [];
+      const byId = id ? list.find((c) => c.id === id) ?? null : null;
+      // The most senior, most relevant decision maker with an email: founders and e-commerce or marketing leads first, inboxes last.
+      const rank = (c: BdContact): number => { const t = (c.title ?? '').toLowerCase(); return (/founder|ceo|owner|geschäftsführ|gründer|managing director|md\b/.test(t) ? 40 : 0) + (/e-?commerce|digital|marketing|growth|tiktok|social|brand/.test(t) ? 25 : 0) + (/head|director|vp|chief|lead/.test(t) ? 10 : 0) - (/intern|assistant|info@|support/.test(t + (c.email ?? '')) ? 30 : 0); };
+      return byId ?? [...list].filter((c) => c.email).sort((a, b) => rank(b) - rank(a))[0] ?? null;
+    })();
+    const to = optText(b.to) ?? contact?.email ?? null;
+    if (!to) throw new HttpError(400, 'No email address: pick a decision maker with an email, or pass "to".');
+    const toName = optText(b.to_name) ?? contact?.name ?? null;
+    const sender = q.getSetting('outreach_sender_name', '') || 'Isaac';
+    const subject = optText(b.subject) ?? `${p.client} x Brightform: TikTok Shop ${p.brief.markets.join(', ')}`;
+    const first = toName ? toName.split(' ')[0] : null;
+    const body = optText(b.body) ?? [`Hi${first ? ` ${first}` : ''},`, '', `As promised, the deck for ${p.client} on TikTok Shop in ${p.brief.markets.join(', ')} is attached: where you are today, the category, the creator plan, the forecast and the commercials.`, '', 'Two things worth a look first: the best sellers we would lead with, and the creators already selling in the category.', '', 'Shall we walk through it this week?', '', sender].join('\n');
+    let attachments: { filename: string; contentType: string; content: Buffer }[] = [];
+    let linkLine = '';
+    if (p.deck && pdfConfigured()) {
+      try { const file = pitchJob.pdfPath(p) ?? (await pitchJob.renderPdf(p)); attachments = [{ filename: `${p.name.replace(/[^A-Za-z0-9_-]+/g, '_')}.pdf`, contentType: 'application/pdf', content: readFileSync(file) }]; } catch (err) { log.warn(`Pitch ${p.id} PDF for email: ${(err as Error).message}`); }
+    }
+    if (!attachments.length) linkLine = `\n\nThe deck: ${config.publicUrl}/api/pitch/${p.id}/deck.html`;
+    const draft = await mine.createDraft({ to, toName, subject, body: body + linkLine, html: bodyToHtml(body + linkLine), attachments });
+    if (prospect) q.logOutreach(prospect.id, { channel: 'gmail', action: 'note', note: `Pitch deck emailed as a Gmail draft to ${toName ?? to}${attachments.length ? ' (PDF attached)' : ' (link)'}`, contact_name: toName, actor: actorOf(req) });
+    res.json({ draft, to, attached: attachments.length > 0 });
+  });
+  /** A line in Slack with the deck link (the BD channel, else the incidents default). */
+  r.post('/pitch/:id/slack', async (req, res) => {
+    const p = pitchParam(req);
+    const b = (req.body ?? {}) as Record<string, unknown>;
+    const channel = optText(b.channel) ?? q.getSetting('pitch_slack_channel', '') ?? '';
+    const target = channel || q.getSetting('site_inquiries_channel', '') || q.getSetting('incidents_default_channel', '');
+    if (!slackBot.configured) throw new HttpError(400, 'Slack is not connected.');
+    if (!target) throw new HttpError(400, 'No Slack channel set (Settings › Website enquiries, or pass "channel").');
+    const url = `${config.publicUrl}/api/pitch/${p.id}/deck.html`;
+    const text = optText(b.text) ?? `:black_square_button: *Pitch deck ready: ${p.name}*\n${p.brief.markets.join(', ')}${p.brief.category ? ` · ${p.brief.category}` : ''} · ${p.deck?.slides.filter((x) => x.enabled).length ?? 0} slides${p.deck?.generator === 'claude' ? ' · copy by Claude' : ''}\n<${url}|Open the deck>${pdfConfigured() ? ` · <${config.publicUrl}/api/pitch/${p.id}/deck.pdf?download=1|PDF>` : ''}${actorOf(req) ? ` · built by ${actorOf(req)}` : ''}`;
+    const posted = await slackBot.post(await slackBot.channelId(target), text);
+    if (p.prospect_id) q.logOutreach(p.prospect_id, { channel: null, action: 'note', note: `Pitch deck posted to Slack (${target})`, actor: actorOf(req) });
+    res.json({ ok: true, channel: target, ts: posted.ts });
+  });
   r.post('/pitch', (req, res) => {
     const b = (req.body ?? {}) as Record<string, unknown>;
     const lead = b.lead_id ? q.listLeads(true).find((l) => l.id === Number(b.lead_id)) ?? null : null;
     const client = optText(b.client) ?? lead?.name ?? '';
     if (!client) throw new HttpError(400, 'Who is the pitch for?');
     const brief = normaliseBrief({ ...(b.brief as Partial<PitchBrief> | undefined ?? {}), client, markets: lead?.country ? [lead.country.toUpperCase()] : (b.brief as Partial<PitchBrief> | undefined)?.markets ?? DEFAULT_BRIEF.markets, website: optText(b.website) ?? (b.brief as Partial<PitchBrief> | undefined)?.website ?? '' });
-    const pitch = q.createPitch({ lead_id: lead?.id ?? null, name: optText(b.name) ?? `${client} x Brightform`, client, brief, created_by: actorOf(req) });
-    res.status(201).json({ pitch, ...pitchesData() });
+    const pitch = q.createPitch({ lead_id: lead?.id ?? null, prospect_id: b.prospect_id ? Number(b.prospect_id) : null, name: optText(b.name) ?? `${client} x Brightform`, client, brief, created_by: actorOf(req) });
+    res.status(201).json({ pitch: withJob(pitch), ...pitchesData() });
   });
   r.put('/pitch/:id', (req, res) => {
     const p = pitchParam(req);
@@ -3132,23 +3225,25 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     if (b.brief !== undefined) { patch.brief = normaliseBrief(b.brief as Partial<PitchBrief>, p.brief); patch.client = patch.brief.client || p.client; }
     if (b.status !== undefined) patch.status = b.status === 'ready' ? 'ready' : 'draft';
     if (b.lead_id !== undefined) patch.lead_id = b.lead_id === null || b.lead_id === '' ? null : Number(b.lead_id);
-    res.json({ pitch: q.updatePitch(p.id, patch)!, ...pitchesData() });
+    if (b.prospect_id !== undefined) patch.prospect_id = b.prospect_id === null || b.prospect_id === '' ? null : Number(b.prospect_id);
+    res.json({ pitch: withJob(q.updatePitch(p.id, patch)!), ...pitchesData() });
   });
   r.post('/pitch/:id/research', async (req, res) => {
     const p = pitchParam(req);
     const lead = p.lead_id ? q.listLeads(true).find((l) => l.id === p.lead_id) ?? null : null;
-    const research = await researchPitch(q, p.brief, lead);
+    const prospect = p.prospect_id ? q.getProspect(p.prospect_id) : null;
+    const research = await researchPitch(q, p.brief, lead, { sellerId: prospect?.seller_id ?? null, assetDir: pitchDir(p.id) });
     // The site's theme colour becomes the primary when the brief still has the default.
     const brief = { ...p.brief };
     if (research.site?.theme_colour && /^#[0-9a-f]{6}$/i.test(research.site.theme_colour) && brief.colours.primary === DEFAULT_BRIEF.colours.primary) brief.colours = { ...brief.colours, primary: research.site.theme_colour.toLowerCase() };
     if (!brief.pdp_images.length && research.products.some((x) => x.image)) brief.pdp_images = research.products.map((x) => x.image).filter((x): x is string => Boolean(x)).slice(0, 12);
-    res.json({ pitch: q.updatePitch(p.id, { research, brief })!, ...pitchesData() });
+    res.json({ pitch: withJob(q.updatePitch(p.id, { research, brief })!), ...pitchesData() });
   });
   r.post('/pitch/:id/build', async (req, res) => {
     const p = pitchParam(req);
     const b = (req.body ?? {}) as Record<string, unknown>;
     const deck = await buildDeck(q, p.brief, p.research, p.deck, b.use_llm === false ? null : undefined);
-    res.json({ pitch: q.updatePitch(p.id, { deck, status: 'ready' })!, ...pitchesData() });
+    res.json({ pitch: withJob(q.updatePitch(p.id, { deck, status: 'ready' })!), ...pitchesData() });
   });
   r.put('/pitch/:id/deck', (req, res) => {
     const p = pitchParam(req);
@@ -3167,13 +3262,13 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
     const p = pitchParam(req);
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
     if (req.query.download === '1') res.setHeader('Content-Disposition', `attachment; filename="${p.name.replace(/[^A-Za-z0-9_-]+/g, '_')}.html"`);
-    res.send(deckHtml(p));
+    res.send(deckHtml(p, { inline: req.query.download === '1' || req.query.inline === '1' }));
   });
   r.get('/pitch/:id/export.json', (req, res) => {
     const p = pitchParam(req);
     res.setHeader('Content-Type', 'application/json; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${p.name.replace(/[^A-Za-z0-9_-]+/g, '_')}.json"`);
-    res.send(JSON.stringify({ name: p.name, client: p.client, brief: p.brief, research: p.research, deck: p.deck, design_system: { fonts: { display: 'Archivo Black', body: 'Manrope' }, template: 'Brightform pitch: black cover, accent bar left, big-number stat tiles, uppercase display titles, 16:9' } }, null, 2));
+    res.send(JSON.stringify({ name: p.name, client: p.client, brief: p.brief, research: p.research, deck: p.deck, design_system: { name: 'Brightform Design System', fonts: { display: 'Archivo (for Monument Extended Bold), wdth 122 wght 800', body: 'Figtree (for TT Commons Pro)' }, theme: p.deck?.theme ?? null, template: 'Black ground, white uppercase extended display type, outlined section numerals, flat brand-layer panels, neutral metric cards, hairlines, 1280 x 720' } }, null, 2));
   });
   r.delete('/pitch/:id', (req, res) => { if (!q.deletePitch(idParam(req))) throw new HttpError(404, 'Pitch not found'); res.json(pitchesData()); });
 
@@ -3370,7 +3465,10 @@ export function buildRouter(q: Queries, scheduler: Scheduler, auth: AuthProvider
   r.get('/airtable/search', (req, res) => { const q2 = optText(req.query.q); if (!q2) throw new HttpError(400, 'q is required'); res.json({ results: airtable.search(q2, { table: optText(req.query.table) ?? undefined, limit: Math.min(100, Number(req.query.limit) || 30) }) }); });
   r.get('/airtable/deal', (req, res) => { const ref = optText(req.query.ref); if (!ref) throw new HttpError(400, 'ref is required'); const d = airtable.deal(ref); if (!d) throw new HttpError(404, 'No deal matches'); res.json(d); });
   r.post('/airtable/sync', async (req, res) => { try { const r2 = await airtable.sync({ full: bool((req.body ?? {}).full, false) }); res.json({ ...r2, ...airtable.data() }); } catch (err) { bad(err); } });
-  r.put('/airtable/settings', (req, res) => { const b = (req.body ?? {}) as Record<string, unknown>; const base = optText(b.base_id); if (base !== null) { if (!/^app[A-Za-z0-9]{14}$/.test(base)) throw new HttpError(400, 'A base id looks like appXXXXXXXXXXXXXX.'); q.setSetting('airtable_base_id', base); q.setSetting('airtable_base_name', ''); } res.json(airtable.data()); });
+  r.put('/airtable/settings', (req, res) => { const b = (req.body ?? {}) as Record<string, unknown>; const base = optText(b.base_id); if (base !== null) { if (!/^app[A-Za-z0-9]{14}$/.test(base)) throw new HttpError(400, 'A base id looks like appXXXXXXXXXXXXXX.'); q.setSetting('airtable_base_id', base); q.setSetting('airtable_base_name', ''); } if (b.write_enquiries !== undefined) q.setSetting('airtable_write_enquiries', bool(b.write_enquiries, true) ? '1' : '0'); res.json(airtable.data()); });
+  r.get('/airtable/writes', (req, res) => res.json({ writes: q.listAirtableWrites(airtable.baseId, Math.min(500, Number(req.query.limit) || 100)) }));
+  /** Push every enquiry not yet in her base (a catch-up after the switch goes on, or after the table appears). */
+  r.post('/airtable/enquiries/push', async (_req, res) => { const out = { created: 0, updated: 0, skipped: 0, notes: [] as string[] }; for (const i of q.listInquiries(500)) { const r2 = await scheduler.enquiryWriteback.push(i, 'catch-up'); out[r2.action] += 1; if (r2.action === 'skipped' && r2.detail && r2.detail !== 'nothing changed' && !out.notes.includes(r2.detail)) out.notes.push(r2.detail); } res.json({ ...out, ...airtable.data() }); });
 
   // ---- Samples: the traffic light, the rules, the shortlist, bulk and auto accept ----
   const samples = scheduler.samples;

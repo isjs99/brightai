@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactElement } from 'react';
-import type { BdContact, BdData, BdOutreachEvent, BdProspect, BdProspectPatch, BdStatus, TtsContact } from '../../../sweep/types';
+import type { BdContact, BdData, BdOutreachEvent, BdProspect, BdProspectPatch, BdStatus, Pitch, TtsContact } from '../../../sweep/types';
 import { api, fmtMoney, fmtPct, fmtRelative, useLiveUpdates } from '../api';
 import { useIsAdmin } from '../session';
 import { CrmBadge, CrmPanel } from '../crm';
@@ -30,6 +30,34 @@ const launchBadge = (p: BdProspect) => {
 };
 
 const band = (s: number | null) => (s === null ? { label: 'No data', cls: 'muted' } : s >= 0.15 ? { label: 'Surging', cls: 'good' } : s >= 0.05 ? { label: 'Rising', cls: 'accent' } : { label: 'Steady', cls: 'muted' });
+
+/** The pitch started from this prospect: build it, follow the run, open the deck or the PDF, send it. */
+function PitchBlock({ prospectId, isAdmin }: { prospectId: number; isAdmin: boolean }) {
+  const [pitch, setPitch] = useState<Pitch | null | undefined>(undefined);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const load = useCallback(() => api.bdPitchGet(prospectId).then((r) => setPitch(r.pitch)).catch(() => setPitch(null)), [prospectId]);
+  useEffect(() => { load(); }, [load]);
+  useLiveUpdates((e) => { if (e.kind === 'pitch') load(); });
+  const act = async (key: string, fn: () => Promise<unknown>, after?: (r: unknown) => void) => { setBusy(key); setMsg(null); try { const r = await fn(); after?.(r); await load(); } catch (e) { setMsg((e as Error).message); } finally { setBusy(null); } };
+  if (pitch === undefined) return <p className="sub">…</p>;
+  const running = Boolean(pitch?.job?.running);
+  return (
+    <div className="actions" style={{ flexWrap: 'wrap', alignItems: 'center' }}>
+      {!pitch && <span className="sub">No deck yet. Build one: the brand scan (site, best sellers, images, colours), TikTok Shop and Cruva numbers, what they said on calls and in email, then the deck in the Brightform Design System with their colours.</span>}
+      {pitch && <span className="sub">{pitch.name} · {pitch.deck ? `${pitch.deck.slides.filter((s) => s.enabled).length} slides, built ${fmtRelative(pitch.deck.built_at)}${pitch.deck.generator === 'claude' ? ', copy by Claude' : ''}` : pitch.research ? 'researched, no deck yet' : 'not built yet'}</span>}
+      {running && <span className="badge accent">{pitch!.job!.step === 'research' ? 'Researching the brand…' : pitch!.job!.step === 'build' ? 'Writing the deck…' : 'Rendering the PDF…'}</span>}
+      {pitch?.job && !running && pitch.job.error && <span className="badge crit" title={pitch.job.error}>Last run failed: {pitch.job.error.slice(0, 80)}</span>}
+      {isAdmin && <button className="small primary" disabled={running || busy !== null} onClick={() => act('build', () => api.bdPitch(prospectId, true))}>{running ? 'Building…' : pitch ? 'Rebuild pitch' : 'Build pitch'}</button>}
+      {pitch?.deck && <a className="button small" href={api.pitchDeckUrl(pitch.id)} target="_blank" rel="noreferrer">Open the deck</a>}
+      {pitch?.deck && pitch.pdf_possible && <a className="button small" href={api.pitchPdfUrl(pitch.id)} target="_blank" rel="noreferrer">PDF</a>}
+      {pitch && <Link to={`/pitch?id=${pitch.id}`} className="button small">Edit in Pitch designer</Link>}
+      {isAdmin && pitch?.deck && <button className="small" disabled={busy !== null} onClick={() => act('email', () => api.pitchEmail(pitch.id), (r) => { const x = r as { draft: { url: string }; to: string; attached: boolean }; setMsg(`Gmail draft to ${x.to}${x.attached ? ' with the PDF attached' : ' with the deck link'}`); window.open(x.draft.url, '_blank'); })}>{busy === 'email' ? 'Drafting…' : 'Email the deck'}</button>}
+      {isAdmin && pitch?.deck && <button className="small" disabled={busy !== null} onClick={() => act('slack', () => api.pitchSlack(pitch.id), (r) => setMsg(`Posted to ${(r as { channel: string }).channel}`))}>{busy === 'slack' ? 'Posting…' : 'Post to Slack'}</button>}
+      {msg && <span className="sub">{msg}</span>}
+    </div>
+  );
+}
 
 export default function BdPage() {
   const [data, setData] = useState<BdData | null>(null);
@@ -287,6 +315,9 @@ export default function BdPage() {
             </p>
           )}
           {!data.apollo_configured && isAdmin && <p className="sub" style={{ marginTop: 8 }}>Apollo is not connected: add APOLLO_API_KEY to .env to search and reveal decision makers from here. Contacts can still be added by hand.</p>}
+
+          <h3 style={{ margin: '14px 0 6px' }}>Pitch deck</h3>
+          <PitchBlock prospectId={p.id} isAdmin={isAdmin} />
 
           <h3 style={{ margin: '14px 0 6px' }}>Outreach history</h3>
           {p.outreach_log.length === 0 ? <p className="sub">Nothing logged yet. Ticking a channel above records it here; add notes for replies and calls.</p> : (

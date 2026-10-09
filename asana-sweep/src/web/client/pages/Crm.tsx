@@ -65,6 +65,12 @@ export default function CrmPage() {
           <span style={{ flex: 1 }} />
           {isAdmin && <button className="small" disabled={busy !== null} onClick={async () => { setBusy('match'); setError(null); try { const r = await api.airtableMatch(); setNotice(`Matched: ${r.prospects} prospects and ${r.leads} leads carry a label, ${r.review} to check, ${r.changed} link(s) changed.`); setData(r); } catch (e) { setError((e as Error).message); } finally { setBusy(null); } }}>{busy === 'match' ? 'Matching…' : 'Re-match now'}</button>}
         </div>
+        <div className="actions" style={{ flexWrap: 'wrap', marginTop: 8 }}>
+          <b>Write-back</b>
+          <label className="field check" title="Every website enquiry becomes a record in her Website Enquiries table the moment it lands; status, owner and note follow as they change. Formula and link fields are never written."><input type="checkbox" checked={data.write_enquiries} disabled={!isAdmin} onChange={(e) => api.airtableSettings({ write_enquiries: e.target.checked }).then(setData).catch((err) => setError((err as Error).message))} /> Website enquiries → her base</label>
+          <span className="sub">{data.writes} field{data.writes === 1 ? '' : 's'} written so far, each logged with what it replaced.</span>
+          {isAdmin && data.write_enquiries && <button className="small" disabled={busy !== null} onClick={async () => { setBusy('push'); setError(null); try { const r = await api.airtablePushEnquiries(); setNotice(`Enquiries: ${r.created} added, ${r.updated} updated, ${r.skipped} already there${r.notes.length ? ` · ${r.notes.join(' | ')}` : ''}`); setData(r); } catch (e) { setError((e as Error).message); } finally { setBusy(null); } }} title="Send every enquiry not yet in her base (after the switch goes on, or when the table first appears)">{busy === 'push' ? 'Pushing…' : 'Push enquiries'}</button>}
+        </div>
         {data.review.length > 0 && (
           <table className="compact" style={{ marginTop: 8 }}>
             <thead><tr><th>Ours</th><th>Hers</th><th>Why</th><th /></tr></thead>

@@ -77,28 +77,33 @@ const research = (): PitchResearch => ({
 });
 
 describe('pitch deck', () => {
-  it('builds the template deck from the brief and the research, honouring the options', () => {
+  it('builds the Brightform deck from the brief and the research, honouring the options', () => {
     const q = new Queries(openTestDb());
     const brief = normaliseBrief({ client: 'Neuro Gum', website: 'neurogum.com', category: 'focus gum', markets: ['DE'] });
     const deck = templateDeck(q, brief, research());
     const keys = deck.slides.map((s) => s.key);
-    expect(keys).toEqual(['cover', 'agenda', 'about', 'market', 'presence', 'products', 'opportunity', 'forecast', 'creators', 'content', 'livestream', 'case_studies', 'pricing', 'roadmap', 'next']);
+    expect(keys.slice(0, 5)).toEqual(['cover', 'why_us', 'portfolio', 'clients', 'awards']);
+    for (const k of ['presence', 'products', 'market', 'opportunity', 'case_health', 'case_beauty', 'outreach', 'framework', 'cruva', 'creators', 'forecast', 'pricing', 'deliverables1', 'deliverables2', 'team', 'next', 'closing']) expect(keys).toContain(k);
     const by = (k: string) => deck.slides.find((s) => s.key === k)!;
-    expect(by('cover').title).toBe('Neuro Gum x Brightform');
-    expect(by('cover').images).toEqual(['https://neurogum.com/img/pack.jpg']);
+    expect(by('cover').title).toBe('End-to-end TikTok Shop management');
+    expect(by('cover').subtitle).toBe('Prepared for Neuro Gum');
     expect(by('presence').stats[0]).toMatchObject({ label: 'Brand GMV, last 30 days (DE)' });
     expect(by('presence').bullets.some((b) => b.startsWith('VitaReseller'))).toBe(true);
-    expect(by('presence').bullets.some((b) => b.startsWith('Amazon:'))).toBe(true);
+    expect(by('products').images).toEqual(['https://neurogum.com/img/pack.jpg']);
     expect(by('market').stats[0]).toMatchObject({ value: '120', note: '9 surging this week' });
-    expect(by('creators').bullets.some((b) => b.includes('@glowwithanna') && b.includes('20k followers'))).toBe(true);
-    expect(by('forecast').stats).toHaveLength(3);
+    expect(by('creators').stats[0]).toMatchObject({ label: '@glowwithanna' });
+    expect(by('forecast').stats).toHaveLength(4);
     expect(by('forecast').title).toBe('12-month forecast');
+    expect(by('forecast').chart?.values).toHaveLength(12);
     expect(by('pricing').stats.map((s) => s.label)).toEqual(['Retainer', 'Commission', 'Initial term']);
     expect(deck.palette.primary).toBe(DEFAULT_BRIEF.colours.primary);
+    expect(deck.theme?.neutral).toBe(true); // the default primary is near-black: the Brightform set
     expect(deck.generator).toBe('template');
 
     const lean = templateDeck(q, normaliseBrief({ client: 'X', options: { forecasts: false, livestream: false, market: false, case_studies: false, creators: false, pdp_imagery: false } as never, pricing: { retainer: null, commission_pct: 8, commission_basis: 'mor' } as never }), null);
-    expect(lean.slides.map((s) => s.key)).toEqual(['cover', 'agenda', 'about', 'presence', 'opportunity', 'content', 'pricing', 'roadmap', 'next']);
+    const leanKeys = lean.slides.map((s) => s.key);
+    for (const k of ['forecast', 'livestream', 'studio', 'market', 'case_health', 'cruva', 'creators', 'products']) expect(leanKeys).not.toContain(k);
+    expect(leanKeys).toContain('mor');
     expect(lean.slides.find((s) => s.key === 'pricing')!.stats.map((s) => s.label)).toEqual(['Commission', 'Initial term']);
     expect(lean.slides.find((s) => s.key === 'presence')!.body).toMatch(/Run the research/);
   });
@@ -107,11 +112,11 @@ describe('pitch deck', () => {
     const q = new Queries(openTestDb());
     const brief = normaliseBrief({ client: 'Neuro Gum' });
     const deck = templateDeck(q, brief, null);
-    const out = applyDeckJson('Here you go:\n{"slides": [{"key": "cover", "title": "Neuro Gum, live on TikTok Shop DE", "subtitle": null, "bullets": [], "notes": "Open warm."}, {"key": "nope", "title": "x"}, {"key": "about", "bullets": ["One", "Two"]}]}', deck);
+    const out = applyDeckJson('Here you go:\n{"slides": [{"key": "cover", "title": "Neuro Gum, live on TikTok Shop DE", "subtitle": null, "bullets": [], "notes": "Open warm."}, {"key": "nope", "title": "x"}, {"key": "why_us", "bullets": ["One", "Two"]}]}', deck);
     expect(out.generator).toBe('claude');
     expect(out.slides[0]).toMatchObject({ title: 'Neuro Gum, live on TikTok Shop DE', subtitle: null, notes: 'Open warm.' });
     expect(out.slides[0].bullets).toEqual(deck.slides[0].bullets);
-    expect(out.slides.find((s) => s.key === 'about')!.bullets).toEqual(['One', 'Two']);
+    expect(out.slides.find((s) => s.key === 'why_us')!.bullets).toEqual(['One', 'Two']);
     expect(applyDeckJson('not json', deck)).toBe(deck);
 
     const prev = { ...deck, slides: [...deck.slides, { key: 'custom-1', kind: 'custom' as const, enabled: true, title: 'Our ask', subtitle: null, bullets: ['Sign by Friday'], stats: [], images: [], body: null, notes: null }] };
@@ -127,13 +132,13 @@ describe('pitch deck', () => {
     const brief = normaliseBrief({ client: 'Neuro <Gum>', colours: { primary: '#ff5a1f', secondary: '#1d3df0', accent: '#1e8f4e' } });
     const deck = templateDeck(q, brief, research());
     deck.slides.find((s) => s.key === 'livestream')!.enabled = false;
-    const pitch: Pitch = { id: 1, lead_id: null, lead_name: null, name: 'Neuro Gum DE', client: brief.client, brief, research: research(), deck, status: 'draft', created_by: 'Isaac', created_at: '', updated_at: '' };
+    const pitch: Pitch = { id: 1, lead_id: null, lead_name: null, prospect_id: null, prospect_name: null, name: 'Neuro Gum DE', client: brief.client, brief, research: research(), deck, status: 'draft', created_by: 'Isaac', created_at: '', updated_at: '' };
     const html = deckHtml(pitch);
-    expect(html).toContain('--primary: #ff5a1f');
-    expect(html).toContain('Neuro &lt;Gum&gt; x Brightform');
-    expect((html.match(/<section class="slide /g) ?? []).length).toBe(deck.slides.length - 1);
-    expect(html).not.toContain('class="slide livestream');
-    expect(html).toContain('class="slide forecast');
+    expect(html).toContain(`--bf-accent-ink:${deck.theme!.accent_ink}`);
+    expect(html).toContain('Prepared for Neuro &lt;Gum&gt;');
+    expect((html.match(/<section class="bf-slide"/g) ?? []).length).toBe(deck.slides.length - 1);
+    expect(html).not.toContain('data-kind="livestream"');
+    expect(html).toContain('data-kind="forecast"');
     expect(html).toContain('https://neurogum.com/img/pack.jpg');
     expect(deckHtml({ ...pitch, deck: null })).toContain('Build the deck first');
   });
@@ -170,7 +175,7 @@ describe('researchPitch', () => {
     expect(r.tiktok.market.map((m) => m.market)).toEqual(['DE', 'UK']);
     expect(r.amazon).toEqual({ reachable: false, items: [] });
     expect(r.errors.some((e) => e.startsWith('Amazon: HTTP 503'))).toBe(true);
-    expect(fmCalls).toEqual(['shop_search:Neuro Gum', 'product_search:focus gum', 'creator_search:focus gum', 'shop_search:Neuro Gum', 'product_search:focus gum', 'creator_search:focus gum']);
+    expect(fmCalls).toEqual(['product_search:Neuro Gum', 'shop_search:Neuro Gum', 'product_search:focus gum', 'creator_search:focus gum', 'shop_search:Neuro Gum', 'product_search:focus gum', 'creator_search:focus gum']); // the brand's own products first (no seller id: a product search on the name)
     expect(crCalls).toEqual(['search_marketplace_brands:de', 'ai_search_creators:shop-1']);
     expect(fetched[0]).toBe('https://neurogum.com');
     expect(fetched.at(-1)).toBe('https://www.amazon.de/s?k=Neuro%20Gum');

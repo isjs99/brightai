@@ -14,6 +14,9 @@ FROM node:22-bookworm-slim
 ARG GIT_SHA=unknown
 WORKDIR /app
 ENV NODE_ENV=production GIT_SHA=$GIT_SHA
+# Headless Chromium renders pitch decks to PDF (src/pitch/pdf.ts); the fonts keep the fallbacks readable when Google Fonts is slow.
+RUN apt-get update && apt-get install -y --no-install-recommends chromium fonts-liberation fonts-noto-core && rm -rf /var/lib/apt/lists/*
+ENV PITCH_CHROMIUM=/usr/bin/chromium
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY package.json ./
