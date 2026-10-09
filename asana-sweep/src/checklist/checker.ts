@@ -38,7 +38,8 @@ export function checkAccount(q: Queries, account: Account, opts: CheckOptions): 
     const stored = q.upsertCheck(account.id, checkDate, { ...data, trigger: opts.trigger, final: opts.final });
     liveEvents.emit('update', { kind: 'check', account_id: account.id });
     // Callers that want "what the checklist looks like right now" get the live figures even after the lock.
-    return opts.trigger === 'live' && stored.final ? q.getLive(account.id) ?? stored : stored;
+    // Today: the live row (what the Checklists page shows); a past day: the record, which now carries the tick too.
+    return opts.trigger === 'live' && stored.final && checkDate === todayIn(opts.tz) ? q.getLive(account.id) ?? stored : stored;
   };
   try {
     const items = q.checklistItemsFor(account.id);

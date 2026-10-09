@@ -71,7 +71,7 @@ describe('native checklist', () => {
     expect(q.listTicks(a.id, date)).toHaveLength(q.checklistItemsFor(a.id).filter((x) => x.enabled && isDue(x, date)).length - 1);
   });
 
-  it('a locked snapshot is not overwritten by later ticks, but the live view moves', () => {
+  it('a tick after the lock moves the day\'s record too (the lock only says the digest went out), and the live view with it', () => {
     const q = new Queries(openTestDb());
     const a = account(q);
     const tz = TZ;
@@ -82,7 +82,10 @@ describe('native checklist', () => {
     q.setTick(a.id, item.id, locked.check_date, true, 'Elena');
     const live = checkAccount(q, a, { trigger: 'live', tz });
     expect(live.am_done).toBe(1);
-    expect(q.getCheckForDate(a.id, locked.check_date)!.status).toBe('none');
+    const stored = q.getCheckForDate(a.id, locked.check_date)!;
+    expect(stored.status).toBe('partial'); // the calendar and the monitor read this
+    expect(stored.am_done).toBe(1);
+    expect(stored.final).toBe(true); // still locked: the scheduled digest is not posted again
     expect(refreshLive(q)).toBeGreaterThan(0);
   });
 });

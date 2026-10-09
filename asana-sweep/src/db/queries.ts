@@ -224,8 +224,10 @@ export class Queries {
     checkDate: string,
     data: Omit<Check, 'id' | 'account_id' | 'check_date' | 'checked_at' | 'final'> & { items: CheckItem[]; final?: boolean },
   ): CheckWithItems {
+    // A locked day (the 16:00 snapshot) stays locked, but ticks after the lock still move its status: the record
+    // always says what the checklist looks like, and the lock only says the digest went out.
     const existing = this.getCheckForDate(accountId, checkDate);
-    if (existing?.final && !data.final) return existing;
+    const final = Boolean(data.final || existing?.final);
     this.db
       .prepare(
         `INSERT INTO checks (account_id, check_date, checked_at, trigger, status, am_total, am_done, aa_total, aa_done,
@@ -238,7 +240,7 @@ export class Queries {
            am_complete=excluded.am_complete, aa_complete=excluded.aa_complete, combined_complete=excluded.combined_complete,
            warnings=excluded.warnings, error_message=excluded.error_message, items=excluded.items, final=excluded.final`,
       )
-      .run({ ...this.checkParams(data), account_id: accountId, check_date: checkDate, trigger: data.trigger, final: data.final ? 1 : 0 });
+      .run({ ...this.checkParams(data), account_id: accountId, check_date: checkDate, trigger: data.trigger, final: final ? 1 : 0 });
     return this.getCheckForDate(accountId, checkDate)!;
   }
 

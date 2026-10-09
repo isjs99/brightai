@@ -91,7 +91,7 @@ Use a long password. `PUBLIC_URL` must be the https address so the login cookie 
 
 ## Daily lock (16:00 every workday)
 
-The Checklists page always shows the live picture. Once a day (weekdays 16:00 Madrid time by default, change it under Checklists › Settings) the status of every account is locked as the official record used by the Calendar and Analytics. Ticks after the lock still show live, with the locked status noted underneath. "Record status now" writes a snapshot on demand without locking it.
+The Checklists page always shows the live picture. Once a day (weekdays 16:00 Madrid time by default, change it under Checklists › Settings) the status of every account is locked as the official record used by the Calendar and Analytics. Ticks after the lock update the record too, box by box: the status, the Calendar, Analytics and the monitor's "checklist not done" flag follow every tick; the lock only marks that the digest for that day went out. "Record status now" writes a snapshot on demand without locking it.
 
 - **AM** = the account manager's lines.
 - **AA** = the action items underneath and any line marked AA.
